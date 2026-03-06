@@ -12,7 +12,19 @@ pub struct FeaturePos {
     pub start: usize,
     pub end: usize,
     pub strand: bool, // true for +, false for -
-    pub seq: String
+    pub seq: Vec<u8>
+}
+
+fn encode_dna(seq: &str) -> Vec<u8> {
+    seq.bytes()
+        .map(|b| match b {
+            b'A' => 0,
+            b'C' => 1,
+            b'G' => 2,
+            b'T' => 3,
+            _ => 4,
+        })
+        .collect()
 }
 
 pub fn extract_feature_positions(file_gff: File) -> io::Result<HashMap<String, Vec<FeaturePos>>> {
@@ -51,7 +63,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<HashMap<String, V
                         start: last_feature_end,
                         end: feature_start,
                         strand: true,
-                        seq: "".to_string()
+                        seq: vec![0]
                     });
             }
 
@@ -72,7 +84,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<HashMap<String, V
                         start: last_feature_end,
                         end: feature_start,
                         strand: true,
-                        seq: "".to_string()
+                        seq: vec![0]
                     });
             }
 
@@ -87,7 +99,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<HashMap<String, V
                         start: feature_start,
                         end: feature_end,
                         strand: record.strand() == Strand::Forward,
-                        seq: "".to_string()
+                        seq: vec![0]
                     });
             }
 
@@ -132,7 +144,7 @@ pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<HashMap<St
 
                 let subseq = &seq[result.start..result.end];
 
-                result.seq = subseq.to_string();
+                result.seq = encode_dna(subseq);
 
                 last_feature_end = result.end;
                 last_feature_id = result.feature_id;
@@ -142,7 +154,7 @@ pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<HashMap<St
             let len_seq: usize  = seq.len();
             let feature_start = last_feature_end;
             let feature_end = len_seq;
-            let subseq = &seq[feature_start..feature_end];
+            let subseq = encode_dna(&seq[feature_start..feature_end]);
 
             results.push(FeaturePos {
                 seqname: seqname.clone(),
@@ -151,7 +163,7 @@ pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<HashMap<St
                 start: feature_start,
                 end: feature_end,
                 strand: true,
-                seq: subseq.to_string()
+                seq: subseq
             });
         }
     }

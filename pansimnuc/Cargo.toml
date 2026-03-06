@@ -7,3 +7,6 @@ edition = "2024"
 clap = { version = "4.5.32", features = ["derive"] }
 noodles-fasta = "0.60.0"
 noodles-gff = "0.55.0"
+rayon = "1.5"
+ndarray = { version = "0.15.6", features = ["rayon"] }
+logsumexp = "0.1"
