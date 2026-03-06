@@ -1,8 +1,10 @@
 mod gff;
 mod config;
+mod population;
 
 use clap::Parser;
 use gff::read_gff_lines;
+use population::Population;
 use config::Config;
 use std::collections::HashMap;
 
@@ -42,6 +44,15 @@ fn main() {
 		match read_gff_lines(&gff_path, &fasta_path) {
 			Ok(features) => {
 				println!("Loaded {} contigs with features", features.len());
+
+				if let (Some(n_individuals_str), Some(n_generation_str)) = (configuration.get("population.n_individuals"), configuration.get("population.n_generations")) {
+					
+					// generate initial population
+					let n_individuals: usize = n_individuals_str.parse::<usize>().expect("n_individuals must be an integer.");
+					let mut population = Population::new(features, n_individuals);
+
+					let n_generation: usize = n_generation_str.parse::<usize>().expect("n_generation must be an integer.");
+				}
 			}
 			Err(err) => {
 				eprintln!("Failed to read input files: {err}");
