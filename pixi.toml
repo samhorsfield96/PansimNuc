@@ -8,3 +8,4 @@ version = "0.1.0"
 
 [dependencies]
 rust = ">=1.93.1,<1.94"
+biopython = ">=1.86,<2"

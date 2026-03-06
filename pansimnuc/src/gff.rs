@@ -158,3 +158,72 @@ pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<HashMap<St
 
     Ok(features)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn create_temp_file(prefix: &str, suffix: &str, content: &str) -> String {
+        let temp_dir = std::env::temp_dir();
+        let temp_path = temp_dir.join(format!("{}_{}{}", prefix, std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(), suffix));
+        let mut file = File::create(&temp_path).expect("Failed to create temp file");
+        file.write_all(content.as_bytes()).expect("Failed to write temp file");
+        drop(file);
+        temp_path.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn test_read_multi_contig_gff() {
+        let gff_content = "##gff-version 3
+contig1\t.\tGene\t100\t200\t.\t+\t.\tID=gene1
+contig1\t.\texon\t100\t200\t.\t+\t.\tID=exon1
+contig2\t.\tGene\t50\t150\t.\t+\t.\tID=gene2
+contig2\t.\texon\t50\t150\t.\t+\t.\tID=exon2";
+
+        let fasta_content = ">contig1
+ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
+>contig2
+ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT";
+
+        let gff_file = create_temp_file("test", ".gff", gff_content);
+        let fasta_file = create_temp_file("test", ".fasta", fasta_content);
+
+        let result = read_gff_lines(&gff_file, &fasta_file);
+        assert!(result.is_ok());
+
+        let features = result.unwrap();
+        assert_eq!(features.len(), 2);
+        assert!(features.contains_key("contig1"));
+        assert!(features.contains_key("contig2"));
+
+        let _ = std::fs::remove_file(&gff_file);
+        let _ = std::fs::remove_file(&fasta_file);
+    }
+
+    #[test]
+    fn test_extract_multi_contig_features() {
+        let gff_content = "##gff-version 3
+contig1\t.\tGene\t100\t200\t.\t+\t.\tID=gene1
+contig1\t.\texon\t100\t200\t.\t+\t.\tID=exon1
+contig2\t.\tGene\t50\t150\t.\t+\t.\tID=gene2
+contig2\t.\texon\t50\t150\t.\t+\t.\tID=exon2";
+
+        let gff_file = create_temp_file("test", ".gff", gff_content);
+        let file = File::open(&gff_file).expect("Failed to open test file");
+
+        let result = extract_feature_positions(file);
+        assert!(result.is_ok());
+
+        let features = result.unwrap();
+        assert!(features.contains_key("contig1"));
+        assert!(features.contains_key("contig2"));
+        assert!(!features.get("contig1").unwrap().is_empty());
+        assert!(!features.get("contig2").unwrap().is_empty());
+
+        let _ = std::fs::remove_file(&gff_file);
+    }
+}
