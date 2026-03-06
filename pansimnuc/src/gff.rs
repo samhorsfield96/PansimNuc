@@ -15,7 +15,7 @@ pub struct FeaturePos {
     pub seq: String
 }
 
-pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<FeaturePos>> {
+pub fn extract_feature_positions(file_gff: File) -> io::Result<HashMap<String, Vec<FeaturePos>>> {
     let mut gff_reader = gff::io::Reader::new(BufReader::new(file_gff));
 
     // keep track of current feature ID, dictacted by gene and its upstream region
@@ -25,7 +25,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<FeaturePos>> 
     let mut last_feature_end: usize = 0;
     
     // hold features
-    let mut features: Vec<FeaturePos> = Vec::new();
+    let mut features: HashMap<String, Vec<FeaturePos>> = HashMap::new();
 
     for result in gff_reader.record_bufs() {
         let record: noodles_gff::feature::RecordBuf = result?;
@@ -42,15 +42,17 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<FeaturePos>> 
 
             // in case gene is start of contig
             if feature_start > last_feature_end {
-                features.push(FeaturePos {
-                    seqname: seqname.clone(),
-                    feature_id: current_feature_id,
-                    feature_type: "intergenic".to_string(),
-                    start: last_feature_end,
-                    end: feature_start,
-                    strand: true,
-                    seq: "".to_string()
-                });
+                features.entry(seqname.clone())
+                    .or_default()
+                    .push(FeaturePos {
+                        seqname: seqname.clone(),
+                        feature_id: current_feature_id,
+                        feature_type: "intergenic".to_string(),
+                        start: last_feature_end,
+                        end: feature_start,
+                        strand: true,
+                        seq: "".to_string()
+                    });
             }
 
             // update last_feature_end
@@ -61,28 +63,32 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<FeaturePos>> 
             
             // if next feature is exon, need to check than current end is not identical otherwise still at start of gene
             if feature_start > last_feature_end {
-                features.push(FeaturePos {
-                    seqname: seqname.clone(),
-                    feature_id: current_feature_id,
-                    feature_type: "intron".to_string(),
-                    start: last_feature_end,
-                    end: feature_start,
-                    strand: true,
-                    seq: "".to_string()
-                });
+                features.entry(seqname.clone())
+                    .or_default()
+                    .push(FeaturePos {
+                        seqname: seqname.clone(),
+                        feature_id: current_feature_id,
+                        feature_type: "intron".to_string(),
+                        start: last_feature_end,
+                        end: feature_start,
+                        strand: true,
+                        seq: "".to_string()
+                    });
             }
 
             // only add exons as features
             if feature_type == "exon" {
-                features.push(FeaturePos {
-                    seqname: seqname.clone(),
-                    feature_id: current_feature_id,
-                    feature_type: feature_type.clone(),
-                    start: feature_start,
-                    end: feature_end,
-                    strand: record.strand() == Strand::Forward,
-                    seq: "".to_string()
-                });
+                features.entry(seqname.clone())
+                    .or_default()
+                    .push(FeaturePos {
+                        seqname: seqname.clone(),
+                        feature_id: current_feature_id,
+                        feature_type: feature_type.clone(),
+                        start: feature_start,
+                        end: feature_end,
+                        strand: record.strand() == Strand::Forward,
+                        seq: "".to_string()
+                    });
             }
 
             // update last_feature_end
@@ -94,7 +100,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<FeaturePos>> 
     Ok(features)
 }
 
-pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<Vec<FeaturePos>> {
+pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<HashMap<String, Vec<FeaturePos>>> {
     let file_gff = File::open(gff_path)?;
     let file_fasta = File::open(fasta_path)?;
 
@@ -113,52 +119,41 @@ pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<Vec<Featur
         );
     }
 
-    for result in &mut features {
+    for (seqname, results) in &mut features {
+        if let Some(seq) = genome.get(seqname) {
+            let mut last_feature_end: usize = 0;
+            let mut last_feature_id:usize = 0;
+            
+            for result in &mut **results {
+            
+                if result.start >= result.end || result.end > seq.len() {
+                    continue;
+                }
 
-        if let Some(seq) = genome.get(&result.seqname) {
-            if result.start >= result.end || result.end > seq.len() {
-                continue;
+                let subseq = &seq[result.start..result.end];
+
+                result.seq = subseq.to_string();
+
+                last_feature_end = result.end;
+                last_feature_id = result.feature_id;
             }
+            
+            // add final intergenic region, if contig empty adds full contig
+            let len_seq: usize  = seq.len();
+            let feature_start = last_feature_end;
+            let feature_end = len_seq;
+            let subseq = &seq[feature_start..feature_end];
 
-            let subseq = &seq[result.start..result.end];
-
-            result.seq = subseq.to_string();
+            results.push(FeaturePos {
+                seqname: seqname.clone(),
+                feature_id: last_feature_id + 1,
+                feature_type: "intergenic".to_string(),
+                start: feature_start,
+                end: feature_end,
+                strand: true,
+                seq: subseq.to_string()
+            });
         }
-    }
-
-    if cfg!(debug_assertions) {
-        println!("{}\n{}\n{}\n{}\n{}\n{}\n{}", 
-            features[0].seqname,
-            features[0].feature_id,
-            features[0].feature_type,
-            features[0].start,
-            features[0].end,
-            features[0].strand,
-            features[0].seq);
-        println!("{}\n{}\n{}\n{}\n{}\n{}\n{}", 
-            features[1].seqname,
-            features[1].feature_id,
-            features[1].feature_type,
-            features[1].start,
-            features[1].end,
-            features[1].strand,
-            features[1].seq);
-        println!("{}\n{}\n{}\n{}\n{}\n{}\n{}", 
-            features[2].seqname,
-            features[2].feature_id,
-            features[2].feature_type,
-            features[2].start,
-            features[2].end,
-            features[2].strand,
-            features[2].seq);
-        println!("{}\n{}\n{}\n{}\n{}\n{}\n{}", 
-            features[3].seqname,
-            features[3].feature_id,
-            features[3].feature_type,
-            features[3].start,
-            features[3].end,
-            features[3].strand,
-            features[3].seq);
     }
 
     Ok(features)
