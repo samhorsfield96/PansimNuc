@@ -4,17 +4,12 @@ mod config;
 use clap::Parser;
 use gff::read_gff_lines;
 use config::Config;
+use std::collections::HashMap;
 
 #[derive(Parser, Debug)]
 #[command(name = "pansimnuc")]
-#[command(about = "Extract feature sequences from GFF + FASTA", long_about = None)]
+#[command(about = "Forward simulation of base genome at nucleotide level", long_about = None)]
 struct Args {
-	#[arg(long, help = "Path to GFF3 file")]
-	gff: String,
-
-	#[arg(long, help = "Path to FASTA file")]
-	fasta: String,
-
 	#[arg(long, help = "Optional path to config file")]
 	config: Option<String>,
 }
@@ -22,18 +17,18 @@ struct Args {
 fn main() {
 	let args = Args::parse();
 
+	let mut configuration: HashMap<String, String> = HashMap::new();
+
 	// Load config if provided
 	if let Some(config_path) = &args.config {
 		match Config::from_file(config_path) {
 			Ok(config) => {
 				println!("Loaded config from: {}", config_path);
-				for section in config.sections.keys() {
-					println!("  [{}]", section);
-					for key in config.keys_in_section(section) {
-						if let Some(value) = config.get(section, &key) {
-							println!("    {} = {}", key, value);
-						}
-					}
+				// Flatten config into a single HashMap for easy access
+				configuration = config.flatten();
+				println!("Configuration values:");
+				for (key, value) in &configuration {
+					println!("  {} = {}", key, value);
 				}
 			}
 			Err(err) => {
@@ -43,15 +38,17 @@ fn main() {
 		}
 	}
 
-	match read_gff_lines(&args.gff, &args.fasta) {
-		Ok(features) => {
-			println!("Loaded {} contigs with features", features.len());
+	if let (Some(gff_path), Some(fasta_path)) = (configuration.get("input.gff_file"), configuration.get("input.fasta_file")) {
+		match read_gff_lines(&gff_path, &fasta_path) {
+			Ok(features) => {
+				println!("Loaded {} contigs with features", features.len());
+			}
+			Err(err) => {
+				eprintln!("Failed to read input files: {err}");
+				std::process::exit(1);
+			}
 		}
-		Err(err) => {
-			eprintln!("Failed to read input files: {err}");
-			std::process::exit(1);
-		}
+	} else {
+		eprintln!("Failed to read input gff and fasta files");
 	}
-
-	
 }
