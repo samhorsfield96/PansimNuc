@@ -200,6 +200,18 @@ ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
         assert!(features.contains_key("contig1"));
         assert!(features.contains_key("contig2"));
 
+        // Check coordinates for contig1 exon
+        let contig1_features = &features["contig1"];
+        let exon = contig1_features.iter().find(|f| f.feature_type == "exon").unwrap();
+        assert_eq!(exon.start, 99);  // GFF 100 becomes 0-indexed 99
+        assert_eq!(exon.end, 200);
+
+        // Check coordinates for contig2 exon
+        let contig2_features = &features["contig2"];
+        let exon = contig2_features.iter().find(|f| f.feature_type == "exon").unwrap();
+        assert_eq!(exon.start, 49);  // GFF 50 becomes 0-indexed 49
+        assert_eq!(exon.end, 150);
+
         let _ = std::fs::remove_file(&gff_file);
         let _ = std::fs::remove_file(&fasta_file);
     }
@@ -223,6 +235,18 @@ contig2\t.\texon\t50\t150\t.\t+\t.\tID=exon2";
         assert!(features.contains_key("contig2"));
         assert!(!features.get("contig1").unwrap().is_empty());
         assert!(!features.get("contig2").unwrap().is_empty());
+
+        // Check coordinates for contig1 exon
+        let contig1_features = &features["contig1"];
+        let exon = contig1_features.iter().find(|f| f.feature_type == "exon").unwrap();
+        assert_eq!(exon.start, 99);  // GFF 100 becomes 0-indexed 99
+        assert_eq!(exon.end, 200);
+
+        // Check coordinates for contig2 exon
+        let contig2_features = &features["contig2"];
+        let exon = contig2_features.iter().find(|f| f.feature_type == "exon").unwrap();
+        assert_eq!(exon.start, 49);  // GFF 50 becomes 0-indexed 49
+        assert_eq!(exon.end, 150);
 
         let _ = std::fs::remove_file(&gff_file);
     }
