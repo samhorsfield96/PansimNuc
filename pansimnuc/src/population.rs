@@ -7,41 +7,11 @@ pub struct NucElement {
     seq: Vec<u8>,
 }
 
-// impl NucElement {
-//     fn new (
-//         seqname: String,
-//         feature_id: usize,
-//         feature_type: String,
-//         seq: Vec<u8>
-//     ) -> Self {
-//         Self {
-//             seqname,
-//             feature_id,
-//             feature_type,
-//             seq
-//         }
-//     }
-// }
-
 pub struct Genome {
     pub identifier: String,
     pub parent: String,
     pub seq: Vec<NucElement>
 }
-
-// impl Genome {
-//     fn new (
-//         identifier: String,
-//         parent: String,
-//         seq: Vec<NucElement>
-//     ) -> Self {
-//         Self {
-//             identifier,
-//             parent,
-//             seq
-//         }
-//     }
-// }
 
 pub struct Population{
     pub generation: usize,
@@ -77,6 +47,63 @@ impl Population {
         Self {
             generation: 0,
             pop: population
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gff::FeaturePos;
+
+    #[test]
+    fn test_population_new() {
+        // Create test data
+        let mut root = HashMap::new();
+        let features = vec![
+            FeaturePos {
+                seqname: "chr1".to_string(),
+                feature_id: 0,
+                feature_type: "gene".to_string(),
+                start: 100,
+                end: 200,
+                strand: true,
+                seq: vec![0, 1, 2, 3], // ACGT
+            },
+            FeaturePos {
+                seqname: "chr1".to_string(),
+                feature_id: 1,
+                feature_type: "gene".to_string(),
+                start: 300,
+                end: 400,
+                strand: false,
+                seq: vec![3, 2, 1, 0], // TGCA
+            },
+        ];
+        root.insert("chr1".to_string(), features);
+
+        let n_genomes = 3;
+        let pop = Population::new(root, n_genomes);
+
+        // Check population was created correctly
+        assert_eq!(pop.generation, 0);
+        assert_eq!(pop.pop.len(), n_genomes);
+
+        // Check each genome
+        for (i, genome) in pop.pop.iter().enumerate() {
+            assert_eq!(genome.identifier, format!("{}", i));
+            assert_eq!(genome.parent, "root");
+            assert_eq!(genome.seq.len(), 2); // Two features
+
+            // Check first feature
+            assert_eq!(genome.seq[0].seqname, "chr1");
+            assert_eq!(genome.seq[0].feature_id, 0);
+            assert_eq!(genome.seq[0].feature_type, "gene");
+
+            // Check second feature
+            assert_eq!(genome.seq[1].seqname, "chr1");
+            assert_eq!(genome.seq[1].feature_id, 1);
+            assert_eq!(genome.seq[1].feature_type, "gene");
         }
     }
 }
