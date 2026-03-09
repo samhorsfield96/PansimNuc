@@ -14,9 +14,13 @@
 // ancestry that is held in parent/id? Or calculate edit distance? Probably will take too long
 
 use rustc_hash::FxHashMap;
-use rand::Rng;
+use rand::rngs::StdRng;
+use rand::{Rng};
+use rand::seq::IteratorRandom;
 use rand_distr::{Normal, Uniform, Exp, Distribution as RandDist};
 use std::fmt;
+use statrs::distribution::Poisson;
+use crate::population::NucElement;
 
 #[derive(Debug)]
 pub enum DistributionError {
@@ -68,11 +72,11 @@ impl DoubleExponential {
         Ok(Self { exp1, exp2, cutoff, weight })
     }
 
-    pub fn weight<R: Rng>(&mut self, uniform: Uniform<f64>, rng: &mut R) {
+    pub fn weight(&mut self, uniform: Uniform<f64>, rng: &mut StdRng) {
         self.weight = uniform.sample(rng);
     }
 
-    pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
+    pub fn sample(&self, rng: &mut StdRng) -> f64 {
         if self.weight <= self.cutoff {
             // Higher selected gene
             self.exp2.sample(rng)
@@ -127,21 +131,59 @@ impl Distribution {
     }
 }
 
-pub struct MutationMap<V> {
-    
-    data: [FxHashMap<u32, V>; 4],
+pub struct MutationMap<'a> {
+    distribution: &'a mut Distribution,
+    data: [FxHashMap<usize, f64>; 4],
+    element: &'a mut NucElement,
 }
 
-impl<V> MutationMap<V> {
-    pub fn new() -> Self {
-        Self { data: std::array::from_fn(|_| FxHashMap::default()) }
+impl <'a>MutationMap<'a> {
+    pub fn new(distribution: &'a mut Distribution, element: &'a mut NucElement) -> Self {
+        Self {distribution, data: std::array::from_fn(|_| FxHashMap::default()), element }
     }
 
-    fn insert(&mut self, level: usize, key: u32, value: V) {
-        self.data[level].insert(key, value);
+    fn insert(&mut self, level: u8, key: usize, value: f64) {
+        self.data[level as usize].insert(key, value);
     }
 
-    fn get(&self, level: usize, key: u32) -> Option<&V> {
-        self.data[level].get(&key)
+    fn get(&self, level: u8, key: usize) -> Option<&f64> {
+        self.data[level as usize].get(&key)
+    }
+
+    fn mutate (& mut self, poisson: &mut Poisson, core_vec: &Vec<Vec<u8>>) {
+        // thread-specific random number generator
+        let mut thread_rng = rand::thread_rng();
+
+        let seq_len = self.element.seq.len();
+
+        // sample from Poisson distribution for number of sites to mutate in this isolate
+        let n_sites = poisson.sample(&mut thread_rng) as usize;
+        let sampled_sites = (0..seq_len).choose_multiple(&mut thread_rng, n_sites);
+
+        // iterate for number of mutations required to reach mutation rate
+        for mutant_site in sampled_sites {
+            // sample new site to mutate
+            let value = self.element.seq[mutant_site];
+            
+            let values = &core_vec[1 >> value];
+
+            // sample new allele
+            let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
+            let mut selection_coefficient: f64 = 0.0;
+
+            // generate new selection coefficient for this mutation if necessary, otherwise retrieve existing one
+            if let Some(coeff) = self.get(*new_allele, mutant_site) {
+                // value exists
+                selection_coefficient = *coeff;
+            } else {
+                selection_coefficient = self.distribution.sample(&mut thread_rng);
+            }
+
+            // set value in place
+            self.element.seq[mutant_site] = *new_allele;
+            self.insert(*new_allele, mutant_site, selection_coefficient);
+
+        }
     }
 }
+
