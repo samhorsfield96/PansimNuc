@@ -14,13 +14,11 @@
 // ancestry that is held in parent/id? Or calculate edit distance? Probably will take too long
 
 use rustc_hash::FxHashMap;
-use rand::rngs::StdRng;
 use rand::{Rng};
 use rand::seq::IteratorRandom;
 use rand_distr::{Normal, Uniform, Exp, Distribution as RandDist};
 use std::fmt;
 use statrs::distribution::Poisson;
-use crate::mutation::Distribution;
 
 #[derive(Debug)]
 pub enum DistributionError {
@@ -72,11 +70,11 @@ impl DoubleExponential {
         Ok(Self { exp1, exp2, cutoff, weight })
     }
 
-    pub fn weight(&mut self, uniform: Uniform<f64>, rng: &mut StdRng) {
+    pub fn weight<R: Rng>(&mut self, uniform: &Uniform<f64>, rng: &mut R) {
         self.weight = uniform.sample(rng);
     }
 
-    pub fn sample(&self, rng: &mut StdRng) -> f64 {
+    pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
         if self.weight <= self.cutoff {
             // Higher selected gene
             self.exp2.sample(rng)
@@ -105,9 +103,7 @@ impl Distribution {
         if low >= high {
             return Err(DistributionError::InvalidUniformParameters);
         }
-        Uniform::new(low, high)
-            .map(Distribution::Uniform)
-            .map_err(|_| DistributionError::InvalidUniformParameters)
+        Ok(Distribution::Uniform(Uniform::new(low, high)))
     }
 
     pub fn new_exp(lambda: f64) -> Result<Self, DistributionError> {
@@ -137,7 +133,7 @@ pub struct MutationMap {
 }
 
 impl MutationMap {
-    pub fn new(distribution_id) -> Self {
+    pub fn new(distribution_id: usize) -> Self {
         Self {distribution_id, data: std::array::from_fn(|_| FxHashMap::default()) }
     }
 
@@ -164,7 +160,7 @@ impl MutationMap {
             // sample new site to mutate
             let value = seq[mutant_site];
             
-            let values = &core_vec[1 >> value];
+            let values = &core_vec[value as usize];
 
             // sample new allele
             let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
