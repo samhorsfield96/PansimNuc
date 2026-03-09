@@ -1,10 +1,13 @@
 use crate::gff::FeaturePos;
+use crate::mutation::MutationMap;
 use std::collections::HashMap;
+
 pub struct NucElement {
     pub seqname: String,
     pub feature_id: usize,
     pub feature_type: String,
     seq: Vec<u8>,
+    mutations: MutationMap<u8>,
 }
 
 pub struct Genome {
@@ -33,7 +36,8 @@ impl Population {
                         seqname: feature.seqname.clone(),
                         feature_id: feature.feature_id,
                         feature_type: feature.feature_type.clone(),
-                        seq: feature.seq.clone()
+                        seq: feature.seq.clone(),
+                        mutations: MutationMap::new(),
                     });
                 }
             }

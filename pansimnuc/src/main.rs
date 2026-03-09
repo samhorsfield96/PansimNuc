@@ -1,6 +1,7 @@
 mod gff;
 mod config;
 mod population;
+mod mutation;
 
 use clap::Parser;
 use gff::read_gff_lines;
