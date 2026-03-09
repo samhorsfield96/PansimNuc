@@ -26,6 +26,7 @@ pub enum DistributionError {
     InvalidUniformParameters,
     InvalidExponentialParameters,
     InvalidDoubleExpParameters,
+    InvalidPoissonParameters,
 }
 
 impl fmt::Display for DistributionError {
@@ -42,6 +43,9 @@ impl fmt::Display for DistributionError {
             }
             DistributionError::InvalidDoubleExpParameters => {
                 write!(f, "Invalid DoubleExp distribution: lambdas must be positive and cutoff must be between 0 and 1")
+            }
+            DistributionError::InvalidPoissonParameters => {
+                write!(f, "Invalid Poisson distribution: lambda must be positive")
             }
         }
     }
@@ -64,8 +68,6 @@ impl DoubleExponential {
         
         let exp1 = Exp::new(lambda1).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
         let exp2 = Exp::new(lambda2).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
-        // TODO generate uniform distribution before this that is passed between samples, avoiding regenerating each time
-        //let uniform = Uniform::new(0.0, 1.0).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
         
         Ok(Self { exp1, exp2, cutoff, weight })
     }
@@ -90,6 +92,7 @@ pub enum Distribution {
     Uniform(Uniform<f64>),
     Exp(Exp<f64>),
     DoubleExp(DoubleExponential),
+    Poisson(Poisson)
 }
 
 impl Distribution {
@@ -117,42 +120,51 @@ impl Distribution {
             .map(Distribution::DoubleExp)
     }
 
+    pub fn new_poisson(lambda: f64) -> Result<Self, DistributionError> {
+        Poisson::new(lambda)
+            .map(Distribution::Poisson)
+            .map_err(|_| DistributionError::InvalidPoissonParameters)
+    }
+
     pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
         match self {
             Distribution::Normal(d) => d.sample(rng),
             Distribution::Uniform(d) => d.sample(rng),
             Distribution::Exp(d) => d.sample(rng),
             Distribution::DoubleExp(d) => d.sample(rng),
+            Distribution::Poisson(d) => d.sample(rng),
         }
     }
 }
 
+#[derive(Clone)]
 pub struct MutationMap {
-    pub distribution_id: usize,
+    pub selection_dist_id: usize,
+    pub mu_dist_id: usize,
     data: [FxHashMap<usize, f64>; 4],
 }
 
 impl MutationMap {
-    pub fn new(distribution_id: usize) -> Self {
-        Self {distribution_id, data: std::array::from_fn(|_| FxHashMap::default()) }
+    pub fn new(selection_dist_id: usize, mu_dist_id: usize) -> Self {
+        Self {selection_dist_id, mu_dist_id, data: std::array::from_fn(|_| FxHashMap::default()) }
     }
 
     fn insert(&mut self, level: u8, key: usize, value: f64) {
         self.data[level as usize].insert(key, value);
     }
 
-    fn get(&self, level: u8, key: usize) -> Option<&f64> {
+    pub fn get(&self, level: u8, key: usize) -> Option<&f64> {
         self.data[level as usize].get(&key)
     }    
 
-    fn mutate (& mut self, poisson: &mut Poisson, core_vec: &Vec<Vec<u8>>, seq: &mut Vec<u8>, distribution: &Distribution) {
+    pub fn mutate (& mut self, core_vec: &Vec<Vec<u8>>, seq: &mut Vec<u8>, selection_dist: &Distribution, mu_dist: &Distribution) {
         // thread-specific random number generator
         let mut thread_rng = rand::thread_rng();
 
         let seq_len = seq.len();
 
         // sample from Poisson distribution for number of sites to mutate in this isolate
-        let n_sites = poisson.sample(&mut thread_rng) as usize;
+        let n_sites = mu_dist.sample(&mut thread_rng) as usize;
         let sampled_sites = (0..seq_len).choose_multiple(&mut thread_rng, n_sites);
 
         // iterate for number of mutations required to reach mutation rate
@@ -171,13 +183,12 @@ impl MutationMap {
                 // value exists
                 selection_coefficient = *coeff;
             } else {
-                selection_coefficient = distribution.sample(&mut thread_rng);
+                selection_coefficient = selection_dist.sample(&mut thread_rng);
             }
 
             // set value in place
             seq[mutant_site] = *new_allele;
             self.insert(*new_allele, mutant_site, selection_coefficient);
-
         }
     }
 }
@@ -222,6 +233,18 @@ mod tests {
     }
 
     #[test]
+    fn test_poisson_creation() {
+        let dist = Distribution::new_poisson(1.1);
+        assert!(dist.is_ok());
+    }
+
+    #[test]
+    fn test_poisson_invalid_params() {
+        let dist = Distribution::new_poisson(-1.1);
+        assert!(dist.is_err());
+    }
+
+    #[test]
     fn test_double_exp_distribution_invalid_params() {
         // Invalid lambda1
         let dist1 = Distribution::new_double_exp(-0.5, 2.0, 0.3);
@@ -254,17 +277,21 @@ mod tests {
         let exp = Distribution::new_exp(1.0).unwrap();
         let sample = exp.sample(&mut rng);
         assert!(sample >= 0.0);
+
+        let poisson = Distribution::new_poisson(1.0).unwrap();
+        let sample = poisson.sample(&mut rng);
+        assert!(sample >= 0.0)
     }
 
     #[test]
     fn test_mutation_map_creation() {
-        let map = MutationMap::new(1);
-        assert_eq!(map.distribution_id, 1);
+        let map = MutationMap::new(1, 1);
+        assert_eq!(map.selection_dist_id, 1);
     }
 
     #[test]
     fn test_mutation_map_insert_and_get() {
-        let mut map = MutationMap::new(0);
+        let mut map = MutationMap::new(0, 0);
         
         map.insert(0, 100, 0.5);
         let value = map.get(0, 100);
@@ -276,7 +303,7 @@ mod tests {
 
     #[test]
     fn test_mutation_map_multiple_levels() {
-        let mut map = MutationMap::new(0);
+        let mut map = MutationMap::new(0, 0);
         
         map.insert(0, 10, 0.1);
         map.insert(1, 10, 0.2);

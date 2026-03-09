@@ -10,6 +10,7 @@ use config::Config;
 use std::collections::HashMap;
 use crate::mutation::Distribution;
 use rand::rngs::StdRng;
+use rand::{SeedableRng};
 
 #[derive(Parser, Debug)]
 #[command(name = "pansimnuc")]
@@ -43,6 +44,23 @@ fn main() {
 		}
 	}
 
+	// enable multithreading
+	if let Some(n_threads_str) = configuration.get("misc.threads") {
+		let mut n_threads: usize = n_threads_str.parse::<usize>().expect("threads must be an integer.");
+		if n_threads < 1 {
+			n_threads = 1;
+		}
+		rayon::ThreadPoolBuilder::new()
+			.num_threads(n_threads)
+			.build_global()
+			.expect("Failed to initialise rayon pool");
+	}
+
+	// initialise RNG with seed for reproducibility
+ 	let seed_str = configuration.get("misc.seed").expect("Require seed for reproducibility. Please specify in config file.");
+	let seed: u64 = seed_str.parse::<u64>().expect("seed must be an integer.");
+	let mut rng: StdRng = StdRng::seed_from_u64(seed);
+
 	if let (Some(gff_path), Some(fasta_path)) = (configuration.get("input.gff_file"), configuration.get("input.fasta_file")) {
 		match read_gff_lines(&gff_path, &fasta_path) {
 			Ok(features) => {
@@ -66,8 +84,17 @@ fn main() {
 					// generate initial population
 					let n_individuals: usize = n_individuals_str.parse::<usize>().expect("n_individuals must be an integer.");
 					let mut population = Population::new(features, n_individuals, site_mutation_dists, site_mutation_mus);
-
+					
+					// mutate population
 					let n_generation: usize = n_generation_str.parse::<usize>().expect("n_generation must be an integer.");
+										
+					for _ in 0..n_generation {
+						population.mutate();
+
+						let sampled_indices = population.sample_individuals(&mut rng);
+						population.next_generation(sampled_indices);
+
+					}
 				}
 			}
 			Err(err) => {

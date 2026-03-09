@@ -1,9 +1,13 @@
 use crate::gff::FeaturePos;
 use crate::mutation::MutationMap;
-use crate::mutation::Distribution;
+use crate::mutation::Distribution as MutationDistribution;
 use std::collections::HashMap;
-use statrs::distribution::Poisson;
+use rayon::prelude::*;
+use logsumexp::LogSumExp;
+use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
+use rand::rngs::StdRng;
 
+#[derive(Clone)]
 pub struct NucElement {
     pub seqname: String,
     pub feature_id: usize,
@@ -22,16 +26,16 @@ pub struct Population{
     pub generation: usize,
     pub pop: Vec<Genome>,
     pub core_vec: Vec<Vec<u8>>,
-    pub selection_dists: Vec<Distribution>,
-    pub mu_dists: Vec<Distribution>,
+    pub selection_dists: Vec<MutationDistribution>,
+    pub mu_dists: Vec<MutationDistribution>,
 }
 
 impl Population {
     pub fn new(
         root: HashMap<String, Vec<FeaturePos>>,
         n_genomes: usize,
-        selection_dists: Vec<Distribution>,
-        mu_dists: Vec<Distribution>
+        selection_dists: Vec<MutationDistribution>,
+        mu_dists: Vec<MutationDistribution>
     ) -> Self {
         let mut population: Vec<Genome> = Vec::new();
 
@@ -84,20 +88,74 @@ impl Population {
         }
     }
 
+    // mutate individuals in the population according to their mutation maps and the provided distributions
     pub fn mutate (&mut self) {
         for genome in &mut self.pop {
             for element in &mut genome.seq {
-                element.mutation_map.mutate(&self.core_vec, &mut element.seq, &self.selection_dists[element.mutation_map.selection_dist_id], &self.mu_dists[element.mutation_map.mu_dist_id],);
-
-
-                // apply mutations to element.seq based on element.mutation_map and self.distributions
+                element.mutation_map.mutate(&self.core_vec, 
+                    &mut element.seq, 
+                    &self.selection_dists[element.mutation_map.selection_dist_id], 
+                    &self.mu_dists[element.mutation_map.mu_dist_id],);
             }
         }
-        // placeholder for mutation function, which will apply mutations to each genome in the population based on the mutation map of each NucElement and the specified distributions
     }
 
-    pub fn next_generation (&mut self) {
+    // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights
+    pub fn sample_individuals (&self, rng: &mut StdRng) -> Vec<usize> {
+        let mut selection_weights: Vec<f64> = vec![1.0; self.pop.len()];
+        
+        selection_weights = self.pop
+            .par_iter()
+            .map(|genome| {
+                let mut log_sum = 0.0;
+                for element in &genome.seq {
+                    for (site, allele) in element.seq.iter().enumerate() {
+                        if let Some(coeff) = element.mutation_map.get(*allele, site) {
+                            log_sum += coeff;
+                        } else {
+                            panic!(
+                                "Failed to generate selection coefficient for genome {} allele {} at site {}",
+                                genome.identifier, allele, site
+                            );
+                        }
+                    }
+                }
+                log_sum
+            })
+            .collect();
 
+        // logsumexp normalization to prevent underflow/overflow issues with very small/large weights
+        let logsumexp_value = selection_weights.iter().ln_sum_exp();
+
+        selection_weights = selection_weights.into_iter()
+            .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
+            .collect();
+
+        let sum_weights: f64 = selection_weights.iter().sum();
+        selection_weights = selection_weights.iter().map(|&w| if w != std::f64::NEG_INFINITY {w / sum_weights} else {0.0}).collect();
+
+        // Create a WeightedIndex distribution based on weights
+        let sampling_dist = WeightedIndex::new(&selection_weights).expect("Failed to generate sampling index for population.");
+
+        // Sample rows based on the distribution
+        let sampled_indices: Vec<usize> = (0..self.pop.len()).map(|_| sampling_dist.sample(rng)).collect();
+
+        sampled_indices
+    }
+
+    pub fn next_generation (&mut self, sampled_indices: Vec<usize>) {
+        let mut new_pop: Vec<Genome> = Vec::new();
+
+        for &selected_index in &sampled_indices {
+            let selected_genome = &self.pop[selected_index];
+            new_pop.push(Genome {
+                identifier: format!("{}-{}", self.generation + 1, selected_genome.identifier),
+                parent: selected_genome.identifier.clone(),
+                seq: selected_genome.seq.clone(),
+            });
+        }
+        self.pop = new_pop;
+        self.generation += 1;
     }
 }
 
@@ -133,14 +191,14 @@ mod tests {
         root.insert("chr1".to_string(), features);
 
         let n_genomes = 3;
-        let exon_dist = Distribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
-        let intron_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
-        let intergenic_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
+        let exon_dist = MutationDistribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
+        let intron_dist = MutationDistribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
+        let intergenic_dist = MutationDistribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
         let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
 
-        let exon_mu = Distribution::new_uniform(0.0, 1.0).expect("Failed to create double exponential distribution for exon features");
-        let intron_mu = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
-        let intergenic_mu = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
+        let exon_mu = MutationDistribution::new_uniform(0.0, 1.0).expect("Failed to create double exponential distribution for exon features");
+        let intron_mu = MutationDistribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
+        let intergenic_mu = MutationDistribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
         let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
 
 
