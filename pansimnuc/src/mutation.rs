@@ -15,68 +15,115 @@
 
 use rustc_hash::FxHashMap;
 use rand::Rng;
-use rand_distr::Normal;
-use rand::distr::Uniform;
-use statrs::distribution::Exp;
-use rand::rngs::StdRng;
+use rand_distr::{Normal, Uniform, Exp, Distribution as RandDist};
+use std::fmt;
 
-struct DoubleExponential {
-    lambda1: f64,
-    lambda2: f64,
-    prop_lambda1: f64,
+#[derive(Debug)]
+pub enum DistributionError {
+    InvalidNormalParameters,
+    InvalidUniformParameters,
+    InvalidExponentialParameters,
+    InvalidDoubleExpParameters,
+}
+
+impl fmt::Display for DistributionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DistributionError::InvalidNormalParameters => {
+                write!(f, "Invalid Normal distribution: std_dev must be positive")
+            }
+            DistributionError::InvalidUniformParameters => {
+                write!(f, "Invalid Uniform distribution: low must be less than high")
+            }
+            DistributionError::InvalidExponentialParameters => {
+                write!(f, "Invalid Exponential distribution: lambda must be positive")
+            }
+            DistributionError::InvalidDoubleExpParameters => {
+                write!(f, "Invalid DoubleExp distribution: lambdas must be positive and cutoff must be between 0 and 1")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DistributionError {}
+
+pub struct DoubleExponential {
+    exp1: Exp<f64>,
+    exp2: Exp<f64>,
     cutoff: f64,
-    sample: f64
+    uniform: Uniform<f64>,
 }
 
 impl DoubleExponential {
-    pub fn new(lambda1: f64, lambda2: f64, prop_lambda1: f64, cutoff: f64, rng: &mut StdRng) -> Self {
-        let uniform: Uniform<f64> = Uniform::new(0.0, 1.0).unwrap();
-        let exponential1: Exp = Exp::new(lambda1).unwrap();
-        let exponential2: Exp = Exp::new(lambda2).unwrap();
-
-        let weight: f64 = uniform.sample(&mut rng) as f64;
-        let mut sample: f64 = 0.0;
-
-        // higher selected gene
-        if weight <= cutoff {
-            sample = exponential2.sample(&mut rng);
-            //selection_coeffient = 100.0;
-        } else {
-            sample = exponential1.sample(&mut rng);
-
-            while sample > 1.0 {
-                sample = exponential1.sample(&mut rng);
-            }
-
-            sample = -1.0 * sample;
+    pub fn new(lambda1: f64, lambda2: f64, cutoff: f64) -> Result<Self, DistributionError> {
+        if lambda1 <= 0.0 || lambda2 <= 0.0 || cutoff < 0.0 || cutoff > 1.0 {
+            return Err(DistributionError::InvalidDoubleExpParameters);
         }
-
-        Self { lambda1, lambda2, prop_lambda1, cutoff, sample }
+        
+        let exp1 = Exp::new(lambda1).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
+        let exp2 = Exp::new(lambda2).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
+        let uniform = Uniform::new(0.0, 1.0).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
+        
+        Ok(Self { exp1, exp2, cutoff, uniform })
     }
     
-
+    pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
+        let weight: f64 = self.uniform.sample(rng);
+        
+        if weight <= self.cutoff {
+            // Higher selected gene
+            self.exp2.sample(rng)
+        } else {
+            // Negative selection - sample until <= 1.0, then negate
+            let mut sample = self.exp1.sample(rng);
+            while sample > 1.0 {
+                sample = self.exp1.sample(rng);
+            }
+            -sample
+        }
+    }
 }
 
-#[derive(Clone)]
 pub enum Distribution {
-    Normal { mean: f64, std_dev: f64 },
-    Uniform { low: f64, high: f64 },
-    Exp { lambda: f64 },
-    DoubleExp { lambda1: f64, lambda2: f64, prop_lambda1: f64, cutoff: f64, sample: f64 }
+    Normal(Normal<f64>),
+    Uniform(Uniform<f64>),
+    Exp(Exp<f64>),
+    DoubleExp(DoubleExponential),
 }
 
 impl Distribution {
+    pub fn new_normal(mean: f64, std_dev: f64) -> Result<Self, DistributionError> {
+        Normal::new(mean, std_dev)
+            .map(Distribution::Normal)
+            .map_err(|_| DistributionError::InvalidNormalParameters)
+    }
+
+    pub fn new_uniform(low: f64, high: f64) -> Result<Self, DistributionError> {
+        if low >= high {
+            return Err(DistributionError::InvalidUniformParameters);
+        }
+        Uniform::new(low, high)
+            .map(Distribution::Uniform)
+            .map_err(|_| DistributionError::InvalidUniformParameters)
+    }
+
+    pub fn new_exp(lambda: f64) -> Result<Self, DistributionError> {
+        Exp::new(lambda)
+            .map(Distribution::Exp)
+            .map_err(|_| DistributionError::InvalidExponentialParameters)
+    }
+
+    pub fn new_double_exp(lambda1: f64, lambda2: f64, cutoff: f64) -> Result<Self, DistributionError> {
+        DoubleExponential::new(lambda1, lambda2, cutoff)
+            .map(Distribution::DoubleExp)
+    }
+
     pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
         match self {
-            Distribution::Normal { mean, std_dev } => {
-                Normal::new(*mean, *std_dev).unwrap().sample(rng)
-            }
-            Distribution::Uniform { low, high } => {
-                Uniform::new(*low, *high).unwrap().sample(rng)
-            }
-            Distribution::Exp { lambda } => {
-                Exp::new(*lambda).unwrap().sample(rng)
-            }
+            Distribution::Normal(d) => d.sample(rng),
+            Distribution::Uniform(d) => d.sample(rng),
+            Distribution::Exp(d) => d.sample(rng),
+            Distribution::DoubleExp(d) => d.sample(rng),
         }
     }
 }

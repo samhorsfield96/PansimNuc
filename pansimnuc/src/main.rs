@@ -8,6 +8,7 @@ use gff::read_gff_lines;
 use population::Population;
 use config::Config;
 use std::collections::HashMap;
+use rand::rngs::StdRng;
 
 #[derive(Parser, Debug)]
 #[command(name = "pansimnuc")]

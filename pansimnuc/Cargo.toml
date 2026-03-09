@@ -8,5 +8,8 @@ clap = { version = "4.5.32", features = ["derive"] }
 noodles-fasta = "0.60.0"
 noodles-gff = "0.55.0"
 rayon = "1.5"
-ndarray = { version = "0.15.6", features = ["rayon"] }
 logsumexp = "0.1"
+rustc-hash = "2.1.1"
+rand = "0.10.0"
+rand_distr = "0.6.0"
+statrs = "0.16.0"
