@@ -51,35 +51,34 @@ pub struct DoubleExponential {
     exp1: Exp<f64>,
     exp2: Exp<f64>,
     cutoff: f64,
-    uniform: Uniform<f64>,
+    weight: f64,
 }
 
 impl DoubleExponential {
-    pub fn new(lambda1: f64, lambda2: f64, cutoff: f64) -> Result<Self, DistributionError> {
+    pub fn new(lambda1: f64, lambda2: f64, cutoff: f64, weight: f64) -> Result<Self, DistributionError> {
         if lambda1 <= 0.0 || lambda2 <= 0.0 || cutoff < 0.0 || cutoff > 1.0 {
             return Err(DistributionError::InvalidDoubleExpParameters);
         }
         
         let exp1 = Exp::new(lambda1).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
         let exp2 = Exp::new(lambda2).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
-        let uniform = Uniform::new(0.0, 1.0).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
+        // TODO generate uniform distribution before this that is passed between samples, avoiding regenerating each time
+        //let uniform = Uniform::new(0.0, 1.0).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
         
-        Ok(Self { exp1, exp2, cutoff, uniform })
+        Ok(Self { exp1, exp2, cutoff, weight })
     }
-    
+
+    pub fn weight<R: Rng>(&mut self, uniform: Uniform<f64>, rng: &mut R) {
+        self.weight = uniform.sample(rng);
+    }
+
     pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
-        let weight: f64 = self.uniform.sample(rng);
-        
-        if weight <= self.cutoff {
+        if self.weight <= self.cutoff {
             // Higher selected gene
             self.exp2.sample(rng)
         } else {
-            // Negative selection - sample until <= 1.0, then negate
-            let mut sample = self.exp1.sample(rng);
-            while sample > 1.0 {
-                sample = self.exp1.sample(rng);
-            }
-            -sample
+            // lower selected gene
+            self.exp1.sample(rng)
         }
     }
 }
@@ -114,7 +113,7 @@ impl Distribution {
     }
 
     pub fn new_double_exp(lambda1: f64, lambda2: f64, cutoff: f64) -> Result<Self, DistributionError> {
-        DoubleExponential::new(lambda1, lambda2, cutoff)
+        DoubleExponential::new(lambda1, lambda2, cutoff, 0.0)
             .map(Distribution::DoubleExp)
     }
 
