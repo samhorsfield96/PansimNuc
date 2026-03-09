@@ -8,6 +8,7 @@ use gff::read_gff_lines;
 use population::Population;
 use config::Config;
 use std::collections::HashMap;
+use crate::mutation::Distribution;
 use rand::rngs::StdRng;
 
 #[derive(Parser, Debug)]
@@ -49,9 +50,17 @@ fn main() {
 
 				if let (Some(n_individuals_str), Some(n_generation_str)) = (configuration.get("population.n_individuals"), configuration.get("population.n_generations")) {
 					
+					// generate distributions to draw mutations from
+					// placeholder for mutation map, which will be added to each NucElement in the genome
+        			let exon_dist = Distribution::new_double_exp(0.0, 1.0, 0.5).expect("Failed to create double exponential distribution for exon features");
+        			let intron_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
+        			let intergenic_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
+
+					let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
+
 					// generate initial population
 					let n_individuals: usize = n_individuals_str.parse::<usize>().expect("n_individuals must be an integer.");
-					let mut population = Population::new(features, n_individuals);
+					let mut population = Population::new(features, n_individuals, site_mutation_dists);
 
 					let n_generation: usize = n_generation_str.parse::<usize>().expect("n_generation must be an integer.");
 				}

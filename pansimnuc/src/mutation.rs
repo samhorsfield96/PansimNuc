@@ -20,7 +20,7 @@ use rand::seq::IteratorRandom;
 use rand_distr::{Normal, Uniform, Exp, Distribution as RandDist};
 use std::fmt;
 use statrs::distribution::Poisson;
-use crate::population::NucElement;
+use crate::mutation::Distribution;
 
 #[derive(Debug)]
 pub enum DistributionError {
@@ -131,14 +131,14 @@ impl Distribution {
     }
 }
 
-pub struct MutationMap<'a> {
-    distribution: &'a mut Distribution,
+pub struct MutationMap {
+    pub distribution_id: usize,
     data: [FxHashMap<usize, f64>; 4],
 }
 
-impl <'a>MutationMap<'a> {
-    pub fn new(distribution: &'a mut Distribution) -> Self {
-        Self {distribution, data: std::array::from_fn(|_| FxHashMap::default()) }
+impl MutationMap {
+    pub fn new(distribution_id) -> Self {
+        Self {distribution_id, data: std::array::from_fn(|_| FxHashMap::default()) }
     }
 
     fn insert(&mut self, level: u8, key: usize, value: f64) {
@@ -147,9 +147,9 @@ impl <'a>MutationMap<'a> {
 
     fn get(&self, level: u8, key: usize) -> Option<&f64> {
         self.data[level as usize].get(&key)
-    }
+    }    
 
-    fn mutate (& mut self, poisson: &mut Poisson, core_vec: &Vec<Vec<u8>>, seq: &mut Vec<u8>) {
+    fn mutate (& mut self, poisson: &mut Poisson, core_vec: &Vec<Vec<u8>>, seq: &mut Vec<u8>, distribution: &Distribution) {
         // thread-specific random number generator
         let mut thread_rng = rand::thread_rng();
 
@@ -175,7 +175,7 @@ impl <'a>MutationMap<'a> {
                 // value exists
                 selection_coefficient = *coeff;
             } else {
-                selection_coefficient = self.distribution.sample(&mut thread_rng);
+                selection_coefficient = distribution.sample(&mut thread_rng);
             }
 
             // set value in place

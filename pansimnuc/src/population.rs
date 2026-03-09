@@ -3,47 +3,44 @@ use crate::mutation::MutationMap;
 use crate::mutation::Distribution;
 use std::collections::HashMap;
 
-pub struct NucElement<'a> {
+pub struct NucElement {
     pub seqname: String,
     pub feature_id: usize,
     pub feature_type: String,
     pub seq: Vec<u8>,
-    pub mutation_map: MutationMap<'a>
+    pub mutation_map: MutationMap
 }
 
-pub struct Genome<'a> {
+pub struct Genome {
     pub identifier: String,
     pub parent: String,
-    pub seq: Vec<NucElement<'a>>
+    pub seq: Vec<NucElement>
 }
 
-pub struct Population<'a>{
+pub struct Population{
     pub generation: usize,
-    pub pop: Vec<Genome<'a>>,
-    pub core_vec: Vec<Vec<u8>>
+    pub pop: Vec<Genome>,
+    pub core_vec: Vec<Vec<u8>>,
+    pub distributions: Vec<Distribution>
 }
 
-impl<'a> Population<'a> {
+impl Population {
     pub fn new(
         root: HashMap<String, Vec<FeaturePos>>,
         n_genomes: usize,
+        distributions: Vec<Distribution>
         // TODO add way of specifying number of mutation distribution types, which can then be added by reference to mutation_map
     ) -> Self {
         let mut population: Vec<Genome> = Vec::new();
-
-        // placeholder for mutation map, which will be added to each NucElement in the genome
-        let mut exon_dist = Distribution::new_double_exp(0.0, 1.0, 0.5).expect("Failed to create double exponential distribution for exon features");
-        let mut intron_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
-        let mut intergenic_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
 
         for i in 0..n_genomes {
             let mut genome: Vec<NucElement> = Vec::new();
             for (seqname, features) in &root {
                 for feature in features {
-                    let distribution = match feature.feature_type.as_str() {
-                        "exon" => &mut exon_dist,
-                        "intron" => &mut intron_dist,
-                        "intergenic" => &mut intergenic_dist,
+                    let distribution_id:usize = match feature.feature_type.as_str() {
+                        "exon" => 0,
+                        "intron" => 1,
+                        "intergenic" => 2,
                         _ => panic!("Unknown feature type: {}", feature.feature_type),
                     };
 
@@ -52,7 +49,7 @@ impl<'a> Population<'a> {
                         feature_id: feature.feature_id,
                         feature_type: feature.feature_type.clone(),
                         seq: feature.seq.clone(),
-                        mutation_map: MutationMap::new(distribution),
+                        mutation_map: MutationMap::new(distribution_id),
                     });
                 }
             }
@@ -69,7 +66,8 @@ impl<'a> Population<'a> {
         Self {
             generation: 0,
             pop: population,
-            core_vec
+            core_vec,
+            distributions
         }
     }
 }
@@ -106,7 +104,13 @@ mod tests {
         root.insert("chr1".to_string(), features);
 
         let n_genomes = 3;
-        let pop = Population::new(root, n_genomes);
+        let exon_dist = Distribution::new_double_exp(0.0, 1.0, 0.5).expect("Failed to create double exponential distribution for exon features");
+        let intron_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
+        let intergenic_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
+
+        let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
+
+        let pop = Population::new(root, n_genomes, site_mutation_dists);
 
         // Check population was created correctly
         assert_eq!(pop.generation, 0);
