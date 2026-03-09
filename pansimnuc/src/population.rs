@@ -8,6 +8,7 @@ use rayon::prelude::*;
 use logsumexp::LogSumExp;
 use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
 use rand::rngs::StdRng;
+use rand::{SeedableRng};
 
 #[derive(Clone)]
 pub struct NucElement {
@@ -39,7 +40,8 @@ impl Population {
             2 => b'C',
             4 => b'G',
             8 => b'T',
-            _ => b'N',
+            16 => b'N',
+            _ => panic!("Invalid base encoding: {}", base),
         }
     }
 
@@ -47,44 +49,47 @@ impl Population {
         root: HashMap<String, Vec<FeaturePos>>,
         n_genomes: usize,
         selection_dists: Vec<MutationDistribution>,
-        mu_dists: Vec<MutationDistribution>
+        mu_dists: Vec<MutationDistribution>,
+        rng: &mut StdRng,
     ) -> Self {
         let mut population: Vec<Genome> = Vec::new();
 
-        for i in 0..n_genomes {
-            let mut genome: Vec<NucElement> = Vec::new();
-            for (seqname, features) in &root {
-                for feature in features {
-                    
-                    // TODO change this so that can specify different mutation rates per site
-                    // also add separate TE compartment
-                    let selection_dist_id:usize = match feature.feature_type.as_str() {
-                        "exon" => 0,
-                        "intron" => 1,
-                        "intergenic" => 2,
-                        _ => panic!("Unknown feature type: {}", feature.feature_type),
-                    };
-                    
-                    let mu_dist_id:usize = match feature.feature_type.as_str() {
-                        "exon" => 0,
-                        "intron" => 1,
-                        "intergenic" => 2,
-                        _ => panic!("Unknown feature type: {}", feature.feature_type),
-                    };
+        let mut genome: Vec<NucElement> = Vec::new();
+        for (seqname, features) in &root {
+            for feature in features {
+                
+                // TODO change this so that can specify different mutation rates per site
+                // also add separate TE compartment
+                let selection_dist_id:usize = match feature.feature_type.as_str() {
+                    "exon" => 0,
+                    "intron" => 1,
+                    "intergenic" => 2,
+                    _ => panic!("Unknown feature type: {}", feature.feature_type),
+                };
+                
+                let mu_dist_id:usize = match feature.feature_type.as_str() {
+                    "exon" => 0,
+                    "intron" => 1,
+                    "intergenic" => 2,
+                    _ => panic!("Unknown feature type: {}", feature.feature_type),
+                };
 
-                    genome.push(NucElement {
-                        seqname: seqname.clone(),
-                        feature_id: feature.feature_id,
-                        feature_type: feature.feature_type.clone(),
-                        seq: feature.seq.clone(),
-                        mutation_map: MutationMap::new(selection_dist_id, mu_dist_id),
-                    });
-                }
+                genome.push(NucElement {
+                    seqname: seqname.clone(),
+                    feature_id: feature.feature_id,
+                    feature_type: feature.feature_type.clone(),
+                    seq: feature.seq.clone(),
+                    mutation_map: MutationMap::new(selection_dist_id, mu_dist_id, &feature.seq, &selection_dists[selection_dist_id], rng),
+                });
             }
+        }
+
+        // copy whole genome to start
+        for i in 0..n_genomes {
             population.push(Genome {
                 identifier: format!("{}", i),
                 parent: "root".to_string(),
-                seq: genome,
+                seq: genome.clone(),
             });
         }
         
@@ -122,12 +127,13 @@ impl Population {
                 let mut log_sum = 0.0;
                 for element in &genome.seq {
                     for (site, allele) in element.seq.iter().enumerate() {
+                        let allele_shifted = 1 >> allele;
                         if let Some(coeff) = element.mutation_map.get(*allele, site) {
                             log_sum += coeff;
                         } else {
                             panic!(
-                                "Failed to generate selection coefficient for genome {} allele {} at site {}",
-                                genome.identifier, allele, site
+                                "Failed to generate selection coefficient for genome {} allele {} (shifted {}) at site {}",
+                                genome.identifier, allele, allele_shifted, site
                             );
                         }
                     }
@@ -250,8 +256,8 @@ mod tests {
         let intergenic_mu = MutationDistribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
         let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
 
-
-        let pop = Population::new(root, n_genomes, site_mutation_dists, site_mutation_mus);
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let pop = Population::new(root, n_genomes, site_mutation_dists, site_mutation_mus, &mut rng);
 
         // Check population was created correctly
         assert_eq!(pop.generation, 0);
@@ -305,7 +311,8 @@ mod tests {
             .expect("Failed to create uniform distribution for intergenic features");
         let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
 
-        let pop = Population::new(root, 1, site_mutation_dists, site_mutation_mus);
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let pop = Population::new(root, 1, site_mutation_dists, site_mutation_mus, &mut rng);
 
         let temp_path = std::env::temp_dir().join(format!(
             "pansimnuc_pop_{}.fasta",

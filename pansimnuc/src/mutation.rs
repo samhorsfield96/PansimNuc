@@ -14,6 +14,7 @@
 // ancestry that is held in parent/id? Or calculate edit distance? Probably will take too long
 
 use rustc_hash::FxHashMap;
+use rand::rngs::StdRng;
 use rand::{Rng};
 use rand::seq::IteratorRandom;
 use rand_distr::{Normal, Uniform, Exp, Distribution as RandDist};
@@ -145,16 +146,23 @@ pub struct MutationMap {
 }
 
 impl MutationMap {
-    pub fn new(selection_dist_id: usize, mu_dist_id: usize) -> Self {
-        Self {selection_dist_id, mu_dist_id, data: std::array::from_fn(|_| FxHashMap::default()) }
+    pub fn new(selection_dist_id: usize, mu_dist_id: usize, seq: &Vec<u8>, selection_dist: &Distribution, rng: &mut StdRng) -> Self {
+        let mut data = std::array::from_fn(|_| FxHashMap::default());
+        
+        for (site, allele) in seq.iter().enumerate() {
+            let allele_shifted = 1 >> *allele as usize;
+            data[allele_shifted].insert(site, selection_dist.sample(rng));
+        }
+
+        Self {selection_dist_id, mu_dist_id, data}
     }
 
     fn insert(&mut self, level: u8, key: usize, value: f64) {
-        self.data[level as usize].insert(key, value);
+        self.data[1 >> level as usize].insert(key, value);
     }
 
     pub fn get(&self, level: u8, key: usize) -> Option<&f64> {
-        self.data[level as usize].get(&key)
+        self.data[1 >> level as usize].get(&key)
     }    
 
     pub fn mutate (& mut self, core_vec: &Vec<Vec<u8>>, seq: &mut Vec<u8>, selection_dist: &Distribution, mu_dist: &Distribution) {
@@ -172,7 +180,7 @@ impl MutationMap {
             // sample new site to mutate
             let value = seq[mutant_site];
             
-            let values = &core_vec[value as usize];
+            let values = &core_vec[1 >> value as usize];
 
             // sample new allele
             let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
@@ -285,13 +293,20 @@ mod tests {
 
     #[test]
     fn test_mutation_map_creation() {
-        let map = MutationMap::new(1, 1);
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
+        let test_seq = vec![16, 1, 4, 8, 16, 1, 2, 4];
+
+        let map = MutationMap::new(1, 1, &test_seq,  &test_dist, &mut rng);
         assert_eq!(map.selection_dist_id, 1);
     }
 
     #[test]
     fn test_mutation_map_insert_and_get() {
-        let mut map = MutationMap::new(0, 0);
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
+        let test_seq = vec![16, 1, 4, 8, 16, 1, 2, 4];
+        let mut map = MutationMap::new(0, 0, &test_seq, &test_dist, &mut rng);
         
         map.insert(0, 100, 0.5);
         let value = map.get(0, 100);
@@ -303,7 +318,10 @@ mod tests {
 
     #[test]
     fn test_mutation_map_multiple_levels() {
-        let mut map = MutationMap::new(0, 0);
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
+        let test_seq = vec![16, 1, 4, 8, 16, 1, 2, 4];
+        let mut map = MutationMap::new(0, 0, &test_seq, &test_dist, &mut rng);
         
         map.insert(0, 10, 0.1);
         map.insert(1, 10, 0.2);
