@@ -32,26 +32,27 @@ impl<'a> Population<'a> {
         let mut population: Vec<Genome> = Vec::new();
 
         // placeholder for mutation map, which will be added to each NucElement in the genome
-        let exon_dist = Distribution::new_double_exp(0.0, 1.0, 0.5).expect("Failed to create double exponential distribution for exon features");
-        let intron_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
-        let intergenic_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
+        let mut exon_dist = Distribution::new_double_exp(0.0, 1.0, 0.5).expect("Failed to create double exponential distribution for exon features");
+        let mut intron_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
+        let mut intergenic_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
 
         for i in 0..n_genomes {
             let mut genome: Vec<NucElement> = Vec::new();
             for (seqname, features) in &root {
                 for feature in features {
                     let distribution = match feature.feature_type.as_str() {
-                        "exon" => exon_dist,
-                        "intron" => intron_dist,
-                        "intergenic" => intergenic_dist,
+                        "exon" => &mut exon_dist,
+                        "intron" => &mut intron_dist,
+                        "intergenic" => &mut intergenic_dist,
                         _ => panic!("Unknown feature type: {}", feature.feature_type),
                     };
 
                     genome.push(NucElement {
-                        seqname: feature.seqname.clone(),
+                        seqname: seqname.clone(),
                         feature_id: feature.feature_id,
                         feature_type: feature.feature_type.clone(),
-                        mutation_map: MutationMap::new(distribution, &mut feature.seq),
+                        seq: feature.seq.clone(),
+                        mutation_map: MutationMap::new(distribution),
                     });
                 }
             }

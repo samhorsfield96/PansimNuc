@@ -18,11 +18,11 @@ pub struct FeaturePos {
 fn encode_dna(seq: &str) -> Vec<u8> {
     seq.bytes()
         .map(|b| match b {
-            b'A' => 0,
-            b'C' => 1,
-            b'G' => 2,
-            b'T' => 3,
-            _ => 4,
+            b'A' => 1,
+            b'C' => 2,
+            b'G' => 4,
+            b'T' => 8,
+            _ => 0,
         })
         .collect()
 }

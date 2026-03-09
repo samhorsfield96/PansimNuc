@@ -134,12 +134,11 @@ impl Distribution {
 pub struct MutationMap<'a> {
     distribution: &'a mut Distribution,
     data: [FxHashMap<usize, f64>; 4],
-    element: &'a mut NucElement,
 }
 
 impl <'a>MutationMap<'a> {
-    pub fn new(distribution: &'a mut Distribution, element: &'a mut NucElement) -> Self {
-        Self {distribution, data: std::array::from_fn(|_| FxHashMap::default()), element }
+    pub fn new(distribution: &'a mut Distribution) -> Self {
+        Self {distribution, data: std::array::from_fn(|_| FxHashMap::default()) }
     }
 
     fn insert(&mut self, level: u8, key: usize, value: f64) {
@@ -150,11 +149,11 @@ impl <'a>MutationMap<'a> {
         self.data[level as usize].get(&key)
     }
 
-    fn mutate (& mut self, poisson: &mut Poisson, core_vec: &Vec<Vec<u8>>) {
+    fn mutate (& mut self, poisson: &mut Poisson, core_vec: &Vec<Vec<u8>>, seq: &mut Vec<u8>) {
         // thread-specific random number generator
         let mut thread_rng = rand::thread_rng();
 
-        let seq_len = self.element.seq.len();
+        let seq_len = seq.len();
 
         // sample from Poisson distribution for number of sites to mutate in this isolate
         let n_sites = poisson.sample(&mut thread_rng) as usize;
@@ -163,7 +162,7 @@ impl <'a>MutationMap<'a> {
         // iterate for number of mutations required to reach mutation rate
         for mutant_site in sampled_sites {
             // sample new site to mutate
-            let value = self.element.seq[mutant_site];
+            let value = seq[mutant_site];
             
             let values = &core_vec[1 >> value];
 
@@ -180,7 +179,7 @@ impl <'a>MutationMap<'a> {
             }
 
             // set value in place
-            self.element.seq[mutant_site] = *new_allele;
+            seq[mutant_site] = *new_allele;
             self.insert(*new_allele, mutant_site, selection_coefficient);
 
         }
