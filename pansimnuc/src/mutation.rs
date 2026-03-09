@@ -182,3 +182,127 @@ impl MutationMap {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    #[test]
+    fn test_normal_distribution_creation() {
+        let dist = Distribution::new_normal(0.0, 1.0);
+        assert!(dist.is_ok());
+    }
+
+    #[test]
+    fn test_uniform_distribution_creation() {
+        let dist = Distribution::new_uniform(-1.0, 1.0);
+        assert!(dist.is_ok());
+    }
+
+    #[test]
+    fn test_uniform_distribution_invalid_range() {
+        let dist = Distribution::new_uniform(1.0, 1.0);
+        assert!(dist.is_err());
+        
+        let dist2 = Distribution::new_uniform(2.0, 1.0);
+        assert!(dist2.is_err());
+    }
+
+    #[test]
+    fn test_exp_distribution_creation() {
+        let dist = Distribution::new_exp(1.5);
+        assert!(dist.is_ok());
+    }
+
+    #[test]
+    fn test_double_exp_distribution_creation() {
+        let dist = Distribution::new_double_exp(0.5, 2.0, 0.3);
+        assert!(dist.is_ok());
+    }
+
+    #[test]
+    fn test_double_exp_distribution_invalid_params() {
+        // Invalid lambda1
+        let dist1 = Distribution::new_double_exp(-0.5, 2.0, 0.3);
+        assert!(dist1.is_err());
+        
+        // Invalid lambda2
+        let dist2 = Distribution::new_double_exp(0.5, 0.0, 0.3);
+        assert!(dist2.is_err());
+        
+        // Invalid cutoff
+        let dist3 = Distribution::new_double_exp(0.5, 2.0, 1.5);
+        assert!(dist3.is_err());
+        
+        let dist4 = Distribution::new_double_exp(0.5, 2.0, -0.1);
+        assert!(dist4.is_err());
+    }
+
+    #[test]
+    fn test_distribution_sampling() {
+        let mut rng = StdRng::seed_from_u64(42);
+        
+        let normal = Distribution::new_normal(0.0, 1.0).unwrap();
+        let sample = normal.sample(&mut rng);
+        assert!(sample.is_finite());
+        
+        let uniform = Distribution::new_uniform(-1.0, 1.0).unwrap();
+        let sample = uniform.sample(&mut rng);
+        assert!(sample >= -1.0 && sample <= 1.0);
+        
+        let exp = Distribution::new_exp(1.0).unwrap();
+        let sample = exp.sample(&mut rng);
+        assert!(sample >= 0.0);
+    }
+
+    #[test]
+    fn test_mutation_map_creation() {
+        let map = MutationMap::new(1);
+        assert_eq!(map.distribution_id, 1);
+    }
+
+    #[test]
+    fn test_mutation_map_insert_and_get() {
+        let mut map = MutationMap::new(0);
+        
+        map.insert(0, 100, 0.5);
+        let value = map.get(0, 100);
+        assert_eq!(value, Some(&0.5));
+        
+        let missing = map.get(1, 100);
+        assert_eq!(missing, None);
+    }
+
+    #[test]
+    fn test_mutation_map_multiple_levels() {
+        let mut map = MutationMap::new(0);
+        
+        map.insert(0, 10, 0.1);
+        map.insert(1, 10, 0.2);
+        map.insert(2, 10, 0.3);
+        map.insert(3, 10, 0.4);
+        
+        assert_eq!(map.get(0, 10), Some(&0.1));
+        assert_eq!(map.get(1, 10), Some(&0.2));
+        assert_eq!(map.get(2, 10), Some(&0.3));
+        assert_eq!(map.get(3, 10), Some(&0.4));
+    }
+
+    #[test]
+    fn test_double_exponential_weight_update() {
+        let mut double_exp = DoubleExponential::new(1.0, 2.0, 0.5, 0.0).unwrap();
+        let uniform = Uniform::new(0.0, 1.0);
+        let mut rng = StdRng::seed_from_u64(123);
+        
+        let old_weight = double_exp.weight;
+        double_exp.weight(&uniform, &mut rng);
+        let new_weight = double_exp.weight;
+        
+        // Weight should be in valid range
+        assert!(new_weight >= 0.0 && new_weight <= 1.0);
+        // With seeded RNG, weight should have changed (unless by coincidence)
+        assert_ne!(old_weight, new_weight);
+    }
+}
+
