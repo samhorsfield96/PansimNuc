@@ -85,7 +85,7 @@ mod tests {
             FeaturePos {
                 seqname: "chr1".to_string(),
                 feature_id: 0,
-                feature_type: "gene".to_string(),
+                feature_type: "exon".to_string(),
                 start: 100,
                 end: 200,
                 strand: true,
@@ -94,7 +94,7 @@ mod tests {
             FeaturePos {
                 seqname: "chr1".to_string(),
                 feature_id: 1,
-                feature_type: "gene".to_string(),
+                feature_type: "intron".to_string(),
                 start: 300,
                 end: 400,
                 strand: false,
@@ -104,7 +104,7 @@ mod tests {
         root.insert("chr1".to_string(), features);
 
         let n_genomes = 3;
-        let exon_dist = Distribution::new_double_exp(0.0, 1.0, 0.5).expect("Failed to create double exponential distribution for exon features");
+        let exon_dist = Distribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
         let intron_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
         let intergenic_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
 
@@ -125,12 +125,12 @@ mod tests {
             // Check first feature
             assert_eq!(genome.seq[0].seqname, "chr1");
             assert_eq!(genome.seq[0].feature_id, 0);
-            assert_eq!(genome.seq[0].feature_type, "gene");
+            assert_eq!(genome.seq[0].feature_type, "exon");
 
             // Check second feature
             assert_eq!(genome.seq[1].seqname, "chr1");
             assert_eq!(genome.seq[1].feature_id, 1);
-            assert_eq!(genome.seq[1].feature_type, "gene");
+            assert_eq!(genome.seq[1].feature_type, "intron");
         }
     }
 }
