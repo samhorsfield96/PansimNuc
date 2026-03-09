@@ -22,7 +22,7 @@ fn encode_dna(seq: &str) -> Vec<u8> {
             b'C' => 2,
             b'G' => 4,
             b'T' => 8,
-            _ => 0,
+            _ => 16, // N or any other non-ACGT character
         })
         .collect()
 }
