@@ -56,11 +56,16 @@ fn main() {
         			let intron_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
         			let intergenic_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
 
+					let exon_mu = Distribution::new_uniform(0.0, 1.0).expect("Failed to create double exponential distribution for exon features");
+        			let intron_mu = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
+        			let intergenic_mu = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
+
 					let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
+					let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
 
 					// generate initial population
 					let n_individuals: usize = n_individuals_str.parse::<usize>().expect("n_individuals must be an integer.");
-					let mut population = Population::new(features, n_individuals, site_mutation_dists);
+					let mut population = Population::new(features, n_individuals, site_mutation_dists, site_mutation_mus);
 
 					let n_generation: usize = n_generation_str.parse::<usize>().expect("n_generation must be an integer.");
 				}
