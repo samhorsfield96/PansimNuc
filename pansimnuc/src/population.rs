@@ -1,43 +1,57 @@
 use crate::gff::FeaturePos;
 use crate::mutation::MutationMap;
+use crate::mutation::Distribution;
 use std::collections::HashMap;
 
-pub struct NucElement {
+pub struct NucElement<'a> {
     pub seqname: String,
     pub feature_id: usize,
     pub feature_type: String,
-    seq: Vec<u8>,
-    mutations: MutationMap<u8>,
+    pub seq: Vec<u8>,
+    pub mutation_map: MutationMap<'a>
 }
 
-pub struct Genome {
+pub struct Genome<'a> {
     pub identifier: String,
     pub parent: String,
-    pub seq: Vec<NucElement>
+    pub seq: Vec<NucElement<'a>>
 }
 
-pub struct Population{
+pub struct Population<'a>{
     pub generation: usize,
-    pub pop: Vec<Genome>
+    pub pop: Vec<Genome<'a>>,
+    pub core_vec: Vec<Vec<u8>>
 }
 
-impl Population {
+impl<'a> Population<'a> {
     pub fn new(
         root: HashMap<String, Vec<FeaturePos>>,
         n_genomes: usize,
+        // TODO add way of specifying number of mutation distribution types, which can then be added by reference to mutation_map
     ) -> Self {
         let mut population: Vec<Genome> = Vec::new();
+
+        // placeholder for mutation map, which will be added to each NucElement in the genome
+        let exon_dist = Distribution::new_double_exp(0.0, 1.0, 0.5).expect("Failed to create double exponential distribution for exon features");
+        let intron_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
+        let intergenic_dist = Distribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
 
         for i in 0..n_genomes {
             let mut genome: Vec<NucElement> = Vec::new();
             for (seqname, features) in &root {
                 for feature in features {
+                    let distribution = match feature.feature_type.as_str() {
+                        "exon" => exon_dist,
+                        "intron" => intron_dist,
+                        "intergenic" => intergenic_dist,
+                        _ => panic!("Unknown feature type: {}", feature.feature_type),
+                    };
+
                     genome.push(NucElement {
                         seqname: feature.seqname.clone(),
                         feature_id: feature.feature_id,
                         feature_type: feature.feature_type.clone(),
-                        seq: feature.seq.clone(),
-                        mutations: MutationMap::new(),
+                        mutation_map: MutationMap::new(distribution, &mut feature.seq),
                     });
                 }
             }
@@ -47,10 +61,14 @@ impl Population {
                 seq: genome,
             });
         }
+        
+        let core_vec: Vec<Vec<u8>> =
+            vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
 
         Self {
             generation: 0,
-            pop: population
+            pop: population,
+            core_vec
         }
     }
 }
