@@ -2,6 +2,8 @@ use crate::gff::FeaturePos;
 use crate::mutation::MutationMap;
 use crate::mutation::Distribution as MutationDistribution;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 use rayon::prelude::*;
 use logsumexp::LogSumExp;
 use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
@@ -31,6 +33,16 @@ pub struct Population{
 }
 
 impl Population {
+    fn decode_base(base: u8) -> u8 {
+        match base {
+            1 => b'A',
+            2 => b'C',
+            4 => b'G',
+            8 => b'T',
+            _ => b'N',
+        }
+    }
+
     pub fn new(
         root: HashMap<String, Vec<FeaturePos>>,
         n_genomes: usize,
@@ -157,12 +169,49 @@ impl Population {
         self.pop = new_pop;
         self.generation += 1;
     }
+
+
+    pub fn write_fasta(&self, output_path: &str) -> io::Result<()> {
+        let file = File::create(output_path)?;
+        let mut writer = BufWriter::new(file);
+
+        for genome in &self.pop {
+            writeln!(
+                writer,
+                ">{id} parent={parent} generation={generation}",
+                id = genome.identifier,
+                parent = genome.parent,
+                generation = self.generation
+            )?;
+
+            let mut wrapped_line_len = 0usize;
+            for element in &genome.seq {
+                for &base in &element.seq {
+                    writer.write_all(&[Self::decode_base(base)])?;
+                    wrapped_line_len += 1;
+
+                    if wrapped_line_len == 80 {
+                        writer.write_all(b"\n")?;
+                        wrapped_line_len = 0;
+                    }
+                }
+            }
+
+            if wrapped_line_len > 0 {
+                writer.write_all(b"\n")?;
+            }
+        }
+
+        writer.flush()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::gff::FeaturePos;
+    use std::fs;
+    use std::io::Read;
 
     #[test]
     fn test_population_new() {
@@ -224,5 +273,61 @@ mod tests {
             assert_eq!(genome.seq[1].feature_id, 1);
             assert_eq!(genome.seq[1].feature_type, "intron");
         }
+    }
+
+    #[test]
+    fn test_write_fasta_decodes_nucleotides() {
+        let mut root = HashMap::new();
+        let features = vec![FeaturePos {
+            seqname: "chr1".to_string(),
+            feature_id: 0,
+            feature_type: "exon".to_string(),
+            start: 0,
+            end: 4,
+            strand: true,
+            seq: vec![1, 2, 4, 8],
+        }];
+        root.insert("chr1".to_string(), features);
+
+        let exon_dist = MutationDistribution::new_double_exp(0.5, 2.0, 0.3)
+            .expect("Failed to create double exponential distribution for exon features");
+        let intron_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create uniform distribution for intron features");
+        let intergenic_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create uniform distribution for intergenic features");
+        let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
+
+        let exon_mu = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create double exponential distribution for exon features");
+        let intron_mu = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create uniform distribution for intron features");
+        let intergenic_mu = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create uniform distribution for intergenic features");
+        let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
+
+        let pop = Population::new(root, 1, site_mutation_dists, site_mutation_mus);
+
+        let temp_path = std::env::temp_dir().join(format!(
+            "pansimnuc_pop_{}.fasta",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time before UNIX_EPOCH")
+                .as_nanos()
+        ));
+        let output_path = temp_path.to_string_lossy().into_owned();
+
+        pop.write_fasta(&output_path)
+            .expect("failed to write test FASTA file");
+
+        let mut content = String::new();
+        fs::File::open(&output_path)
+            .expect("failed to open test FASTA file")
+            .read_to_string(&mut content)
+            .expect("failed to read test FASTA file");
+
+        assert!(content.contains(">0 parent=root generation=0"));
+        assert!(content.contains("ACGT"));
+
+        let _ = fs::remove_file(output_path);
     }
 }

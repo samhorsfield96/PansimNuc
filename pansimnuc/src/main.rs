@@ -95,6 +95,18 @@ fn main() {
 						population.next_generation(sampled_indices);
 
 					}
+
+					let output_fasta = configuration
+						.get("output.fasta_file")
+						.cloned()
+						.unwrap_or_else(|| "final_population.fasta".to_string());
+
+					if let Err(err) = population.write_fasta(&output_fasta) {
+						eprintln!("Failed to write final population FASTA file: {err}");
+						std::process::exit(1);
+					}
+
+					println!("Wrote final population FASTA: {}", output_fasta);
 				}
 			}
 			Err(err) => {
