@@ -129,7 +129,7 @@ impl Population {
                     &self.mu_dists[element.mutation_map.mu_dist_id],);
             }
         }
-    }
+    }   
 
     // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights
     pub fn sample_individuals (&self, rng: &mut StdRng) -> Vec<usize> {
@@ -366,5 +366,60 @@ mod tests {
         assert!(content.contains("ACGT"));
 
         let _ = fs::remove_file(genome_output_path);
+    }
+
+    #[test]
+    fn test_mutate_changes_sequence_and_mutation_map() {
+        let mut root = HashMap::new();
+        let features = vec![FeaturePos {
+            seqname: "chr1".to_string(),
+            feature_id: 0,
+            feature_type: "exon".to_string(),
+            start: 0,
+            end: 4,
+            strand: true,
+            seq: vec![1, 2, 4, 8],
+        }];
+        root.insert("chr1".to_string(), features);
+
+        let exon_selection_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create exon selection distribution");
+        let intron_selection_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create intron selection distribution");
+        let intergenic_selection_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create intergenic selection distribution");
+        let site_mutation_dists = vec![
+            exon_selection_dist,
+            intron_selection_dist,
+            intergenic_selection_dist,
+        ];
+        let force_mutation_dist = MutationDistribution::new_poisson(100.0)
+            .expect("failed to create mutation distribution");
+        let intron_mu_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create intron mutation distribution");
+        let intergenic_mu_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create intergenic mutation distribution");
+        let site_mutation_mus = vec![force_mutation_dist, intron_mu_dist, intergenic_mu_dist];
+
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut pop = Population::new(root, 1, site_mutation_dists, site_mutation_mus, &mut rng);
+
+        let original_seq = pop.pop[0].seq[0].seq.clone();
+        let original_map = pop.pop[0].seq[0].mutation_map.clone();
+
+        pop.mutate();
+
+        let mutated_element = &pop.pop[0].seq[0];
+        assert_ne!(mutated_element.seq, original_seq);
+
+        for (site, (&old_allele, &new_allele)) in original_seq
+            .iter()
+            .zip(mutated_element.seq.iter())
+            .enumerate()
+        {
+            assert_ne!(new_allele, old_allele);
+            assert!(original_map.get(new_allele, site).is_none());
+            assert!(mutated_element.mutation_map.get(new_allele, site).is_some());
+        }
     }
 }
