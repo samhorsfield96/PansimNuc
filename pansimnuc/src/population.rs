@@ -176,35 +176,47 @@ impl Population {
         self.generation += 1;
     }
 
-
+    // TODO ensure file written in different chromosomes, and check sequences are mutating
     pub fn write_fasta(&self, output_path: &str) -> io::Result<()> {
         let file = File::create(output_path)?;
         let mut writer = BufWriter::new(file);
 
         for genome in &self.pop {
-            writeln!(
-                writer,
-                ">{id} parent={parent} generation={generation}",
-                id = genome.identifier,
-                parent = genome.parent,
-                generation = self.generation
-            )?;
-
-            let mut wrapped_line_len = 0usize;
-            for element in &genome.seq {
-                for &base in &element.seq {
-                    writer.write_all(&[Self::decode_base(base)])?;
-                    wrapped_line_len += 1;
-
-                    if wrapped_line_len == 80 {
-                        writer.write_all(b"\n")?;
-                        wrapped_line_len = 0;
-                    }
-                }
+            // Group element indices by seqname
+            let mut seqname_groups: HashMap<String, Vec<usize>> = HashMap::new();
+            for (idx, element) in genome.seq.iter().enumerate() {
+                seqname_groups.entry(element.seqname.clone())
+                    .or_insert_with(Vec::new)
+                    .push(idx);
             }
 
-            if wrapped_line_len > 0 {
-                writer.write_all(b"\n")?;
+            // Write each seqname group as a separate FASTA entry
+            for (seqname, indices) in seqname_groups {
+                writeln!(
+                    writer,
+                    ">{id}_{seqname} parent={parent} generation={generation}",
+                    id = genome.identifier,
+                    seqname = seqname,
+                    parent = genome.parent,
+                    generation = self.generation
+                )?;
+
+                let mut wrapped_line_len = 0usize;
+                for idx in indices {
+                    for &base in &genome.seq[idx].seq {
+                        writer.write_all(&[Self::decode_base(base)])?;
+                        wrapped_line_len += 1;
+
+                        if wrapped_line_len == 80 {
+                            writer.write_all(b"\n")?;
+                            wrapped_line_len = 0;
+                        }
+                    }
+                }
+
+                if wrapped_line_len > 0 {
+                    writer.write_all(b"\n")?;
+                }
             }
         }
 
@@ -332,7 +344,7 @@ mod tests {
             .read_to_string(&mut content)
             .expect("failed to read test FASTA file");
 
-        assert!(content.contains(">0 parent=root generation=0"));
+        assert!(content.contains(">0_chr1 parent=root generation=0"));
         assert!(content.contains("ACGT"));
 
         let _ = fs::remove_file(output_path);

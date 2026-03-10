@@ -146,23 +146,46 @@ pub struct MutationMap {
 }
 
 impl MutationMap {
+    fn allele_to_index(level: u8) -> usize {
+        // Convert one-hot allele code to zero-based index using bit shifting:
+        // 1 -> 0, 2 -> 1, 4 -> 2, 8 -> 3.
+        if level == 0 || (level & (level - 1)) != 0 {
+            panic!("Allele code must be one-hot (1, 2, 4, 8); got {}", level);
+        }
+
+        let mut idx = 0usize;
+        let mut value = level;
+        while value > 1 {
+            value >>= 1;
+            idx += 1;
+        }
+
+        if idx >= 4 {
+            panic!("Allele code out of range for A/C/G/T map: {}", level);
+        }
+
+        idx
+    }
+
     pub fn new(selection_dist_id: usize, mu_dist_id: usize, seq: &Vec<u8>, selection_dist: &Distribution, rng: &mut StdRng) -> Self {
         let mut data = std::array::from_fn(|_| FxHashMap::default());
         
         for (site, allele) in seq.iter().enumerate() {
-            let allele_shifted = 1 >> *allele as usize;
-            data[allele_shifted].insert(site, selection_dist.sample(rng));
+            let allele_index = Self::allele_to_index(*allele);
+            data[allele_index].insert(site, selection_dist.sample(rng));
         }
 
         Self {selection_dist_id, mu_dist_id, data}
     }
 
     fn insert(&mut self, level: u8, key: usize, value: f64) {
-        self.data[1 >> level as usize].insert(key, value);
+        let allele_index = Self::allele_to_index(level);
+        self.data[allele_index].insert(key, value);
     }
 
     pub fn get(&self, level: u8, key: usize) -> Option<&f64> {
-        self.data[1 >> level as usize].get(&key)
+        let allele_index = Self::allele_to_index(level);
+        self.data[allele_index].get(&key)
     }    
 
     pub fn mutate (& mut self, core_vec: &Vec<Vec<u8>>, seq: &mut Vec<u8>, selection_dist: &Distribution, mu_dist: &Distribution) {
@@ -180,7 +203,7 @@ impl MutationMap {
             // sample new site to mutate
             let value = seq[mutant_site];
             
-            let values = &core_vec[1 >> value as usize];
+            let values = &core_vec[Self::allele_to_index(value)];
 
             // sample new allele
             let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
@@ -295,7 +318,7 @@ mod tests {
     fn test_mutation_map_creation() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
         let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
-        let test_seq = vec![16, 1, 4, 8, 16, 1, 2, 4];
+        let test_seq = vec![1, 1, 4, 8, 2, 1, 2, 4];
 
         let map = MutationMap::new(1, 1, &test_seq,  &test_dist, &mut rng);
         assert_eq!(map.selection_dist_id, 1);
@@ -305,14 +328,14 @@ mod tests {
     fn test_mutation_map_insert_and_get() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
         let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
-        let test_seq = vec![16, 1, 4, 8, 16, 1, 2, 4];
+        let test_seq = vec![1, 1, 4, 8, 2, 1, 2, 4];
         let mut map = MutationMap::new(0, 0, &test_seq, &test_dist, &mut rng);
         
-        map.insert(0, 100, 0.5);
-        let value = map.get(0, 100);
+        map.insert(1, 100, 0.5);
+        let value = map.get(1, 100);
         assert_eq!(value, Some(&0.5));
         
-        let missing = map.get(1, 100);
+        let missing = map.get(2, 100);
         assert_eq!(missing, None);
     }
 
@@ -320,18 +343,22 @@ mod tests {
     fn test_mutation_map_multiple_levels() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
         let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
-        let test_seq = vec![16, 1, 4, 8, 16, 1, 2, 4];
+        let test_seq = vec![1, 1, 4, 8, 2, 1, 2, 4];
         let mut map = MutationMap::new(0, 0, &test_seq, &test_dist, &mut rng);
         
-        map.insert(0, 10, 0.1);
-        map.insert(1, 10, 0.2);
-        map.insert(2, 10, 0.3);
-        map.insert(3, 10, 0.4);
+        map.insert(1, 10, 0.1);
+        println!("1 maps to index {}\n", MutationMap::allele_to_index(1));
+        map.insert(2, 10, 0.2);
+        println!("2 maps to index {}\n", MutationMap::allele_to_index(2));
+        map.insert(4, 10, 0.3);
+        println!("4 maps to index {}\n", MutationMap::allele_to_index(4));
+        map.insert(8, 10, 0.4);
+        println!("8 maps to index {}\n", MutationMap::allele_to_index(8));
         
-        assert_eq!(map.get(0, 10), Some(&0.1));
-        assert_eq!(map.get(1, 10), Some(&0.2));
-        assert_eq!(map.get(2, 10), Some(&0.3));
-        assert_eq!(map.get(3, 10), Some(&0.4));
+        assert_eq!(map.get(1, 10), Some(&0.1));
+        assert_eq!(map.get(4, 10), Some(&0.3));
+        assert_eq!(map.get(2, 10), Some(&0.2));
+        assert_eq!(map.get(8, 10), Some(&0.4));
     }
 
     #[test]
