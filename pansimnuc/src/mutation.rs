@@ -142,13 +142,18 @@ impl Distribution {
 pub struct MutationMap {
     pub selection_dist_id: usize,
     pub mu_dist_id: usize,
-    data: [FxHashMap<usize, f64>; 4],
+    data: [FxHashMap<usize, f64>; 5],
 }
 
 impl MutationMap {
-    fn allele_to_index(level: u8) -> usize {
+    fn allele_to_index(level: u8) -> Option<usize> {
         // Convert one-hot allele code to zero-based index using bit shifting:
         // 1 -> 0, 2 -> 1, 4 -> 2, 8 -> 3.
+        // N (16) is represented at index 4.
+        if level == 16 {
+            return Some(4);
+        }
+
         if level == 0 || (level & (level - 1)) != 0 {
             panic!("Allele code must be one-hot (1, 2, 4, 8); got {}", level);
         }
@@ -164,14 +169,15 @@ impl MutationMap {
             panic!("Allele code out of range for A/C/G/T map: {}", level);
         }
 
-        idx
+        Some(idx)
     }
 
     pub fn new(selection_dist_id: usize, mu_dist_id: usize, seq: &Vec<u8>, selection_dist: &Distribution, rng: &mut StdRng) -> Self {
         let mut data = std::array::from_fn(|_| FxHashMap::default());
         
         for (site, allele) in seq.iter().enumerate() {
-            let allele_index = Self::allele_to_index(*allele);
+            let allele_index = Self::allele_to_index(*allele)
+                .expect("Allele code conversion failed while building mutation map");
             data[allele_index].insert(site, selection_dist.sample(rng));
         }
 
@@ -179,12 +185,14 @@ impl MutationMap {
     }
 
     fn insert(&mut self, level: u8, key: usize, value: f64) {
-        let allele_index = Self::allele_to_index(level);
+        let allele_index = Self::allele_to_index(level)
+            .expect("Cannot insert selection coefficient for invalid allele code");
         self.data[allele_index].insert(key, value);
     }
 
     pub fn get(&self, level: u8, key: usize) -> Option<&f64> {
-        let allele_index = Self::allele_to_index(level);
+        let allele_index = Self::allele_to_index(level)
+            .expect("Cannot lookup selection coefficient for invalid allele code");
         self.data[allele_index].get(&key)
     }    
 
@@ -192,18 +200,24 @@ impl MutationMap {
         // thread-specific random number generator
         let mut thread_rng = rand::thread_rng();
 
-        let seq_len = seq.len();
-
         // sample from Poisson distribution for number of sites to mutate in this isolate
         let n_sites = mu_dist.sample(&mut thread_rng) as usize;
+        let seq_len = seq.len();
         let sampled_sites = (0..seq_len).choose_multiple(&mut thread_rng, n_sites);
 
         // iterate for number of mutations required to reach mutation rate
         for mutant_site in sampled_sites {
             // sample new site to mutate
             let value = seq[mutant_site];
+
+            // N is stored in the map but should not be mutated; skip
+            if value == 16 {
+                continue;
+            }
             
-            let values = &core_vec[Self::allele_to_index(value)];
+            let allele_index = Self::allele_to_index(value)
+                .expect("Sampled non-mutable N allele for mutation");
+            let values = &core_vec[allele_index];
 
             // sample new allele
             let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
@@ -347,18 +361,40 @@ mod tests {
         let mut map = MutationMap::new(0, 0, &test_seq, &test_dist, &mut rng);
         
         map.insert(1, 10, 0.1);
-        println!("1 maps to index {}\n", MutationMap::allele_to_index(1));
         map.insert(2, 10, 0.2);
-        println!("2 maps to index {}\n", MutationMap::allele_to_index(2));
         map.insert(4, 10, 0.3);
-        println!("4 maps to index {}\n", MutationMap::allele_to_index(4));
         map.insert(8, 10, 0.4);
-        println!("8 maps to index {}\n", MutationMap::allele_to_index(8));
         
         assert_eq!(map.get(1, 10), Some(&0.1));
         assert_eq!(map.get(4, 10), Some(&0.3));
         assert_eq!(map.get(2, 10), Some(&0.2));
         assert_eq!(map.get(8, 10), Some(&0.4));
+    }
+
+    #[test]
+    fn test_n_allele_is_non_mutable_and_unmapped() {
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let selection_dist = Distribution::new_uniform(0.0, 1.0)
+            .expect("failed to create selection distribution");
+        let mu_dist = Distribution::new_poisson(10.0)
+            .expect("failed to create mutation-rate distribution");
+        let core_vec: Vec<Vec<u8>> = vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
+
+        let mut seq = vec![16, 1, 16, 2, 4, 8, 16];
+        let original_n_sites: Vec<u8> = seq.iter().copied().filter(|&x| x == 16).collect();
+
+        let mut map = MutationMap::new(0, 0, &seq, &selection_dist, &mut rng);
+        map.mutate(&core_vec, &mut seq, &selection_dist, &mu_dist);
+
+        assert_eq!(seq[0], 16);
+        assert_eq!(seq[2], 16);
+        assert_eq!(seq[6], 16);
+        assert!(map.get(16, 0).is_some());
+        assert!(map.get(16, 2).is_some());
+        assert!(map.get(16, 6).is_some());
+
+        let post_n_sites: Vec<u8> = seq.iter().copied().filter(|&x| x == 16).collect();
+        assert_eq!(original_n_sites, post_n_sites);
     }
 
     #[test]
