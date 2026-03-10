@@ -4,6 +4,7 @@ use crate::mutation::Distribution as MutationDistribution;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
+use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 use logsumexp::LogSumExp;
 use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
@@ -34,6 +35,19 @@ pub struct Population{
 }
 
 impl Population {
+    fn genome_output_path(output_path: &str, genome_index: usize) -> io::Result<PathBuf> {
+        let path = Path::new(output_path);
+        let file_name = path.file_name().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Output path must include a file name: {output_path}"),
+            )
+        })?;
+
+        let prefixed_name = format!("{genome_index}_{}", file_name.to_string_lossy());
+        Ok(path.with_file_name(prefixed_name))
+    }
+
     fn decode_base(base: u8) -> u8 {
         match base {
             1 => b'A',
@@ -176,12 +190,12 @@ impl Population {
         self.generation += 1;
     }
 
-    // TODO ensure file written in different chromosomes, and check sequences are mutating
     pub fn write_fasta(&self, output_path: &str) -> io::Result<()> {
-        let file = File::create(output_path)?;
-        let mut writer = BufWriter::new(file);
+        for (genome_index, genome) in self.pop.iter().enumerate() {
+            let genome_output_path = Self::genome_output_path(output_path, genome_index)?;
+            let file = File::create(&genome_output_path)?;
+            let mut writer = BufWriter::new(file);
 
-        for genome in &self.pop {
             // Group element indices by seqname
             let mut seqname_groups: HashMap<String, Vec<usize>> = HashMap::new();
             for (idx, element) in genome.seq.iter().enumerate() {
@@ -218,9 +232,11 @@ impl Population {
                     writer.write_all(b"\n")?;
                 }
             }
+
+            writer.flush()?;
         }
 
-        writer.flush()
+        Ok(())
     }
 }
 
@@ -334,12 +350,14 @@ mod tests {
                 .as_nanos()
         ));
         let output_path = temp_path.to_string_lossy().into_owned();
+        let genome_output_path = Population::genome_output_path(&output_path, 0)
+            .expect("failed to construct per-genome output path");
 
         pop.write_fasta(&output_path)
             .expect("failed to write test FASTA file");
 
         let mut content = String::new();
-        fs::File::open(&output_path)
+        fs::File::open(&genome_output_path)
             .expect("failed to open test FASTA file")
             .read_to_string(&mut content)
             .expect("failed to read test FASTA file");
@@ -347,6 +365,6 @@ mod tests {
         assert!(content.contains(">0_chr1 parent=root generation=0"));
         assert!(content.contains("ACGT"));
 
-        let _ = fs::remove_file(output_path);
+        let _ = fs::remove_file(genome_output_path);
     }
 }

@@ -105,11 +105,11 @@ fn main() {
 						.unwrap_or_else(|| "final_population.fasta".to_string());
 
 					if let Err(err) = population.write_fasta(&output_fasta) {
-						eprintln!("Failed to write final population FASTA file: {err}");
+						eprintln!("Failed to write final population FASTA files: {err}");
 						std::process::exit(1);
 					}
 
-					println!("Wrote final population FASTA: {}", output_fasta);
+					println!("Wrote final population FASTA files with per-genome prefixes based on: {}", output_fasta);
 				}
 			}
 			Err(err) => {
