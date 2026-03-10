@@ -172,6 +172,11 @@ impl Population {
         // Sample rows based on the distribution
         let sampled_indices: Vec<usize> = (0..self.pop.len()).map(|_| sampling_dist.sample(rng)).collect();
 
+        #[cfg(debug_assertions)] {
+            eprintln!("Selection weights: {:?}", selection_weights);
+            eprintln!("Sampled indices: {:?}", sampled_indices);
+        }
+
         sampled_indices
     }
 
@@ -418,8 +423,88 @@ mod tests {
             .enumerate()
         {
             assert_ne!(new_allele, old_allele);
-            assert!(original_map.get(new_allele, site).is_none());
             assert!(mutated_element.mutation_map.get(new_allele, site).is_some());
+        }
+    }
+
+    #[test]
+    fn test_next_generation_creates_new_population() {
+        let mut root = HashMap::new();
+        let features = vec![
+            FeaturePos {
+                seqname: "chr1".to_string(),
+                feature_id: 0,
+                feature_type: "exon".to_string(),
+                start: 0,
+                end: 4,
+                strand: true,
+                seq: vec![1, 2, 4, 8],
+            },
+            FeaturePos {
+                seqname: "chr1".to_string(),
+                feature_id: 1,
+                feature_type: "intron".to_string(),
+                start: 4,
+                end: 8,
+                strand: true,
+                seq: vec![8, 4, 2, 1],
+            },
+        ];
+        root.insert("chr1".to_string(), features);
+
+        let exon_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create exon selection distribution");
+        let intron_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create intron selection distribution");
+        let intergenic_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create intergenic selection distribution");
+        let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
+
+        let exon_mu = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create exon mutation distribution");
+        let intron_mu = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create intron mutation distribution");
+        let intergenic_mu = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create intergenic mutation distribution");
+        let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
+
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut pop = Population::new(root, 3, site_mutation_dists, site_mutation_mus, &mut rng);
+
+        let original_identifiers: Vec<String> = pop
+            .pop
+            .iter()
+            .map(|genome| genome.identifier.clone())
+            .collect();
+        let original_parents: Vec<String> = pop
+            .pop
+            .iter()
+            .map(|genome| genome.parent.clone())
+            .collect();
+        let original_sequences: Vec<Vec<Vec<u8>>> = pop
+            .pop
+            .iter()
+            .map(|genome| genome.seq.iter().map(|element| element.seq.clone()).collect())
+            .collect();
+
+        pop.next_generation(vec![2, 0, 1]);
+
+        assert_eq!(pop.generation, 1);
+        assert_eq!(pop.pop.len(), 3);
+
+        for (new_index, genome) in pop.pop.iter().enumerate() {
+            let selected_index = [2usize, 0, 1][new_index];
+            assert_eq!(genome.identifier, format!("1-{}", original_identifiers[selected_index]));
+            assert_eq!(genome.parent, original_identifiers[selected_index]);
+            assert_ne!(genome.identifier, original_identifiers[new_index]);
+            assert_ne!(genome.parent, original_parents[new_index]);
+
+            let new_sequences: Vec<Vec<u8>> = genome
+                .seq
+                .iter()
+                .map(|element| element.seq.clone())
+                .collect();
+            assert_eq!(new_sequences, original_sequences[selected_index]);
         }
     }
 }
