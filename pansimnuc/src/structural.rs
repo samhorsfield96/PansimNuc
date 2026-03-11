@@ -144,7 +144,8 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
 }
 
 pub fn mutate_inter_genome (population: &mut Population) {
-    //TODO add recombination between genomes, need to think of way of identifying homologous regions
+    // TODO add recombination between genomes, need to think of way of identifying homologous regions and if each recombination event 
+    // has single or double crossovers
 }
 
 #[cfg(test)]
@@ -168,10 +169,12 @@ mod tests {
 
         Genome {
             identifier: "test".to_string(),
+            genome_id: 0,
             parent: "root".to_string(),
             seq: vec![
                 NucElement {
                     seqname: "chr1".to_string(),
+                    element_id: 0,
                     feature_id: 0,
                     feature_type: "exon".to_string(),
                     selection_coefficient: 0.0,
@@ -182,6 +185,7 @@ mod tests {
                 },
                 NucElement {
                     seqname: "chr1".to_string(),
+                    element_id: 1,
                     feature_id: 1,
                     feature_type: "exon".to_string(),
                     selection_coefficient: 0.0,

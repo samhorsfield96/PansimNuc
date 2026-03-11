@@ -16,6 +16,7 @@ use rand::{SeedableRng};
 #[derive(Clone)]
 pub struct NucElement {
     pub seqname: String,
+    pub element_id: usize,
     pub feature_id: usize,
     pub feature_type: String,
     pub selection_coefficient: f64,
@@ -27,6 +28,7 @@ pub struct NucElement {
 
 pub struct Genome {
     pub identifier: String,
+    pub genome_id: usize,
     pub parent: String,
     pub seq: Vec<NucElement>
 }
@@ -37,6 +39,9 @@ pub struct Population{
     pub core_vec: Vec<Vec<u8>>,
     pub selection_dists: Vec<MutationDistribution>,
     pub mu_dists: Vec<MutationDistribution>,
+    // Map from original element ID to positions of homologous regions in other genomes
+    //outermost loop is the homology group, middle loop is genomes, inner loop is positions
+    pub homology_map: Vec<Vec<Vec<usize>>>
 }
 
 impl Population {
@@ -71,9 +76,17 @@ impl Population {
         mu_dists: Vec<MutationDistribution>,
         rng: &mut StdRng,
     ) -> Self {
+        // initialise population
         let mut population: Vec<Genome> = Vec::new();
-
         let mut genome: Vec<NucElement> = Vec::new();
+
+        // count for element ID, each NucElement gets own to signal it it's homology group
+        let mut element_id: usize = 0;
+
+        // initialise homology map, outermost loop is the homology group, middle loop is genomes, inner loop is positions
+        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+
+        // generate starting genome
         for (seqname, features) in &root {
             for feature in features {
                 
@@ -95,6 +108,7 @@ impl Population {
 
                 genome.push(NucElement {
                     seqname: seqname.clone(),
+                    element_id: element_id,
                     feature_id: feature.feature_id,
                     feature_type: feature.feature_type.clone(),
                     seq: feature.seq.clone(),
@@ -109,6 +123,14 @@ impl Population {
                     },
                     selection_coefficient: 0.0, // Initialize with a default value, can be updated later
                 });
+                element_id += 1;
+
+                // generate homology map for this element, initially just self
+                let mut element_homology_map: Vec<Vec<usize>> = Vec::new();
+                for _ in 0..n_genomes {
+                    element_homology_map.push(vec![element_id]);
+                }
+                homology_map.push(element_homology_map);
             }
         }
 
@@ -116,6 +138,7 @@ impl Population {
         for i in 0..n_genomes {
             population.push(Genome {
                 identifier: format!("{}", i),
+                genome_id: i,
                 parent: "root".to_string(),
                 seq: genome.clone(),
             });
@@ -129,7 +152,8 @@ impl Population {
             pop: population,
             core_vec,
             selection_dists,
-            mu_dists
+            mu_dists,
+            homology_map
         }
     }
 
@@ -221,16 +245,25 @@ impl Population {
 
     pub fn next_generation (&mut self, sampled_indices: Vec<usize>) {
         let mut new_pop: Vec<Genome> = Vec::new();
+        let mut new_homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        let mut genome_id = 0;
 
+        // update genomes and homology map
         for &selected_index in &sampled_indices {
             let selected_genome = &self.pop[selected_index];
             new_pop.push(Genome {
                 identifier: format!("{}-{}", self.generation + 1, selected_genome.identifier),
+                genome_id: genome_id,
                 parent: selected_genome.identifier.clone(),
                 seq: selected_genome.seq.clone(),
             });
+
+            new_homology_map.push(self.homology_map[selected_index].clone());
+
+            genome_id += 1;
         }
         self.pop = new_pop;
+        self.homology_map = new_homology_map;
         self.generation += 1;
     }
 
