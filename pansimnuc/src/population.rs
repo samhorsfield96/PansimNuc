@@ -104,6 +104,7 @@ impl Population {
                         deletion_rate: 0.0,
                         inversion_rate: 0.0,
                         recombination_rate: 0.0,
+                        max_duplications: None,
                     },
                     selection_coefficient: 0.0, // Initialize with a default value, can be updated later
                 });

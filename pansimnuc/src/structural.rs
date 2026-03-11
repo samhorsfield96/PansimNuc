@@ -25,6 +25,9 @@ pub struct StructureMutationMap {
     pub deletion_rate: f64,
     pub inversion_rate: f64,
     pub recombination_rate: f64,
+    /// Cap on the number of duplications per element per generation.
+    /// `None` means no cap (behaviour unchanged from before this field was added).
+    pub max_duplications: Option<usize>,
 }
 
 // write function which runs through each element and determines whether a structural mutation occurs, and if so, which one, and where it moves to.
@@ -46,7 +49,11 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
         
         // duplications, can model multiple duplications repeatedly sampling until rand_val is above duplication rate
         let mut rand_val = mu_dist.sample(&mut thread_rng);
-        while rand_val < element.structure_mutation_map.duplication_rate {
+        let mut dup_count: usize = 0;
+        while rand_val < element.structure_mutation_map.duplication_rate
+            && element.structure_mutation_map.max_duplications.map_or(true, |max| dup_count < max)
+        {
+            dup_count += 1;
             // sample from poisson distribution to determine where duplication goes
             let duplication_pos = pos_dist.sample(&mut thread_rng) as i64;
 
@@ -134,4 +141,121 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
 
     genome.seq = new_genome;
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mutation::{Distribution as MutationDistribution, MutationMap};
+    use crate::population::{Genome, NucElement};
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    fn make_test_genome() -> Genome {
+        let base_map = StructureMutationMap {
+            duplication_rate: 0.0,
+            deletion_rate: 0.0,
+            inversion_rate: 0.0,
+            recombination_rate: 0.0,
+            max_duplications: None,
+        };
+        let mut rng = StdRng::seed_from_u64(42);
+        let sel_dist = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
+
+        Genome {
+            identifier: "test".to_string(),
+            parent: "root".to_string(),
+            seq: vec![
+                NucElement {
+                    seqname: "chr1".to_string(),
+                    feature_id: 0,
+                    feature_type: "exon".to_string(),
+                    selection_coefficient: 0.0,
+                    seq: vec![],
+                    mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
+                    strand: true,
+                    structure_mutation_map: base_map.clone(),
+                },
+                NucElement {
+                    seqname: "chr1".to_string(),
+                    feature_id: 1,
+                    feature_type: "exon".to_string(),
+                    selection_coefficient: 0.0,
+                    seq: vec![],
+                    mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
+                    strand: false,
+                    structure_mutation_map: base_map,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn inversion_flips_strand() {
+        let mut genome = make_test_genome();
+        let before_strands: Vec<bool> = genome.seq.iter().map(|e| e.strand).collect();
+
+        for e in &mut genome.seq {
+            e.structure_mutation_map.inversion_rate = 1.0;
+        }
+
+        let mu = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
+        let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
+        mutate_intra_genome(&mut genome, &mu, &pos);
+
+        let after_strands: Vec<bool> = genome.seq.iter().map(|e| e.strand).collect();
+        assert_ne!(before_strands, after_strands, "strands should flip after forced inversion");
+        assert_eq!(genome.seq.len(), before_strands.len(), "inversion should preserve genome length");
+    }
+
+    #[test]
+    fn deletion_reduces_genome_length() {
+        let mut genome = make_test_genome();
+        let before_len = genome.seq.len();
+
+        for e in &mut genome.seq {
+            e.structure_mutation_map.deletion_rate = 1.0;
+        }
+
+        let mu = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
+        let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
+        mutate_intra_genome(&mut genome, &mu, &pos);
+
+        assert!(genome.seq.len() < before_len, "genome should shrink after forced deletion");
+    }
+
+    #[test]
+    fn translocation_preserves_length() {
+        // A translocation is a simultaneous duplication (copy to new position) and
+        // deletion (remove from original position).  The gene moves but the genome
+        // length stays the same.
+        let mut genome = make_test_genome();
+        let before_len = genome.seq.len();
+        let before_ids: Vec<usize> = genome.seq.iter().map(|e| e.feature_id).collect();
+
+        for e in &mut genome.seq {
+            // Exactly one duplication per element, then delete the original.
+            e.structure_mutation_map.duplication_rate = 1.0;
+            e.structure_mutation_map.max_duplications = Some(1);
+            e.structure_mutation_map.deletion_rate = 1.0;
+            e.structure_mutation_map.inversion_rate = 0.0;
+        }
+
+        // Use a non-zero offset so duplicates land somewhere other than position 0.
+        let mu = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
+        let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
+        mutate_intra_genome(&mut genome, &mu, &pos);
+
+        assert_eq!(
+            genome.seq.len(),
+            before_len,
+            "translocation should preserve genome length"
+        );
+        // The set of feature_ids present should be unchanged even if order differs.
+        let mut after_ids: Vec<usize> = genome.seq.iter().map(|e| e.feature_id).collect();
+        let mut expected = before_ids.clone();
+        after_ids.sort();
+        expected.sort();
+        assert_eq!(after_ids, expected, "translocation should not add or remove genes");
+    }
 }
