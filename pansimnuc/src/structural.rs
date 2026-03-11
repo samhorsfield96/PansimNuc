@@ -28,6 +28,7 @@ pub struct StructureMutationMap {
     /// Cap on the number of duplications per element per generation.
     /// `None` means no cap (behaviour unchanged from before this field was added).
     pub max_duplications: Option<usize>,
+    pub duplication_insertion_prob: f64, // probability of duplication inserting upstream of the original position, as opposed to downstream
 }
 
 // write function which runs through each element and determines whether a structural mutation occurs, and if so, which one, and where it moves to.
@@ -58,7 +59,7 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
 
             // determine if position is before or after gene, adjust if too large
             let pos_rand_val = mu_dist.sample(&mut thread_rng);
-            let pos_order: i64 = if pos_rand_val < 0.5 { -1 } else { 1 };
+            let pos_order: i64 = if pos_rand_val < element.structure_mutation_map.duplication_insertion_prob { -1 } else { 1 };
             let mut new_pos = current_pos as i64 + (duplication_pos * pos_order);
             if new_pos < 0 {
                 new_pos = 0;
@@ -168,6 +169,7 @@ mod tests {
             inversion_rate: 0.0,
             recombination_rate: 0.0,
             max_duplications: None,
+            duplication_insertion_prob: 0.5,
         };
         let mut rng = StdRng::seed_from_u64(42);
         let sel_dist = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
@@ -197,6 +199,17 @@ mod tests {
                     seq: vec![],
                     mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
                     strand: false,
+                    structure_mutation_map: base_map.clone(),
+                },
+                NucElement {
+                    seqname: "chr1".to_string(),
+                    element_id: 2,
+                    feature_id: 2,
+                    feature_type: "exon".to_string(),
+                    selection_coefficient: 0.0,
+                    seq: vec![],
+                    mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
+                    strand: false,
                     structure_mutation_map: base_map,
                 },
             ],
@@ -214,8 +227,12 @@ mod tests {
 
         let mu = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
-        // homology_map: outer = element_id (0..2), inner = genome_id (0..1)
-        let mut homology_map: Vec<Vec<Vec<usize>>> = vec![vec![vec![]], vec![vec![]]];
+        
+        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        for _ in genome.seq.iter() {
+            homology_map.push(vec![vec![0]]);
+        }
+
         mutate_intra_genome(&mut genome, &mut homology_map, &mu, &pos);
 
         let after_strands: Vec<bool> = genome.seq.iter().map(|e| e.strand).collect();
@@ -232,6 +249,11 @@ mod tests {
             e.structure_mutation_map.deletion_rate = 1.0;
         }
 
+        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        for _ in genome.seq.iter() {
+            homology_map.push(vec![vec![0]]);
+        }
+
         let mu = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
         let mut homology_map: Vec<Vec<Vec<usize>>> = vec![vec![vec![]], vec![vec![]]];
@@ -241,6 +263,7 @@ mod tests {
     }
 
     #[test]
+    // run multiple times, as may fail stochastically if duplication and deletion events don't line up as expected
     fn translocation_preserves_length() {
         // A translocation is a simultaneous duplication (copy to new position) and
         // deletion (remove from original position).  The gene moves but the genome
@@ -256,11 +279,15 @@ mod tests {
             e.structure_mutation_map.deletion_rate = 1.0;
             e.structure_mutation_map.inversion_rate = 0.0;
         }
+                
+        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        for _ in genome.seq.iter() {
+            homology_map.push(vec![vec![0]]);
+        }
 
         // Use a non-zero offset so duplicates land somewhere other than position 0.
-        let mu = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
+        let mu = MutationDistribution::new_uniform(0.0, 0.9).unwrap();
         let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
-        let mut homology_map: Vec<Vec<Vec<usize>>> = vec![vec![vec![]], vec![vec![]]];
         mutate_intra_genome(&mut genome, &mut homology_map, &mu, &pos);
 
         assert_eq!(

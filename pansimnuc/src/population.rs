@@ -120,6 +120,7 @@ impl Population {
                         inversion_rate: 0.0,
                         recombination_rate: 0.0,
                         max_duplications: None,
+                        duplication_insertion_prob: 0.5,
                     },
                     selection_coefficient: 0.0, // Initialize with a default value, can be updated later
                 });
