@@ -1,6 +1,7 @@
 use crate::gff::FeaturePos;
 use crate::mutation::MutationMap;
 use crate::mutation::Distribution as MutationDistribution;
+use crate::structural::mutate_intra_genome;
 use crate::structural::StructureMutationMap;
 use std::collections::HashMap;
 use std::fs::File;
@@ -143,6 +144,27 @@ impl Population {
             }
         }
     }   
+
+    pub fn structural_intra_genome(&mut self) {
+        // probabilities for duplications
+        let duplication_mu_dist = MutationDistribution::new_uniform(0.0, 1.0). expect("Failed to create uniform distribution for duplications"); // TODO all setting
+        let duplication_pos_dist = MutationDistribution::new_poisson(1.0).expect("Failed to create poisson distribution for duplications");
+
+        // make probabilities very high to favour only the most transposable of elements
+        let translocation_mu_dist = MutationDistribution::new_uniform(0.9, 1.0).expect("Failed to create uniform distribution for translocations"); // TODO all setting of this to favour translocations
+        let translocation_pos_dist = MutationDistribution::new_poisson(1000.0).expect("Failed to create poisson distribution for translocations"); // TODO all setting of this to favour translocations
+
+        // duplications
+        for idx in 0..self.pop.len() {
+            let genome = &mut self.pop[idx];
+
+            // duplications
+            mutate_intra_genome(genome, &duplication_mu_dist, &duplication_pos_dist);
+
+            // translocations
+            mutate_intra_genome(genome, &translocation_mu_dist, &translocation_pos_dist);
+        }
+    }
 
     // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights
     pub fn sample_individuals (&mut self, rng: &mut StdRng) -> Vec<usize> {

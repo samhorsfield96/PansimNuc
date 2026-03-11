@@ -2,7 +2,7 @@
 
 use crate::{mutation::MutationMap, population::NucElement};
 use std::collections::HashMap;
-use crate::population::Genome;
+use crate::population::{Genome, Population};
 use rand::rngs::StdRng;
 use crate::mutation::Distribution as MutationDistribution;
 
@@ -141,6 +141,10 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
 
     genome.seq = new_genome;
 
+}
+
+pub fn mutate_inter_genome (population: &mut Population) {
+    //TODO add recombination between genomes, need to think of way of identifying homologous regions
 }
 
 #[cfg(test)]
