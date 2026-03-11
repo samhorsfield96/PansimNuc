@@ -15,7 +15,7 @@ use rand::{SeedableRng};
 
 #[derive(Clone)]
 pub struct NucElement {
-    pub seqname: String,
+    pub contig_id: usize,
     pub element_id: usize,
     pub feature_id: usize,
     pub feature_type: String,
@@ -39,6 +39,8 @@ pub struct Population{
     pub core_vec: Vec<Vec<u8>>,
     pub selection_dists: Vec<MutationDistribution>,
     pub mu_dists: Vec<MutationDistribution>,
+    pub recombination_dist: MutationDistribution,
+    pub recombination_decay: f64,
     // Map from original element ID to positions of homologous regions in other genomes
     //outermost loop is the homology group, middle loop is genomes, inner loop is positions
     pub homology_map: Vec<Vec<Vec<usize>>>
@@ -70,10 +72,12 @@ impl Population {
     }
 
     pub fn new(
-        root: HashMap<String, Vec<FeaturePos>>,
+        root: Vec<Vec<FeaturePos>>,
         n_genomes: usize,
         selection_dists: Vec<MutationDistribution>,
         mu_dists: Vec<MutationDistribution>,
+        recombination_dist: MutationDistribution,
+        recombination_decay: f64,
         rng: &mut StdRng,
     ) -> Self {
         // initialise population
@@ -87,7 +91,7 @@ impl Population {
         let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
 
         // generate starting genome
-        for (seqname, features) in &root {
+        for (contig_id, features) in root.iter().enumerate() {
             for feature in features {
                 
                 // TODO change this so that can specify different mutation rates per site
@@ -107,7 +111,7 @@ impl Population {
                 };
 
                 genome.push(NucElement {
-                    seqname: seqname.clone(),
+                    contig_id: contig_id,
                     element_id: element_id,
                     feature_id: feature.feature_id,
                     feature_type: feature.feature_type.clone(),
@@ -154,6 +158,8 @@ impl Population {
             core_vec,
             selection_dists,
             mu_dists,
+            recombination_dist,
+            recombination_decay,
             homology_map
         }
     }
@@ -286,20 +292,20 @@ impl Population {
             let mut writer = BufWriter::new(file);
 
             // Group element indices by seqname
-            let mut seqname_groups: HashMap<String, Vec<usize>> = HashMap::new();
+            let mut contig_groups: HashMap<usize, Vec<usize>> = HashMap::new();
             for (idx, element) in genome.seq.iter().enumerate() {
-                seqname_groups.entry(element.seqname.clone())
+                contig_groups.entry(element.contig_id)
                     .or_insert_with(Vec::new)
                     .push(idx);
             }
 
-            // Write each seqname group as a separate FASTA entry
-            for (seqname, indices) in seqname_groups {
+            // Write each contig group as a separate FASTA entry
+            for (contig_id, indices) in contig_groups {
                 writeln!(
                     writer,
-                    ">{id}_{seqname} parent={parent} generation={generation}",
+                    ">{id}_contig{contig_id} parent={parent} generation={generation}",
                     id = genome.identifier,
-                    seqname = seqname,
+                    contig_id = contig_id,
                     parent = genome.parent,
                     generation = self.generation
                 )?;
@@ -339,10 +345,10 @@ mod tests {
     #[test]
     fn test_population_new() {
         // Create test data
-        let mut root = HashMap::new();
+        let mut root = Vec::new();
         let features = vec![
             FeaturePos {
-                seqname: "chr1".to_string(),
+                contig_id: 0,
                 feature_id: 0,
                 feature_type: "exon".to_string(),
                 start: 100,
@@ -351,7 +357,7 @@ mod tests {
                 seq: vec![1, 2, 4, 8], // ACGT
             },
             FeaturePos {
-                seqname: "chr1".to_string(),
+                contig_id: 0,
                 feature_id: 1,
                 feature_type: "intron".to_string(),
                 start: 300,
@@ -360,7 +366,7 @@ mod tests {
                 seq: vec![8, 4, 2, 1], // TGCA
             },
         ];
-        root.insert("chr1".to_string(), features);
+        root.push(features);
 
         let n_genomes = 3;
         let exon_dist = MutationDistribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
@@ -373,8 +379,10 @@ mod tests {
         let intergenic_mu = MutationDistribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
         let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
 
+        let recombination_dist = MutationDistribution::new_poisson(1.0).expect("Failed to create uniform distribution for recombination");
+
         let mut rng: StdRng = StdRng::seed_from_u64(42);
-        let pop = Population::new(root, n_genomes, site_mutation_dists, site_mutation_mus, &mut rng);
+        let pop = Population::new(root, n_genomes, site_mutation_dists, site_mutation_mus, recombination_dist, 1.0, &mut rng);
 
         // Check population was created correctly
         assert_eq!(pop.generation, 0);
@@ -387,12 +395,12 @@ mod tests {
             assert_eq!(genome.seq.len(), 2); // Two features
 
             // Check first feature
-            assert_eq!(genome.seq[0].seqname, "chr1");
+            assert_eq!(genome.seq[0].contig_id, 0);
             assert_eq!(genome.seq[0].feature_id, 0);
             assert_eq!(genome.seq[0].feature_type, "exon");
 
             // Check second feature
-            assert_eq!(genome.seq[1].seqname, "chr1");
+            assert_eq!(genome.seq[1].contig_id, 0);
             assert_eq!(genome.seq[1].feature_id, 1);
             assert_eq!(genome.seq[1].feature_type, "intron");
         }
@@ -400,9 +408,9 @@ mod tests {
 
     #[test]
     fn test_write_fasta_decodes_nucleotides() {
-        let mut root = HashMap::new();
+        let mut root = Vec::new();
         let features = vec![FeaturePos {
-            seqname: "chr1".to_string(),
+            contig_id: 0,
             feature_id: 0,
             feature_type: "exon".to_string(),
             start: 0,
@@ -410,7 +418,7 @@ mod tests {
             strand: true,
             seq: vec![1, 2, 4, 8],
         }];
-        root.insert("chr1".to_string(), features);
+        root.push(features);
 
         let exon_dist = MutationDistribution::new_double_exp(0.5, 2.0, 0.3)
             .expect("Failed to create double exponential distribution for exon features");
@@ -427,9 +435,12 @@ mod tests {
         let intergenic_mu = MutationDistribution::new_uniform(0.0, 1.0)
             .expect("Failed to create uniform distribution for intergenic features");
         let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
+        let recombination_dist = MutationDistribution::new_poisson(1.0)
+            .expect("Failed to create uniform distribution for recombination");
+
 
         let mut rng: StdRng = StdRng::seed_from_u64(42);
-        let pop = Population::new(root, 1, site_mutation_dists, site_mutation_mus, &mut rng);
+        let pop = Population::new(root, 1, site_mutation_dists, site_mutation_mus, recombination_dist, 1.0, &mut rng);
 
         let temp_path = std::env::temp_dir().join(format!(
             "pansimnuc_pop_{}.fasta",
@@ -459,9 +470,9 @@ mod tests {
 
     #[test]
     fn test_mutate_changes_sequence_and_mutation_map() {
-        let mut root = HashMap::new();
+        let mut root = Vec::new();
         let features = vec![FeaturePos {
-            seqname: "chr1".to_string(),
+            contig_id: 0,
             feature_id: 0,
             feature_type: "exon".to_string(),
             start: 0,
@@ -469,7 +480,7 @@ mod tests {
             strand: true,
             seq: vec![1, 2, 4, 8],
         }];
-        root.insert("chr1".to_string(), features);
+        root.push(features);
 
         let exon_selection_dist = MutationDistribution::new_uniform(0.0, 1.0)
             .expect("failed to create exon selection distribution");
@@ -489,9 +500,11 @@ mod tests {
         let intergenic_mu_dist = MutationDistribution::new_uniform(0.0, 1.0)
             .expect("failed to create intergenic mutation distribution");
         let site_mutation_mus = vec![force_mutation_dist, intron_mu_dist, intergenic_mu_dist];
+                let recombination_dist = MutationDistribution::new_poisson(1.0)
+            .expect("Failed to create uniform distribution for recombination");
 
         let mut rng: StdRng = StdRng::seed_from_u64(42);
-        let mut pop = Population::new(root, 1, site_mutation_dists, site_mutation_mus, &mut rng);
+        let mut pop = Population::new(root, 1, site_mutation_dists, site_mutation_mus, recombination_dist, 1.0, &mut rng);
 
         let original_seq = pop.pop[0].seq[0].seq.clone();
         let original_map = pop.pop[0].seq[0].mutation_map.clone();
@@ -513,10 +526,10 @@ mod tests {
 
     #[test]
     fn test_next_generation_creates_new_population() {
-        let mut root = HashMap::new();
+        let mut root = Vec::new();
         let features = vec![
             FeaturePos {
-                seqname: "chr1".to_string(),
+                contig_id: 0,
                 feature_id: 0,
                 feature_type: "exon".to_string(),
                 start: 0,
@@ -525,7 +538,7 @@ mod tests {
                 seq: vec![1, 2, 4, 8],
             },
             FeaturePos {
-                seqname: "chr1".to_string(),
+                contig_id: 0,
                 feature_id: 1,
                 feature_type: "intron".to_string(),
                 start: 4,
@@ -534,7 +547,7 @@ mod tests {
                 seq: vec![8, 4, 2, 1],
             },
         ];
-        root.insert("chr1".to_string(), features);
+        root.push(features);
 
         let exon_dist = MutationDistribution::new_uniform(0.0, 1.0)
             .expect("failed to create exon selection distribution");
@@ -553,7 +566,10 @@ mod tests {
         let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
 
         let mut rng: StdRng = StdRng::seed_from_u64(42);
-        let mut pop = Population::new(root, 3, site_mutation_dists, site_mutation_mus, &mut rng);
+        let recombination_dist = MutationDistribution::new_poisson(1.0)
+            .expect("Failed to create uniform distribution for recombination");
+        
+        let mut pop = Population::new(root, 3, site_mutation_dists, site_mutation_mus, recombination_dist, 1.0, &mut rng);
 
         let original_identifiers: Vec<String> = pop
             .pop

@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::{self, BufReader};
 
 pub struct FeaturePos {
-    pub seqname: String,
+    pub contig_id: usize,
     pub feature_id: usize,
     pub feature_type: String,
     pub start: usize,
@@ -27,7 +27,7 @@ fn encode_dna(seq: &str) -> Vec<u8> {
         .collect()
 }
 
-pub fn extract_feature_positions(file_gff: File) -> io::Result<HashMap<String, Vec<FeaturePos>>> {
+pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePos>>> {
     let mut gff_reader = gff::io::Reader::new(BufReader::new(file_gff));
 
     // keep track of current feature ID, dictacted by gene and its upstream region
@@ -37,14 +37,21 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<HashMap<String, V
     let mut last_feature_end: usize = 0;
     
     // hold features
-    let mut features: HashMap<String, Vec<FeaturePos>> = HashMap::new();
+    let mut features: Vec<Vec<FeaturePos>> = Vec::new();
+    let mut contig_id: i32 = -1;
+    let mut prev_seqname: String = String::new();
 
     for result in gff_reader.record_bufs() {
         let record: noodles_gff::feature::RecordBuf = result?;
-
         let feature_start: usize = usize::from(record.start()).saturating_sub(1);
         let feature_end: usize = usize::from(record.end());
         let seqname: String = record.reference_sequence_name().to_string();
+
+        if prev_seqname != seqname {
+            contig_id += 1;
+            prev_seqname = seqname.clone();
+        }
+
         let feature_type: String = record.ty().to_string();
 
         // if last feature was a gene, then region must be intergenic
@@ -54,10 +61,9 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<HashMap<String, V
 
             // in case gene is start of contig
             if feature_start > last_feature_end {
-                features.entry(seqname.clone())
-                    .or_default()
+                features[contig_id as usize]
                     .push(FeaturePos {
-                        seqname: seqname.clone(),
+                        contig_id: contig_id as usize,
                         feature_id: current_feature_id,
                         feature_type: "intergenic".to_string(),
                         start: last_feature_end,
@@ -75,10 +81,9 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<HashMap<String, V
             
             // if next feature is exon, need to check than current end is not identical otherwise still at start of gene
             if feature_start > last_feature_end {
-                features.entry(seqname.clone())
-                    .or_default()
+                features[contig_id as usize]
                     .push(FeaturePos {
-                        seqname: seqname.clone(),
+                        contig_id: contig_id as usize,
                         feature_id: current_feature_id,
                         feature_type: "intron".to_string(),
                         start: last_feature_end,
@@ -90,10 +95,9 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<HashMap<String, V
 
             // only add exons as features
             if feature_type == "exon" {
-                features.entry(seqname.clone())
-                    .or_default()
+                features[contig_id as usize]
                     .push(FeaturePos {
-                        seqname: seqname.clone(),
+                        contig_id: contig_id as usize,
                         feature_id: current_feature_id,
                         feature_type: feature_type.clone(),
                         start: feature_start,
@@ -112,7 +116,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<HashMap<String, V
     Ok(features)
 }
 
-pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<HashMap<String, Vec<FeaturePos>>> {
+pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<Vec<Vec<FeaturePos>>> {
     let file_gff = File::open(gff_path)?;
     let file_fasta = File::open(fasta_path)?;
 
@@ -131,8 +135,8 @@ pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<HashMap<St
         );
     }
 
-    for (seqname, results) in &mut features {
-        if let Some(seq) = genome.get(seqname) {
+    for (contig_id, results) in features.iter_mut().enumerate() {
+        if let Some(seq) = genome.get(&contig_id.to_string()) {
             let mut last_feature_end: usize = 0;
             let mut last_feature_id:usize = 0;
             
@@ -157,7 +161,7 @@ pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<HashMap<St
             let subseq = encode_dna(&seq[feature_start..feature_end]);
 
             results.push(FeaturePos {
-                seqname: seqname.clone(),
+                contig_id: contig_id,
                 feature_id: last_feature_id + 1,
                 feature_type: "intergenic".to_string(),
                 start: feature_start,
@@ -209,17 +213,15 @@ ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
 
         let features = result.unwrap();
         assert_eq!(features.len(), 2);
-        assert!(features.contains_key("contig1"));
-        assert!(features.contains_key("contig2"));
 
         // Check coordinates for contig1 exon
-        let contig1_features = &features["contig1"];
+        let contig1_features = &features[0];
         let exon = contig1_features.iter().find(|f| f.feature_type == "exon").unwrap();
         assert_eq!(exon.start, 99);  // GFF 100 becomes 0-indexed 99
         assert_eq!(exon.end, 200);
 
         // Check coordinates for contig2 exon
-        let contig2_features = &features["contig2"];
+        let contig2_features = &features[1];
         let exon = contig2_features.iter().find(|f| f.feature_type == "exon").unwrap();
         assert_eq!(exon.start, 49);  // GFF 50 becomes 0-indexed 49
         assert_eq!(exon.end, 150);
@@ -243,19 +245,15 @@ contig2\t.\texon\t50\t150\t.\t+\t.\tID=exon2";
         assert!(result.is_ok());
 
         let features = result.unwrap();
-        assert!(features.contains_key("contig1"));
-        assert!(features.contains_key("contig2"));
-        assert!(!features.get("contig1").unwrap().is_empty());
-        assert!(!features.get("contig2").unwrap().is_empty());
 
         // Check coordinates for contig1 exon
-        let contig1_features = &features["contig1"];
+        let contig1_features = &features[0];
         let exon = contig1_features.iter().find(|f| f.feature_type == "exon").unwrap();
         assert_eq!(exon.start, 99);  // GFF 100 becomes 0-indexed 99
         assert_eq!(exon.end, 200);
 
         // Check coordinates for contig2 exon
-        let contig2_features = &features["contig2"];
+        let contig2_features = &features[1];
         let exon = contig2_features.iter().find(|f| f.feature_type == "exon").unwrap();
         assert_eq!(exon.start, 49);  // GFF 50 becomes 0-indexed 49
         assert_eq!(exon.end, 150);

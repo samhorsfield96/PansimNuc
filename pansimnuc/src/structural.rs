@@ -126,6 +126,8 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
     // go through and delete any positions with value 0
     new_genome_seq.retain(|&x| x != 0);
 
+    let mut prev_seq_name: String = String::new();
+
     // generate new genome
     let mut new_genome: Vec<NucElement> = Vec::new();
 
@@ -150,8 +152,26 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
 }
 
 pub fn mutate_inter_genome (population: &mut Population) {
-    // TODO add recombination between genomes, need to think of way of identifying homologous regions and if each recombination event 
-    // has single or double crossovers
+    // TODO use  homology map to identify homologous regions, sample
+    // from poisson to determine how many recombination events occur, then size of track
+
+    let mut thread_rng = rand::thread_rng();
+    
+    // get number of recombination events across whole population
+    let n_recombinations = population.recombination_dist.sample(&mut thread_rng) as usize;
+
+    // sample combinations of recombinations
+
+
+    for genome in &mut population.pop {
+        // recombination, can model multiple recombinations repeatedly sampling until rand_val is above recombination rate
+        
+
+        if num_recombinations > 0 {
+            
+        }
+    }
+
 }
 
 #[cfg(test)]
