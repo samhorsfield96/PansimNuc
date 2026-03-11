@@ -1,6 +1,6 @@
 // in this script, genes can move around, be duplicated and deleted
 
-use crate::mutation::MutationMap;
+use crate::{mutation::MutationMap, population::NucElement};
 use std::collections::HashMap;
 use crate::population::Genome;
 use rand::rngs::StdRng;
@@ -35,10 +35,11 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
     // and poisson distribution to determine where duplication goes
 
     // store hashmap of positions of genome elements, can store multiple per entry to capture duplications
-    let new_positions: HashMap<usize, Vec<usize>> = HashMap::new(); // placeholder for new positions of each element after structural mutations, which will be used to update the mutation maps of each element after all structural mutations have been processed
+    let mut new_positions: HashMap<usize, Vec<i64>> = HashMap::new(); // placeholder for new positions of each element after structural mutations, which will be used to update the mutation maps of each element after all structural mutations have been processed
     let genome_size = genome.seq.len();
+    let mut max_position: usize = 0;
 
-    for (current_pos, element) in &mut genome.seq.iter().enumerate() {
+    for (current_pos , element) in &mut genome.seq.iter().enumerate() {
 
         //store element structure positions, with current position first
         let mut element_structure_vec: Vec<i64> = vec![current_pos as i64];
@@ -61,6 +62,14 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
 
             element_structure_vec.push(new_pos);
             rand_val = mu_dist.sample(&mut thread_rng);
+
+            // determine maximum position present
+            if new_pos as usize > max_position {
+                max_position = new_pos as usize;
+            }
+            if current_pos > max_position {
+                max_position = current_pos;
+            }
         }
 
         // deletions, only first gene deleted
@@ -73,10 +82,56 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
         
         // inversions, apply to all genes in element structure vec
         for pos in element_structure_vec.iter_mut() {
+            
+            // currently zero indexed, need to make 1 indexed so inversion logic works
+            *pos += 1i64;
+
             rand_val = mu_dist.sample(&mut thread_rng);
             if rand_val < element.structure_mutation_map.inversion_rate {
                 *pos *= -1i64;
             }
-        }       
+        }
+        max_position += 1usize; // account for 1 indexing
+
+        new_positions.insert(current_pos, element_structure_vec); 
     }
+
+    // generate new genome based on all intra-genome variation, current everything is 1-indexed
+    let mut new_genome_seq: Vec<i64> = vec![0; max_position];
+
+    // TODO need to be careful 0 index, assume this is empty position, also won't work with inverting strand
+    for idx in 0..genome_size {
+        if let Some(prev_pos) = new_positions.get(&idx) {
+            // value exists
+            for entry in prev_pos { 
+                if *entry == 0 {
+                    panic!("Entry for structural varient is 0, for position {} in genome {}", idx, genome.identifier);
+                }
+
+                let insertion_pos = entry.abs() as usize - 1; // convert back to 0 indexed
+                new_genome_seq[insertion_pos] = *entry;
+            }
+        } else {
+            // value doesn't exist
+            panic!("No structural entry for position {} in genome {}", idx, genome.identifier);
+        }
+    }
+
+    // go through and delete any positions with value 0
+    new_genome_seq.retain(|&x| x != 0);
+
+    // generate new genome
+    let mut new_genome: Vec<NucElement> = Vec::new();
+
+    for element_idx in new_genome_seq {
+        let invert: bool = if element_idx > 0 { false } else { true };
+        let mut new_element = genome.seq[element_idx.abs() as usize - 1].clone(); // convert back to 0 indexed
+        if invert {
+            new_element.strand = !new_element.strand;
+        }
+        new_genome.push(new_element);
+    }
+
+    genome.seq = new_genome;
+
 }

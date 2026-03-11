@@ -20,6 +20,7 @@ pub struct NucElement {
     pub selection_coefficient: f64,
     pub seq: Vec<u8>,
     pub mutation_map: MutationMap,
+    pub strand: bool,
     pub structure_mutation_map: StructureMutationMap,
 }
 
@@ -96,6 +97,7 @@ impl Population {
                     feature_id: feature.feature_id,
                     feature_type: feature.feature_type.clone(),
                     seq: feature.seq.clone(),
+                    strand: feature.strand,
                     mutation_map: MutationMap::new(selection_dist_id, mu_dist_id, &feature.seq, &selection_dists[selection_dist_id], rng),
                     structure_mutation_map: StructureMutationMap {
                         duplication_rate: 0.0,
