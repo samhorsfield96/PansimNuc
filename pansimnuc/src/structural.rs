@@ -31,7 +31,7 @@ pub struct StructureMutationMap {
 }
 
 // write function which runs through each element and determines whether a structural mutation occurs, and if so, which one, and where it moves to.
-pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, pos_dist: &MutationDistribution) {
+pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<usize>>>, mu_dist: &MutationDistribution, pos_dist: &MutationDistribution) {
     let mut thread_rng = rand::thread_rng();
 
     // For all intra genome comparisons, sample from uniform distribution to determine if variant occurs
@@ -43,7 +43,6 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
     let mut max_position: usize = 0;
 
     for (current_pos , element) in &mut genome.seq.iter().enumerate() {
-
         //store element structure positions, with current position first
         let mut element_structure_vec: Vec<i64> = vec![current_pos as i64];
         
@@ -106,7 +105,6 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
     // generate new genome based on all intra-genome variation, current everything is 1-indexed
     let mut new_genome_seq: Vec<i64> = vec![0; max_position];
 
-    // TODO need to be careful 0 index, assume this is empty position, also won't work with inverting strand
     for idx in 0..genome_size {
         if let Some(prev_pos) = new_positions.get(&idx) {
             // value exists
@@ -133,9 +131,16 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
     for element_idx in new_genome_seq {
         let invert: bool = if element_idx > 0 { false } else { true };
         let mut new_element = genome.seq[element_idx.abs() as usize - 1].clone(); // convert back to 0 indexed
+
         if invert {
             new_element.strand = !new_element.strand;
         }
+
+        // update homology map for new element
+        let element_id = new_element.element_id;
+        let mut homology_group = &mut homology_map[element_id][genome.genome_id];
+        homology_group.push(element_idx.abs() as usize - 1); // convert back to 0 indexed
+        
         new_genome.push(new_element);
     }
 

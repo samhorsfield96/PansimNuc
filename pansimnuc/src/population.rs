@@ -183,10 +183,14 @@ impl Population {
             let genome = &mut self.pop[idx];
 
             // duplications
-            mutate_intra_genome(genome, &duplication_mu_dist, &duplication_pos_dist);
+            mutate_intra_genome(genome, &mut self.homology_map, &duplication_mu_dist, &duplication_pos_dist);
 
             // translocations
-            mutate_intra_genome(genome, &translocation_mu_dist, &translocation_pos_dist);
+            // clear homology map to enable fresh creation of groups
+            self.homology_map.iter_mut().for_each(|element_homology_map| {
+                element_homology_map[idx].clear();
+            });
+            mutate_intra_genome(genome, &mut self.homology_map, &translocation_mu_dist, &translocation_pos_dist);
         }
     }
 
