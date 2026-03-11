@@ -1,6 +1,7 @@
 mod gff;
 mod config;
 mod population;
+mod structural;
 mod mutation;
 
 use clap::Parser;

@@ -1,6 +1,7 @@
 use crate::gff::FeaturePos;
 use crate::mutation::MutationMap;
 use crate::mutation::Distribution as MutationDistribution;
+use crate::structural::StructureMutationMap;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
@@ -16,8 +17,10 @@ pub struct NucElement {
     pub seqname: String,
     pub feature_id: usize,
     pub feature_type: String,
+    pub selection_coefficient: f64,
     pub seq: Vec<u8>,
-    pub mutation_map: MutationMap
+    pub mutation_map: MutationMap,
+    pub structure_mutation_map: StructureMutationMap,
 }
 
 pub struct Genome {
@@ -94,6 +97,13 @@ impl Population {
                     feature_type: feature.feature_type.clone(),
                     seq: feature.seq.clone(),
                     mutation_map: MutationMap::new(selection_dist_id, mu_dist_id, &feature.seq, &selection_dists[selection_dist_id], rng),
+                    structure_mutation_map: StructureMutationMap {
+                        duplication_rate: 0.0,
+                        deletion_rate: 0.0,
+                        inversion_rate: 0.0,
+                        recombination_rate: 0.0,
+                    },
+                    selection_coefficient: 0.0, // Initialize with a default value, can be updated later
                 });
             }
         }
@@ -132,18 +142,20 @@ impl Population {
     }   
 
     // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights
-    pub fn sample_individuals (&self, rng: &mut StdRng) -> Vec<usize> {
+    pub fn sample_individuals (&mut self, rng: &mut StdRng) -> Vec<usize> {
         let mut selection_weights: Vec<f64> = vec![1.0; self.pop.len()];
         
         selection_weights = self.pop
-            .par_iter()
+            .par_iter_mut()
             .map(|genome| {
                 let mut log_sum = 0.0;
-                for element in &genome.seq {
+                for element in &mut genome.seq {
+                    let mut element_log_sum = 0.0;
                     for (site, allele) in element.seq.iter().enumerate() {
                         let allele_shifted = 1 >> allele;
                         if let Some(coeff) = element.mutation_map.get(*allele, site) {
                             log_sum += coeff;
+                            element_log_sum += coeff;
                         } else {
                             panic!(
                                 "Failed to generate selection coefficient for genome {} allele {} (shifted {}) at site {}",
@@ -151,6 +163,8 @@ impl Population {
                             );
                         }
                     }
+                    
+                    element.selection_coefficient = element_log_sum;
                 }
                 log_sum
             })
