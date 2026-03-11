@@ -214,7 +214,9 @@ mod tests {
 
         let mu = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
-        mutate_intra_genome(&mut genome, &mu, &pos);
+        // homology_map: outer = element_id (0..2), inner = genome_id (0..1)
+        let mut homology_map: Vec<Vec<Vec<usize>>> = vec![vec![vec![]], vec![vec![]]];
+        mutate_intra_genome(&mut genome, &mut homology_map, &mu, &pos);
 
         let after_strands: Vec<bool> = genome.seq.iter().map(|e| e.strand).collect();
         assert_ne!(before_strands, after_strands, "strands should flip after forced inversion");
@@ -232,7 +234,8 @@ mod tests {
 
         let mu = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
-        mutate_intra_genome(&mut genome, &mu, &pos);
+        let mut homology_map: Vec<Vec<Vec<usize>>> = vec![vec![vec![]], vec![vec![]]];
+        mutate_intra_genome(&mut genome, &mut homology_map, &mu, &pos);
 
         assert!(genome.seq.len() < before_len, "genome should shrink after forced deletion");
     }
@@ -257,7 +260,8 @@ mod tests {
         // Use a non-zero offset so duplicates land somewhere other than position 0.
         let mu = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
         let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
-        mutate_intra_genome(&mut genome, &mu, &pos);
+        let mut homology_map: Vec<Vec<Vec<usize>>> = vec![vec![vec![]], vec![vec![]]];
+        mutate_intra_genome(&mut genome, &mut homology_map, &mu, &pos);
 
         assert_eq!(
             genome.seq.len(),

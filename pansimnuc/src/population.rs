@@ -261,11 +261,18 @@ impl Population {
                 parent: selected_genome.identifier.clone(),
                 seq: selected_genome.seq.clone(),
             });
-
-            new_homology_map.push(self.homology_map[selected_index].clone());
-
             genome_id += 1;
         }
+
+        // update homology map
+        for element_homology_map in &self.homology_map {
+            let mut new_element_homology_map: Vec<Vec<usize>> = Vec::new();
+            for &selected_index in &sampled_indices {
+                new_element_homology_map.push(element_homology_map[selected_index].clone());
+            }
+            new_homology_map.push(new_element_homology_map);
+        }
+
         self.pop = new_pop;
         self.homology_map = new_homology_map;
         self.generation += 1;
