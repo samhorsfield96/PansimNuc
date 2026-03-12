@@ -197,23 +197,29 @@ pub fn mutate_inter_genome (population: &mut Population) {
 
     // iterate through each donor and recipient pair
     for (donor, recipients) in recombination_map {
-        let donor_genome = &population.pop[donor];
         for recipient in recipients {
-            let recipient_genome = &mut population.pop[recipient];
+            // donor != recipient by construction (from all_pairs)
+            let (donor_genome, recipient_genome): (&Genome, &mut Genome) = if donor < recipient {
+                let (left, right) = population.pop.split_at_mut(recipient);
+                (&left[donor], &mut right[0])
+            } else {
+                let (left, right) = population.pop.split_at_mut(donor);
+                (&right[0], &mut left[recipient])
+            };
 
             // look for donor and recipient site, maximum 25 attempts, if not found, skip recombination event
             let mut donor_site_chosen : bool = false;
             let mut attempts = 0;
             let max_attempts = 25;
 
-            let mut start_donor_site: usize;
-            let mut start_recipient_site: usize;
+            let mut start_donor_site: usize = 0;
+            let mut start_recipient_site: usize = 0;
 
             while !donor_site_chosen && attempts < max_attempts {
                 let recombination_pos = thread_rng.gen_range(0..donor_genome.seq.len());
 
                 // determine if position in both donor and recipient genome, if not, resample
-                let recomb_element = population.homology_map[recombination_pos];
+                let recomb_element = &population.homology_map[recombination_pos];
 
                 let donor_has_site = !recomb_element[donor].is_empty();
                 let recipient_has_site = recomb_element.len() > recipient && !recomb_element[recipient].is_empty();
@@ -250,7 +256,7 @@ pub fn mutate_inter_genome (population: &mut Population) {
                 let mut track_found = false;
                 let mut end_donor_site = start_donor_site;
                 let mut end_recipient_site = start_recipient_site;
-                let mut recombination_len = &donor_genome.seq[start_donor_site].seq.len();
+                let mut recombination_len = donor_genome.seq[start_donor_site].seq.len();
 
                 // ensure recombination occurs in single chromosome each
                 let donor_contig_id = donor_genome.seq[start_donor_site].contig_id;
@@ -258,12 +264,12 @@ pub fn mutate_inter_genome (population: &mut Population) {
 
                 while !track_found {
                     // determine length of donor DNA
-                    while recombination_len < &min_recombination_len {
+                    while recombination_len < min_recombination_len {
                         let new_end_donor_site = end_donor_site + 1;
                         
                         // run off end of contig, assume complete recombination
                         if donor_genome.seq[new_end_donor_site].contig_id != donor_contig_id || new_end_donor_site >= donor_genome.seq.len() {
-                            recombination_len += &donor_genome.seq[end_donor_site].seq.len();
+                            recombination_len += donor_genome.seq[end_donor_site].seq.len();
 
                             // find end of recipient track
                             let mut contig_end = false;
@@ -282,8 +288,7 @@ pub fn mutate_inter_genome (population: &mut Population) {
 
                         // else continue going through contig
                         end_donor_site = new_end_donor_site;
-                        recombination_len += &donor_genome.seq[end_donor_site].seq.len();
-
+                        recombination_len += donor_genome.seq[end_donor_site].seq.len();
 
                     }
 
@@ -296,7 +301,7 @@ pub fn mutate_inter_genome (population: &mut Population) {
                         let new_end_recipient_site = end_recipient_site + 1;
 
                         // run off end of contig, assume complete recombination
-                        if donor_genome.seq[new_end_donor_site].contig_id != recipient_contig_id || new_end_donor_site >= recipient_genome.seq.len() {
+                        if recipient_genome.seq[new_end_recipient_site].contig_id != recipient_contig_id || new_end_recipient_site >= recipient_genome.seq.len() {
                             recipient_end_found = true;
                             break;
                         }
@@ -315,12 +320,15 @@ pub fn mutate_inter_genome (population: &mut Population) {
 
                 // perform recombination event, replacing recipient track with donor track
                 // clone the donor track first, before any mutable borrow of population.pop
-                let mut donor_track: Vec<NucElement> = population.pop[donor].seq[start_donor_site..=end_donor_site].to_vec();
+                let mut donor_track: Vec<NucElement> = donor_genome.seq[start_donor_site..=end_donor_site].to_vec().clone();
 
                 // update information from recipient track
                 for element in &mut donor_track {
                     element.contig_id = recipient_contig_id;
                 }
+
+                // store donor_track length before it is moved
+                let donor_track_len = donor_track.len();
 
                 // update homology map for recipient genome, need to add new positions for each element in donor track, and remove old positions for each element in recipient track
                 // remove old positions
@@ -334,7 +342,7 @@ pub fn mutate_inter_genome (population: &mut Population) {
                 recipient_genome.seq.splice(start_recipient_site..=end_recipient_site, donor_track);
 
                 // add new positions
-                for element_idx in start_recipient_site..start_recipient_site + donor_track.len() {
+                for element_idx in start_recipient_site..start_recipient_site + donor_track_len {
                     let element_id = recipient_genome.seq[element_idx].element_id;
                     let homology_group = &mut population.homology_map[element_id][recipient_genome.genome_id];
                     homology_group.push(element_idx); // add new position
@@ -370,7 +378,7 @@ mod tests {
             parent: "root".to_string(),
             seq: vec![
                 NucElement {
-                    seqname: "chr1".to_string(),
+                    contig_id: 0,
                     element_id: 0,
                     feature_id: 0,
                     feature_type: "exon".to_string(),
@@ -381,7 +389,7 @@ mod tests {
                     structure_mutation_map: base_map.clone(),
                 },
                 NucElement {
-                    seqname: "chr1".to_string(),
+                    contig_id: 0,
                     element_id: 1,
                     feature_id: 1,
                     feature_type: "exon".to_string(),
@@ -392,7 +400,7 @@ mod tests {
                     structure_mutation_map: base_map.clone(),
                 },
                 NucElement {
-                    seqname: "chr1".to_string(),
+                    contig_id: 0,
                     element_id: 2,
                     feature_id: 2,
                     feature_type: "exon".to_string(),
