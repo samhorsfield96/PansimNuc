@@ -312,7 +312,35 @@ pub fn mutate_inter_genome (population: &mut Population) {
                         end_recipient_site = new_end_recipient_site;
                     }
                 }
+
+                // perform recombination event, replacing recipient track with donor track
+                // clone the donor track first, before any mutable borrow of population.pop
+                let mut donor_track: Vec<NucElement> = population.pop[donor].seq[start_donor_site..=end_donor_site].to_vec();
+
+                // update information from recipient track
+                for element in &mut donor_track {
+                    element.contig_id = recipient_contig_id;
+                }
+
+                // update homology map for recipient genome, need to add new positions for each element in donor track, and remove old positions for each element in recipient track
+                // remove old positions
+                for element_idx in start_recipient_site..=end_recipient_site {
+                    let element_id = recipient_genome.seq[element_idx].element_id;
+                    let homology_group = &mut population.homology_map[element_id][recipient_genome.genome_id];
+                    homology_group.retain(|&pos| pos != element_idx); // remove old position
+                }
+                
+                // now safe to mutably borrow recipient
+                recipient_genome.seq.splice(start_recipient_site..=end_recipient_site, donor_track);
+
+                // add new positions
+                for element_idx in start_recipient_site..start_recipient_site + donor_track.len() {
+                    let element_id = recipient_genome.seq[element_idx].element_id;
+                    let homology_group = &mut population.homology_map[element_id][recipient_genome.genome_id];
+                    homology_group.push(element_idx); // add new position
+                }
             }
+        }
     }
 }
 
