@@ -70,22 +70,29 @@ fn main() {
 				if let (Some(n_individuals_str), Some(n_generation_str)) = (configuration.get("population.n_individuals"), configuration.get("population.n_generations")) {
 					
 					// generate distributions to draw mutations from
-					// placeholder for mutation map, which will be added to each NucElement in the genome
+					// selection distrubtions
         			let exon_dist = Distribution::new_double_exp(1.0, 10.0, 0.5).expect("Failed to create selection distribution for exon features");
         			let intron_dist = Distribution::new_normal(0.0, 1.0).expect("Failed to create selection distribution for intron features");
         			let intergenic_dist = Distribution::new_exp(1.0).expect("Failed to create selection distribution for intergenic features");
 
+					// mutation rate distributions
 					let exon_mu = Distribution::new_poisson(0.000001).expect("Failed to create mu dist for exon features");
         			let intron_mu = Distribution::new_poisson(0.00001).expect("Failed to create mu dist for intron features");
         			let intergenic_mu = Distribution::new_poisson(0.0001).expect("Failed to create mu dist for intergenic features");
 
+					// recombination distributions
+					let recombination_prob_dist = Distribution::new_poisson(5.0).expect("Failed to create recombination probability distribution");
+					let recombination_size_dist = Distribution::new_poisson(1000.0).expect("Failed to create recombination distance probability distribution");
+					let recombination_threshold = 0.90;
+
 					let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
 					let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
+					let recombination_dists = vec![recombination_prob_dist, recombination_size_dist];
 
 					// generate initial population
 					let n_individuals: usize = n_individuals_str.parse::<usize>().expect("n_individuals must be an integer.");
 					println!("Initialising population...");
-					let mut population = Population::new(features, n_individuals, site_mutation_dists, site_mutation_mus, &mut rng);
+					let mut population = Population::new(features, n_individuals, site_mutation_dists, site_mutation_mus, recombination_dists, recombination_threshold, &mut rng);
 					println!("Finished initialising population...");
 
 					// mutate population
