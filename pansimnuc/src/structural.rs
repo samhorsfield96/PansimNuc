@@ -28,7 +28,6 @@ pub struct StructureMutationMap {
     pub duplication_rate: f64,
     pub deletion_rate: f64,
     pub inversion_rate: f64,
-    pub recombination_rate: f64,
     /// Cap on the number of duplications per element per generation.
     /// `None` means no cap (behaviour unchanged from before this field was added).
     pub max_duplications: Option<usize>,
@@ -63,7 +62,7 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
     let mut new_positions: HashMap<i64, Vec<(usize, i64)>> = HashMap::new();
     let mut max_position: usize = 0;
 
-    // TODO check which contig each block will be inserted into
+    // check which contig each block will be inserted into
     let contig_starts = &genome.contig_starts;
 
     for (current_pos , element) in &mut genome.seq.iter().enumerate() {
@@ -141,7 +140,6 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
     }
 
     // generate new genome based on all intra-genome variation, current everything is 1-indexed
-    // TODO could append sequences here to prevent overwriting of duplications and previous sequnces
     let mut new_genome_seq: Vec<(usize, i64)> = Vec::new();
 
     // iterate through each position, indexed by new position
@@ -331,7 +329,6 @@ pub fn mutate_inter_genome (population: &mut Population) {
                 // perform recombination event, replacing recipient track with donor track
                 // clone the donor track first, before any mutable borrow of population.pop
                 let mut donor_track: Vec<NucElement> = donor_genome.seq[start_donor_site..=end_donor_site].to_vec().clone();
-                let mut recipient_track: Vec<NucElement> = recipient_genome.seq[start_recipient_site..=end_recipient_site].to_vec().clone();
 
                 // update information from recipient track
                 for element in &mut donor_track {
@@ -358,6 +355,8 @@ pub fn mutate_inter_genome (population: &mut Population) {
                     let homology_group = &mut population.homology_map[element_id][recipient_genome.genome_id];
                     homology_group.push(element_idx); // add new position
                 }
+
+                // TODO update contig_ids
             }
         }
     }
@@ -376,7 +375,6 @@ mod tests {
             duplication_rate: 0.0,
             deletion_rate: 0.0,
             inversion_rate: 0.0,
-            recombination_rate: 0.0,
             max_duplications: None,
             duplication_insertion_prob: 0.5,
         };
@@ -431,7 +429,6 @@ mod tests {
             duplication_rate: 0.0,
             deletion_rate: 0.0,
             inversion_rate: 0.0,
-            recombination_rate: 0.0,
             max_duplications: None,
             duplication_insertion_prob: 0.5,
         };
@@ -477,7 +474,6 @@ mod tests {
             duplication_rate: 0.0,
             deletion_rate: 0.0,
             inversion_rate: 0.0,
-            recombination_rate: 0.0,
             max_duplications: None,
             duplication_insertion_prob: 0.5,
         };

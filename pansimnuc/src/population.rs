@@ -2,6 +2,7 @@ use crate::gff::FeaturePos;
 use crate::mutation::MutationMap;
 use crate::mutation::Distribution as MutationDistribution;
 use crate::structural::mutate_intra_genome;
+use crate::structural::mutate_inter_genome;
 use crate::structural::StructureMutationMap;
 use std::collections::HashMap;
 use std::fs::File;
@@ -35,16 +36,6 @@ pub struct Genome {
 }
 
 impl Genome {
-    pub fn new(identifier: String, genome_id: usize, parent: String, seq: Vec<NucElement>) -> Self {
-        Self {
-            identifier,
-            genome_id,
-            contig_starts: Vec::new(),
-            parent,
-            seq,
-        }
-    }
-
     pub fn update_contig_starts(&mut self) {
         self.contig_starts.clear();
         let mut current_start = 0;
@@ -146,7 +137,6 @@ impl Population {
                         duplication_rate: 0.0,
                         deletion_rate: 0.0,
                         inversion_rate: 0.0,
-                        recombination_rate: 0.0,
                         max_duplications: None,
                         duplication_insertion_prob: 0.5,
                     },
@@ -228,6 +218,11 @@ impl Population {
             });
             mutate_intra_genome(genome, &mut self.homology_map, &translocation_mu_dist, &translocation_pos_dist);
         }
+    }
+
+    pub fn structural_inter_genome(&mut self) {
+        // recombination
+        mutate_inter_genome(self);
     }
 
     // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights

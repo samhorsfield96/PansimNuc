@@ -99,7 +99,16 @@ fn main() {
 					let n_generation: usize = n_generation_str.parse::<usize>().expect("n_generation must be an integer.");
 										
 					for generation in 0..n_generation {
+						// mutate at nucleotide level
 						population.mutate();
+
+						// perform intragenome structural mutations
+						population.structural_intra_genome();
+
+						// perform intergenome structural mutations
+						population.structural_inter_genome();
+
+						// sample next generation
 						let sampled_indices = population.sample_individuals(&mut rng);
 						population.next_generation(sampled_indices);
 						eprintln!("Finished generation {generation}");
