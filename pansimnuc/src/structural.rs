@@ -60,14 +60,18 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
     // and poisson distribution to determine where duplication goes
 
     // store hashmap of positions of genome elements, can store multiple per entry to capture duplications
-    let mut new_positions: HashMap<i64, Vec<(usize, i64)>> = HashMap::new(); // placeholder for new positions of each element after structural mutations, which will be used to update the mutation maps of each element after all structural mutations have been processed
-    let genome_size = genome.seq.len();
+    let mut new_positions: HashMap<i64, Vec<(usize, i64)>> = HashMap::new();
     let mut max_position: usize = 0;
 
     // TODO check which contig each block will be inserted into
     let contig_starts = &genome.contig_starts;
 
     for (current_pos , element) in &mut genome.seq.iter().enumerate() {
+        // determine maximum position
+        if current_pos > max_position {
+            max_position = current_pos;
+        }
+
         //store element structure positions, with current position first
         let mut new_positions_vec: Vec<(usize, i64)> = vec![(element.contig_id, current_pos as i64)];
         
@@ -107,9 +111,6 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
             if new_pos as usize > max_position {
                 max_position = new_pos as usize;
             }
-            if current_pos > max_position {
-                max_position = current_pos;
-            }
         }
 
         // deletions, only first gene deleted which is original position
@@ -143,6 +144,8 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
     // TODO could append sequences here to prevent overwriting of duplications and previous sequnces
     let mut new_genome_seq: Vec<(usize, i64)> = Vec::new();
 
+    println!("new_positions: {:?}", new_positions);
+
     // iterate through each position, indexed by new position
     for idx in 0..=max_position {
         if let Some(prev_pos) = new_positions.get(&(idx as i64)) {
@@ -158,7 +161,8 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
         }
     }
 
-    let mut prev_contig_id = 0;
+    println!("max_position: {}", max_position);
+    println!("new_genome_seq: {:?}", new_genome_seq);
 
     // generate new genome
     let mut new_genome: Vec<NucElement> = Vec::new();
@@ -311,7 +315,6 @@ pub fn mutate_inter_genome (population: &mut Population) {
                     let mut recipient_end_found = false;
                     while !recipient_end_found {
                         let new_end_recipient_site = end_recipient_site + 1;
-
                         // run off end of contig, assume complete recombination
                         if recipient_genome.seq[new_end_recipient_site].contig_id != recipient_contig_id || new_end_recipient_site >= recipient_genome.seq.len() {
                             recipient_end_found = true;
