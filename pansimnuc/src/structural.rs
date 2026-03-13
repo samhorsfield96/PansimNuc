@@ -427,6 +427,52 @@ mod tests {
         }
     }
 
+    fn make_multi_contig_test_genome() -> Genome {
+        let base_map = StructureMutationMap {
+            duplication_rate: 0.0,
+            deletion_rate: 0.0,
+            inversion_rate: 0.0,
+            recombination_rate: 0.0,
+            max_duplications: None,
+            duplication_insertion_prob: 0.5,
+        };
+        let mut rng = StdRng::seed_from_u64(42);
+        let sel_dist = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
+
+        let make_element = |contig_id: usize,
+                            element_id: usize,
+                            feature_id: usize,
+                            strand: bool,
+                            base_map: &StructureMutationMap,
+                            sel_dist: &MutationDistribution,
+                            rng: &mut StdRng| NucElement {
+            contig_id,
+            element_id,
+            feature_id,
+            feature_type: "exon".to_string(),
+            selection_coefficient: 0.0,
+            seq: vec![],
+            mutation_map: MutationMap::new(0, 0, &vec![], sel_dist, rng),
+            strand,
+            structure_mutation_map: base_map.clone(),
+        };
+
+        Genome {
+            identifier: "test_multi_contig".to_string(),
+            genome_id: 0,
+            parent: "root".to_string(),
+            contig_starts: vec![0, 2, 4],
+            seq: vec![
+                make_element(0, 0, 0, true, &base_map, &sel_dist, &mut rng),
+                make_element(0, 1, 1, false, &base_map, &sel_dist, &mut rng),
+                make_element(1, 2, 2, true, &base_map, &sel_dist, &mut rng),
+                make_element(1, 3, 3, false, &base_map, &sel_dist, &mut rng),
+                make_element(2, 4, 4, true, &base_map, &sel_dist, &mut rng),
+                make_element(2, 5, 5, false, &base_map, &sel_dist, &mut rng),
+            ],
+        }
+    }
+
     #[test]
     fn inversion_flips_strand() {
         let mut genome = make_test_genome();
@@ -512,5 +558,34 @@ mod tests {
         after_ids.sort();
         expected.sort();
         assert_eq!(after_ids, expected, "translocation should not add or remove genes");
+    }
+
+    #[test]
+    fn multi_contig_ids_remain_in_ascending_order() {
+        let mut genome = make_multi_contig_test_genome();
+
+        for e in &mut genome.seq {
+            e.structure_mutation_map.duplication_rate = 1.0;
+            e.structure_mutation_map.max_duplications = Some(1);
+            e.structure_mutation_map.deletion_rate = 0.0;
+            e.structure_mutation_map.inversion_rate = 0.0;
+        }
+
+        let mu = MutationDistribution::new_uniform(0.0, 0.9).unwrap();
+        let pos = MutationDistribution::new_uniform(0.0, 0.9).unwrap();
+        let mut homology_map: Vec<Vec<Vec<usize>>> = vec![vec![vec![]]; genome.seq.len()];
+
+        mutate_intra_genome(&mut genome, &mut homology_map, &mu, &pos);
+
+        let contig_ids: Vec<usize> = genome.seq.iter().map(|e| e.contig_id).collect();
+        assert!(!contig_ids.is_empty(), "mutated genome should not be empty");
+        assert_eq!(contig_ids.first().copied(), Some(0), "first contig should be 0");
+        assert!(contig_ids.windows(2).all(|w| w[0] <= w[1]), "contig ids should be non-decreasing");
+
+        let mut unique_contigs = contig_ids.clone();
+        unique_contigs.dedup();
+        assert!(unique_contigs.len() > 1, "test should contain multiple contigs");
+        let expected_contigs: Vec<usize> = (0..unique_contigs.len()).collect();
+        assert_eq!(unique_contigs, expected_contigs, "contigs should progress upward from 0");
     }
 }

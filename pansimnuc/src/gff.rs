@@ -50,6 +50,8 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
         if prev_seqname != seqname {
             contig_id += 1;
             prev_seqname = seqname.clone();
+            features.push(Vec::new());
+            last_feature_end = 0;
         }
 
         let feature_type: String = record.ty().to_string();
@@ -125,18 +127,15 @@ pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<Vec<Vec<Fe
     // Load FASTA records into memory keyed by contig name.
     let mut fasta_reader = fasta::io::Reader::new(BufReader::new(file_fasta));
 
-    let mut genome: HashMap<String, String> = HashMap::new();
+    let mut genome: Vec<String> = Vec::new();
 
     for result in fasta_reader.records() {
         let record = result?;
-        genome.insert(
-            String::from_utf8_lossy(record.name()).into_owned(),
-            String::from_utf8_lossy(record.sequence().as_ref()).into_owned(),
-        );
+        genome.push(String::from_utf8_lossy(record.sequence().as_ref()).into_owned());
     }
 
     for (contig_id, results) in features.iter_mut().enumerate() {
-        if let Some(seq) = genome.get(&contig_id.to_string()) {
+        if let Some(seq) = genome.get(contig_id) {
             let mut last_feature_end: usize = 0;
             let mut last_feature_id:usize = 0;
             

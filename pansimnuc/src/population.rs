@@ -294,6 +294,7 @@ impl Population {
             new_pop.push(Genome {
                 identifier: format!("{}-{}", self.generation + 1, selected_genome.identifier),
                 genome_id: genome_id,
+                contig_starts: selected_genome.contig_starts.clone(),
                 parent: selected_genome.identifier.clone(),
                 seq: selected_genome.seq.clone(),
             });
@@ -496,7 +497,7 @@ mod tests {
             .read_to_string(&mut content)
             .expect("failed to read test FASTA file");
 
-        assert!(content.contains(">0_chr1 parent=root generation=0"));
+        assert!(content.contains(">0_contig0 parent=root generation=0"));
         assert!(content.contains("ACGT"));
 
         let _ = fs::remove_file(genome_output_path);
