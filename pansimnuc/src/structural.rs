@@ -8,6 +8,7 @@ use rand::Rng;
 use crate::mutation::Distribution as MutationDistribution;
 extern crate levenshtein;
 use levenshtein::levenshtein;
+use std::collections::HashSet;
 
 // TODO need to think of way of rearranging each feature, and taking into account where insertions
 // and translocations occur. Also need two different TE compartments, one which copies and inserts
@@ -59,13 +60,13 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
     // and poisson distribution to determine where duplication goes
 
     // store hashmap of positions of genome elements, can store multiple per entry to capture duplications
-    let mut new_positions: HashMap<usize, Vec<i64>> = HashMap::new(); // placeholder for new positions of each element after structural mutations, which will be used to update the mutation maps of each element after all structural mutations have been processed
+    let mut new_positions: HashMap<i64, Vec<i64>> = HashMap::new(); // placeholder for new positions of each element after structural mutations, which will be used to update the mutation maps of each element after all structural mutations have been processed
     let genome_size = genome.seq.len();
     let mut max_position: usize = 0;
 
     for (current_pos , element) in &mut genome.seq.iter().enumerate() {
         //store element structure positions, with current position first
-        let mut element_structure_vec: Vec<i64> = vec![current_pos as i64];
+        let mut new_positions_vec: Vec<i64> = vec![current_pos as i64];
         
         // duplications, can model multiple duplications repeatedly sampling until rand_val is above duplication rate
         let mut rand_val = mu_dist.sample(&mut thread_rng);
@@ -81,13 +82,13 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
             let pos_rand_val = mu_dist.sample(&mut thread_rng);
             let pos_order: i64 = if pos_rand_val < element.structure_mutation_map.duplication_insertion_prob { -1 } else { 1 };
             let mut new_pos = current_pos as i64 + (duplication_pos * pos_order);
+
+            // assign to 0 if before start of genome
             if new_pos < 0 {
                 new_pos = 0;
-            } else if new_pos >= genome_size as i64 {
-                new_pos = genome_size as i64 - 1;
             }
 
-            element_structure_vec.push(new_pos);
+            new_positions_vec.push(new_pos);
             rand_val = mu_dist.sample(&mut thread_rng);
 
             // determine maximum position present
@@ -99,52 +100,51 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
             }
         }
 
-        // deletions, only first gene deleted
+        // deletions, only first gene deleted which is original position
         rand_val = mu_dist.sample(&mut thread_rng);
         if rand_val < element.structure_mutation_map.deletion_rate {
-            let _ = element_structure_vec.remove(0);
+            let _ = new_positions_vec.remove(0);
         }
 
         // translocations not explicitely modelled, as captured by simulatenous duplication and deletion event
         
         // inversions, apply to all genes in element structure vec
-        for pos in element_structure_vec.iter_mut() {
+        for pos in new_positions_vec {
             
-            // currently zero indexed, need to make 1 indexed so inversion logic works
-            *pos += 1i64;
+            let mut inversion = 1;
 
+            // flip sign
             rand_val = mu_dist.sample(&mut thread_rng);
             if rand_val < element.structure_mutation_map.inversion_rate {
-                *pos *= -1i64;
+                inversion = -1;
             }
-        }
-        max_position += 1usize; // account for 1 indexing
 
-        new_positions.insert(current_pos, element_structure_vec); 
+            // now update new_positions, indexed by new position, 
+            // with old entry as value either as positive or negative value depending on whether it is inverted or not and 1 indexed
+            let key = pos;
+            let value = (current_pos as i64 + 1) * inversion; // store old position as value, which can be used to update mutation map of element after all structural mutations have been processed
+            new_positions.entry(key).or_default().push(value);
+        }
     }
 
     // generate new genome based on all intra-genome variation, current everything is 1-indexed
-    let mut new_genome_seq: Vec<i64> = vec![0; max_position];
+    // TODO could append sequences here to prevent overwriting of duplications and previous sequnces
+    let mut new_genome_seq: Vec<i64> = Vec::new();
 
-    for idx in 0..genome_size {
-        if let Some(prev_pos) = new_positions.get(&idx) {
+    // iterate through each position, indexed by new position
+    for idx in 0..=max_position {
+        if let Some(prev_pos) = new_positions.get(&(idx as i64)) {
             // value exists
             for entry in prev_pos { 
                 if *entry == 0 {
                     panic!("Entry for structural varient is 0, for position {} in genome {}", idx, genome.identifier);
                 }
-
-                let insertion_pos = entry.abs() as usize - 1; // convert back to 0 indexed
-                new_genome_seq[insertion_pos] = *entry;
+                
+                // append entry, meaning that genes are not deleted, appended in order
+                new_genome_seq.push(*entry);
             }
-        } else {
-            // value doesn't exist
-            panic!("No structural entry for position {} in genome {}", idx, genome.identifier);
         }
     }
-
-    // go through and delete any positions with value 0
-    new_genome_seq.retain(|&x| x != 0);
 
     let mut prev_contig_id = 0;
 
