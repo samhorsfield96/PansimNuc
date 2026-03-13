@@ -669,6 +669,16 @@ mod tests {
     fn inter_genome_recombination_zero_events_is_noop() {
         let mut population = make_recombination_test_population(0, 8);
 
+        let element_ids_before: Vec<Vec<usize>> = population
+            .pop
+            .iter()
+            .map(|genome| genome.seq.iter().map(|e| e.element_id).collect())
+            .collect();
+
+        for (genome_idx, ids) in element_ids_before.iter().enumerate() {
+            println!("Before recombination - genome {} element_ids: {:?}", genome_idx, ids);
+        }
+
         let mixed_before = count_mixed_marker_genomes(&population);
         assert_eq!(mixed_before, 0, "before recombination, genomes should not be mixed");
 
@@ -676,6 +686,16 @@ mod tests {
         mutate_inter_genome(&mut population);
         let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         let mixed_after = count_mixed_marker_genomes(&population);
+
+        let element_ids_after: Vec<Vec<usize>> = population
+            .pop
+            .iter()
+            .map(|genome| genome.seq.iter().map(|e| e.element_id).collect())
+            .collect();
+
+        for (genome_idx, ids) in element_ids_after.iter().enumerate() {
+            println!("After recombination - genome {} element_ids: {:?}", genome_idx, ids);
+        }
 
         assert_eq!(population.pop.len(), 2, "population size should be unchanged");
         assert_eq!(total_after, total_before, "no forced recombination should not change total length in this deterministic setup");
@@ -724,6 +744,16 @@ mod tests {
         let forced_events = 3;
         let mut population = make_recombination_test_population(forced_events, 8);
 
+        let element_ids_before: Vec<Vec<usize>> = population
+            .pop
+            .iter()
+            .map(|genome| genome.seq.iter().map(|e| e.element_id).collect())
+            .collect();
+
+        for (genome_idx, ids) in element_ids_before.iter().enumerate() {
+            println!("Before recombination - genome {} element_ids: {:?}", genome_idx, ids);
+        }
+
         let mixed_before = count_mixed_marker_genomes(&population);
         assert_eq!(mixed_before, 0, "before recombination, genomes should not be mixed");
 
@@ -731,6 +761,16 @@ mod tests {
         mutate_inter_genome(&mut population);
         let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         let mixed_after = count_mixed_marker_genomes(&population);
+
+        let element_ids_after: Vec<Vec<usize>> = population
+            .pop
+            .iter()
+            .map(|genome| genome.seq.iter().map(|e| e.element_id).collect())
+            .collect();
+
+        for (genome_idx, ids) in element_ids_after.iter().enumerate() {
+            println!("After recombination - genome {} element_ids: {:?}", genome_idx, ids);
+        }
 
         assert_eq!(population.pop.len(), 2, "population size should be unchanged");
         assert_eq!(
