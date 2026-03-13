@@ -144,8 +144,6 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
     // TODO could append sequences here to prevent overwriting of duplications and previous sequnces
     let mut new_genome_seq: Vec<(usize, i64)> = Vec::new();
 
-    println!("new_positions: {:?}", new_positions);
-
     // iterate through each position, indexed by new position
     for idx in 0..=max_position {
         if let Some(prev_pos) = new_positions.get(&(idx as i64)) {
@@ -160,9 +158,6 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
             }
         }
     }
-
-    println!("max_position: {}", max_position);
-    println!("new_genome_seq: {:?}", new_genome_seq);
 
     // generate new genome
     let mut new_genome: Vec<NucElement> = Vec::new();
@@ -476,6 +471,83 @@ mod tests {
         }
     }
 
+    fn make_recombination_test_genome(genome_id: usize, n_elements: usize, strand_seed: bool, marker_base: u8) -> Genome {
+        let base_map = StructureMutationMap {
+            duplication_rate: 0.0,
+            deletion_rate: 0.0,
+            inversion_rate: 0.0,
+            recombination_rate: 0.0,
+            max_duplications: None,
+            duplication_insertion_prob: 0.5,
+        };
+        let mut rng = StdRng::seed_from_u64(100 + genome_id as u64);
+        let sel_dist = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
+
+        let mut seq: Vec<NucElement> = Vec::new();
+        for idx in 0..n_elements {
+            let marker_seq = vec![marker_base; 4];
+            seq.push(NucElement {
+                contig_id: 0,
+                element_id: idx,
+                feature_id: idx,
+                feature_type: "exon".to_string(),
+                selection_coefficient: 0.0,
+                seq: marker_seq.clone(),
+                mutation_map: MutationMap::new(0, 0, &marker_seq, &sel_dist, &mut rng),
+                strand: if idx % 2 == 0 { strand_seed } else { !strand_seed },
+                structure_mutation_map: base_map.clone(),
+            });
+        }
+
+        Genome {
+            identifier: format!("recomb_{}", genome_id),
+            genome_id,
+            parent: "root".to_string(),
+            contig_starts: vec![0],
+            seq,
+        }
+    }
+
+    fn make_recombination_test_population(forced_events: usize, n_elements: usize) -> Population {
+        // genome 0 starts with marker base 1 (A), genome 1 starts with marker base 2 (C)
+        let g0 = make_recombination_test_genome(0, n_elements, true, 1);
+        let g1 = make_recombination_test_genome(1, n_elements, false, 2);
+
+        let recombination_count = MutationDistribution::new_uniform(forced_events as f64, forced_events as f64 + 0.1).unwrap();
+        let recombination_len = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
+
+        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        for _ in 0..n_elements {
+            homology_map.push(vec![vec![0], vec![0]]);
+        }
+
+        Population {
+            generation: 0,
+            pop: vec![g0, g1],
+            core_vec: vec![],
+            selection_dists: vec![],
+            mu_dists: vec![],
+            recombination_dists: vec![recombination_count, recombination_len],
+            recombination_threshold: 0.0,
+            homology_map,
+        }
+    }
+
+    fn genome_has_marker(genome: &Genome, marker: u8) -> bool {
+        genome
+            .seq
+            .iter()
+            .any(|element| element.seq.first().copied() == Some(marker))
+    }
+
+    fn count_mixed_marker_genomes(population: &Population) -> usize {
+        population
+            .pop
+            .iter()
+            .filter(|genome| genome_has_marker(genome, 1) && genome_has_marker(genome, 2))
+            .count()
+    }
+
     #[test]
     fn inversion_flips_strand() {
         let mut genome = make_test_genome();
@@ -590,5 +662,64 @@ mod tests {
         assert!(unique_contigs.len() > 1, "test should contain multiple contigs");
         let expected_contigs: Vec<usize> = (0..unique_contigs.len()).collect();
         assert_eq!(unique_contigs, expected_contigs, "contigs should progress upward from 0");
+    }
+
+    #[test]
+    fn inter_genome_recombination_zero_events_is_noop() {
+        let mut population = make_recombination_test_population(0, 8);
+
+        let mixed_before = count_mixed_marker_genomes(&population);
+        assert_eq!(mixed_before, 0, "before recombination, genomes should not be mixed");
+
+        let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
+        mutate_inter_genome(&mut population);
+        let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
+        let mixed_after = count_mixed_marker_genomes(&population);
+
+        assert_eq!(population.pop.len(), 2, "population size should be unchanged");
+        assert_eq!(total_after, total_before, "no forced recombination should not change total length in this deterministic setup");
+        assert_eq!(mixed_after, mixed_before, "no forced recombination should not change mixed marker genomes");
+    }
+
+    #[test]
+    fn inter_genome_recombination_single_event_changes_total_length_by_one() {
+        let mut population = make_recombination_test_population(1, 8);
+
+        let mixed_before = count_mixed_marker_genomes(&population);
+        assert_eq!(mixed_before, 0, "before recombination, genomes should not be mixed");
+
+        let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
+        mutate_inter_genome(&mut population);
+        let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
+        let mixed_after = count_mixed_marker_genomes(&population);
+
+        assert_eq!(population.pop.len(), 2, "population size should be unchanged");
+        assert_eq!(total_after, total_before - 1, "single forced recombination should reduce total length by one in this deterministic setup");
+        assert!(mixed_after > mixed_before, "after one forced recombination, at least one genome should contain marker sequence from the other genome");
+    }
+
+    #[test]
+    fn inter_genome_recombination_multiple_events_change_total_length_by_event_count() {
+        let forced_events = 3;
+        let mut population = make_recombination_test_population(forced_events, 8);
+
+        let mixed_before = count_mixed_marker_genomes(&population);
+        assert_eq!(mixed_before, 0, "before recombination, genomes should not be mixed");
+
+        let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
+        mutate_inter_genome(&mut population);
+        let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
+        let mixed_after = count_mixed_marker_genomes(&population);
+
+        assert_eq!(population.pop.len(), 2, "population size should be unchanged");
+        assert_eq!(
+            total_after,
+            total_before - forced_events,
+            "forced multiple recombinations should reduce total length by event count in this deterministic setup"
+        );
+        assert!(
+            mixed_after >= 1,
+            "after forced recombinations, at least one genome should contain marker sequence from the other genome"
+        );
     }
 }
