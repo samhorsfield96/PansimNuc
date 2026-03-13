@@ -309,28 +309,29 @@ pub fn mutate_inter_genome (population: &mut Population) {
                     // now iterate through recipient genome until homology found between end and donor site
                     let mut recipient_end_found = false;
                     while !recipient_end_found {
-                        let new_end_recipient_site = end_recipient_site + 1;
                         // run off end of contig, assume complete recombination
-                        if recipient_genome.seq[new_end_recipient_site].contig_id != recipient_contig_id || new_end_recipient_site >= recipient_genome.seq.len() {
+                        if recipient_genome.seq[end_recipient_site].contig_id != recipient_contig_id || end_recipient_site >= recipient_genome.seq.len() {
                             recipient_end_found = true;
                             break;
                         }
 
-                        let recipient_site = &recipient_genome.seq[new_end_recipient_site];
+                        let recipient_site = &recipient_genome.seq[end_recipient_site];
                         let homology = calculate_homology(donor_site, recipient_site);
                         if homology >= population.recombination_threshold {
                             track_found = true;
                             recipient_end_found = true;
+                            break;
                         }
 
                         // continue iterating through recipient contig until homology found, or end of contig reached
-                        end_recipient_site = new_end_recipient_site;
+                        end_recipient_site += 1;
                     }
                 }
 
                 // perform recombination event, replacing recipient track with donor track
                 // clone the donor track first, before any mutable borrow of population.pop
                 let mut donor_track: Vec<NucElement> = donor_genome.seq[start_donor_site..=end_donor_site].to_vec().clone();
+                let mut recipient_track: Vec<NucElement> = recipient_genome.seq[start_recipient_site..=end_recipient_site].to_vec().clone();
 
                 // update information from recipient track
                 for element in &mut donor_track {
@@ -685,6 +686,16 @@ mod tests {
     fn inter_genome_recombination_single_event_changes_total_length_by_one() {
         let mut population = make_recombination_test_population(1, 8);
 
+        let element_ids_before: Vec<Vec<usize>> = population
+            .pop
+            .iter()
+            .map(|genome| genome.seq.iter().map(|e| e.element_id).collect())
+            .collect();
+
+        for (genome_idx, ids) in element_ids_before.iter().enumerate() {
+            println!("Before recombination - genome {} element_ids: {:?}", genome_idx, ids);
+        }
+
         let mixed_before = count_mixed_marker_genomes(&population);
         assert_eq!(mixed_before, 0, "before recombination, genomes should not be mixed");
 
@@ -693,8 +704,18 @@ mod tests {
         let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         let mixed_after = count_mixed_marker_genomes(&population);
 
+        let element_ids_after: Vec<Vec<usize>> = population
+            .pop
+            .iter()
+            .map(|genome| genome.seq.iter().map(|e| e.element_id).collect())
+            .collect();
+
+        for (genome_idx, ids) in element_ids_after.iter().enumerate() {
+            println!("After recombination - genome {} element_ids: {:?}", genome_idx, ids);
+        }
+
         assert_eq!(population.pop.len(), 2, "population size should be unchanged");
-        assert_eq!(total_after, total_before - 1, "single forced recombination should reduce total length by one in this deterministic setup");
+        assert_eq!(total_after, total_before, "single forced recombination should preserve total genome length");
         assert!(mixed_after > mixed_before, "after one forced recombination, at least one genome should contain marker sequence from the other genome");
     }
 
@@ -714,8 +735,8 @@ mod tests {
         assert_eq!(population.pop.len(), 2, "population size should be unchanged");
         assert_eq!(
             total_after,
-            total_before - forced_events,
-            "forced multiple recombinations should reduce total length by event count in this deterministic setup"
+            total_before,
+            "forced multiple recombinations should preserve total genome length"
         );
         assert!(
             mixed_after >= 1,
