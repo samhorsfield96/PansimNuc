@@ -60,13 +60,16 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
     // and poisson distribution to determine where duplication goes
 
     // store hashmap of positions of genome elements, can store multiple per entry to capture duplications
-    let mut new_positions: HashMap<i64, Vec<i64>> = HashMap::new(); // placeholder for new positions of each element after structural mutations, which will be used to update the mutation maps of each element after all structural mutations have been processed
+    let mut new_positions: HashMap<i64, Vec<(usize, i64)>> = HashMap::new(); // placeholder for new positions of each element after structural mutations, which will be used to update the mutation maps of each element after all structural mutations have been processed
     let genome_size = genome.seq.len();
     let mut max_position: usize = 0;
 
+    // TODO check which contig each block will be inserted into
+    let contig_starts = &genome.contig_starts;
+
     for (current_pos , element) in &mut genome.seq.iter().enumerate() {
         //store element structure positions, with current position first
-        let mut new_positions_vec: Vec<i64> = vec![current_pos as i64];
+        let mut new_positions_vec: Vec<(usize, i64)> = vec![(element.contig_id, current_pos as i64)];
         
         // duplications, can model multiple duplications repeatedly sampling until rand_val is above duplication rate
         let mut rand_val = mu_dist.sample(&mut thread_rng);
@@ -82,14 +85,23 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
             let pos_rand_val = mu_dist.sample(&mut thread_rng);
             let pos_order: i64 = if pos_rand_val < element.structure_mutation_map.duplication_insertion_prob { -1 } else { 1 };
             let mut new_pos = current_pos as i64 + (duplication_pos * pos_order);
+            let mut new_contig_id = 0;
 
             // assign to 0 if before start of genome
             if new_pos < 0 {
                 new_pos = 0;
             }
 
-            new_positions_vec.push(new_pos);
-            rand_val = mu_dist.sample(&mut thread_rng);
+            // determine contig position
+            for (contig_id, contig_start) in contig_starts.iter().enumerate() {
+                if new_pos < *contig_start as i64 {
+                    // new position is in previous contig
+                    break;
+                }
+                new_contig_id = contig_id; 
+            }
+
+            new_positions_vec.push((new_contig_id, new_pos));
 
             // determine maximum position present
             if new_pos as usize > max_position {
@@ -109,7 +121,7 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
         // translocations not explicitely modelled, as captured by simulatenous duplication and deletion event
         
         // inversions, apply to all genes in element structure vec
-        for pos in new_positions_vec {
+        for (contig_id, pos) in new_positions_vec {
             
             let mut inversion = 1;
 
@@ -123,20 +135,20 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
             // with old entry as value either as positive or negative value depending on whether it is inverted or not and 1 indexed
             let key = pos;
             let value = (current_pos as i64 + 1) * inversion; // store old position as value, which can be used to update mutation map of element after all structural mutations have been processed
-            new_positions.entry(key).or_default().push(value);
+            new_positions.entry(key).or_default().push((contig_id, value));
         }
     }
 
     // generate new genome based on all intra-genome variation, current everything is 1-indexed
     // TODO could append sequences here to prevent overwriting of duplications and previous sequnces
-    let mut new_genome_seq: Vec<i64> = Vec::new();
+    let mut new_genome_seq: Vec<(usize, i64)> = Vec::new();
 
     // iterate through each position, indexed by new position
     for idx in 0..=max_position {
         if let Some(prev_pos) = new_positions.get(&(idx as i64)) {
             // value exists
             for entry in prev_pos { 
-                if *entry == 0 {
+                if entry.1 == 0 {
                     panic!("Entry for structural varient is 0, for position {} in genome {}", idx, genome.identifier);
                 }
                 
@@ -151,7 +163,7 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
     // generate new genome
     let mut new_genome: Vec<NucElement> = Vec::new();
 
-    for element_idx in new_genome_seq {
+    for (contig_id, element_idx) in new_genome_seq {
         let invert: bool = if element_idx > 0 { false } else { true };
         let mut new_element = genome.seq[element_idx.abs() as usize - 1].clone(); // convert back to 0 indexed
 
@@ -159,24 +171,24 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
             new_element.strand = !new_element.strand;
         }
 
+        // update contig id
+        new_element.contig_id = contig_id;
+
         // update homology map for new element
         let element_id = new_element.element_id;
         let mut homology_group = &mut homology_map[element_id][genome.genome_id];
         homology_group.push(element_idx.abs() as usize - 1); // convert back to 0 indexed
         
         new_genome.push(new_element);
-
-        // TODO need to determine contig breaks, likely using prev_contig_id, and reassign when new contig is reached
     }
 
     genome.seq = new_genome;
 
+    // update contig start positions
+    genome.update_contig_starts();
 }
 
 pub fn mutate_inter_genome (population: &mut Population) {
-    // TODO use  homology map to identify homologous regions, sample
-    // from poisson to determine how many recombination events occur, then size of track
-
     let mut thread_rng = rand::thread_rng();
     
     // get number of recombination events across whole population
@@ -376,6 +388,7 @@ mod tests {
             identifier: "test".to_string(),
             genome_id: 0,
             parent: "root".to_string(),
+            contig_starts: vec![0],
             seq: vec![
                 NucElement {
                     contig_id: 0,

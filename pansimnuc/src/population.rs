@@ -29,8 +29,32 @@ pub struct NucElement {
 pub struct Genome {
     pub identifier: String,
     pub genome_id: usize,
+    pub contig_starts: Vec<usize>,
     pub parent: String,
     pub seq: Vec<NucElement>
+}
+
+impl Genome {
+    pub fn new(identifier: String, genome_id: usize, parent: String, seq: Vec<NucElement>) -> Self {
+        Self {
+            identifier,
+            genome_id,
+            contig_starts: Vec::new(),
+            parent,
+            seq,
+        }
+    }
+
+    pub fn update_contig_starts(&mut self) {
+        self.contig_starts.clear();
+        let mut current_start = 0;
+        for (idx, element) in self.seq.iter().enumerate() {
+            if idx == 0 || element.contig_id != self.seq[idx - 1].contig_id {
+                self.contig_starts.push(current_start);
+                current_start = idx;
+            }
+        }
+    }
 }
 
 pub struct Population{
@@ -139,14 +163,19 @@ impl Population {
             }
         }
 
+
         // copy whole genome to start
         for i in 0..n_genomes {
-            population.push(Genome {
+            let mut genome_entry = Genome {
                 identifier: format!("{}", i),
                 genome_id: i,
+                contig_starts: Vec::new(), // will be updated after mutations
                 parent: "root".to_string(),
                 seq: genome.clone(),
-            });
+            };
+            genome_entry.update_contig_starts();
+
+            population.push(genome_entry);
         }
         
         let core_vec: Vec<Vec<u8>> =
