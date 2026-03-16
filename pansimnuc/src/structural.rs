@@ -10,6 +10,7 @@ use levenshtein::levenshtein;
 use petgraph::graph::{NodeIndex, UnGraph};
 use petgraph::visit::Dfs;
 use std::collections::{HashMap, HashSet};
+use rayon::prelude::*;
 
 // TODO need to think about how to determine whether a TE inserts into another gene, making it non-functional
 // or whether it is upstream or downstream and can augment its function, having a multiplicative effect on its fitness contribution.
@@ -191,23 +192,41 @@ pub fn mutate_inter_genome (population: &mut Population) {
         .flat_map(|i| (0..pop_size).filter(move |&j| j != i).map(move |j| (i, j)))
         .collect();
 
-    let mut recombination_map: HashMap<usize, Vec<usize>> = HashMap::new();
+    let components = connected_components(0..pop_size as u32, &all_pairs);
+
+    // generate list of recombination_maps which can be parralellised over
+    let mut recombination_map_list: Vec<HashMap<usize, Vec<usize>>> = vec![HashMap::new(); components.len()];
+
+    let mut recombination_map_tmp: HashMap<usize, Vec<usize>> = HashMap::new();
     for _ in 0..n_recombinations {
         let (donor, recipient) = all_pairs.choose(&mut thread_rng).expect("Failed to select a random pair for recombination");
-        recombination_map.entry(*donor as usize).or_default().push(*recipient as usize);
+        recombination_map_tmp.entry(*donor as usize).or_default().push(*recipient as usize);
     }
 
-    // iterate through each donor and recipient pair, in future make parallelisable by processing each independent recombination map separately
-    for (donor, recipients) in recombination_map {
-        for recipient in recipients {
-                        // donor != recipient by construction (from all_pairs)
-                        let (donor_genome, recipient_genome): (&Genome, &mut Genome) = if donor < recipient {
-                            let (left, right) = population.pop.split_at_mut(recipient);
-                            (&left[donor], &mut right[0])
-                        } else {
-                            let (left, right) = population.pop.split_at_mut(donor);
-                            (&right[0], &mut left[recipient])
-                        };
+    // pull out each connected component
+    for component in components {
+        let mut component_map: HashMap<usize, Vec<usize>> = HashMap::new();
+        for &donor in &component {
+            if let Some(recipients) = recombination_map_tmp.get(&(donor as usize)) {
+                component_map.insert(donor as usize, recipients.clone());
+            }
+        }
+        recombination_map_list.push(component_map);
+    }
+
+    // iterate through each donor and recipient pair
+    recombination_map_list.par_iter_mut()
+            .for_each(|recombination_map| {
+                   for (donor, recipients) in recombination_map {
+                        for recipient in recipients {
+                            // donor != recipient by construction (from all_pairs)
+                            let (donor_genome, recipient_genome): (&Genome, &mut Genome) = if donor < recipient {
+                                let (left, right) = population.pop.split_at_mut(*recipient);
+                                (&left[*donor], &mut right[0])
+                            } else {
+                                let (left, right) = population.pop.split_at_mut(*donor);
+                                (&right[0], &mut left[*recipient])
+                            };
 
                         // look for donor and recipient site, maximum 25 attempts, if not found, skip recombination event
                         let mut donor_site_chosen : bool = false;
@@ -349,11 +368,12 @@ pub fn mutate_inter_genome (population: &mut Population) {
                                 homology_group.push(element_idx); // add new position
                             }
 
-                            // update contig_ids
-                            recipient_genome.update_contig_starts();
+                                // update contig_ids
+                                recipient_genome.update_contig_starts();
+                            }
                         }
-        }
-    }
+                    }
+    });
 }
 
 #[cfg(test)]
