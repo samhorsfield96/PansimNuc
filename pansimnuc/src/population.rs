@@ -205,18 +205,29 @@ impl Population {
         let translocation_pos_dist = MutationDistribution::new_poisson(1000.0).expect("Failed to create poisson distribution for translocations"); // TODO all setting of this to favour translocations
 
         // duplications
-        for idx in 0..self.pop.len() {
-            let genome = &mut self.pop[idx];
+        self.pop
+            .par_iter_mut()
+            .for_each(|genome| {
+                
+                // duplications
+                mutate_intra_genome(genome, &duplication_mu_dist, &duplication_pos_dist);
 
-            // duplications
-            mutate_intra_genome(genome, &mut self.homology_map, &duplication_mu_dist, &duplication_pos_dist);
-
-            // translocations
-            // clear homology map to enable fresh creation of groups
-            self.homology_map.iter_mut().for_each(|element_homology_map| {
-                element_homology_map[idx].clear();
+                // translocations
+                // clear homology map to enable fresh creation of groups
+                mutate_intra_genome(genome, &translocation_mu_dist, &translocation_pos_dist);
             });
-            mutate_intra_genome(genome, &mut self.homology_map, &translocation_mu_dist, &translocation_pos_dist);
+        
+        // update homology map for all new elements
+        for genome in &self.pop {
+            self.homology_map.iter_mut().for_each(|element_homology_map| {
+                    element_homology_map[genome.genome_id].clear();
+            });
+            
+            for (element_idx, element) in genome.seq.iter().enumerate() {
+                let element_id = element.element_id;
+                let mut homology_group = &mut self.homology_map[element_id][genome.genome_id];
+                homology_group.push(element_idx); // convert back to 0 indexed
+            }
         }
     }
 

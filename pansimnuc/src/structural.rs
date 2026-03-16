@@ -12,6 +12,8 @@ use levenshtein::levenshtein;
 // TODO need to think about how to determine whether a TE inserts into another gene, making it non-functional
 // or whether it is upstream or downstream and can augment its function, having a multiplicative effect on its fitness contribution.
 
+// TODO identify independent recombinations to enable parralellisation
+
 // for a given NucElement, store its position in the genome
 // which can then be shuffled around by structural mutations, or copied
 
@@ -46,7 +48,7 @@ fn calculate_homology(a: &NucElement, b: &NucElement) -> f64 {
 }
 
 // write function which runs through each element and determines whether a structural mutation occurs, and if so, which one, and where it moves to.
-pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<usize>>>, mu_dist: &MutationDistribution, pos_dist: &MutationDistribution) {
+pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, pos_dist: &MutationDistribution) {
     let mut thread_rng = rand::thread_rng();
 
     // For all intra genome comparisons, sample from uniform distribution to determine if variant occurs
@@ -164,11 +166,6 @@ pub fn mutate_intra_genome(genome: &mut Genome, homology_map: &mut Vec<Vec<Vec<u
 
         // update contig id
         new_element.contig_id = contig_id;
-
-        // update homology map for new element
-        let element_id = new_element.element_id;
-        let mut homology_group = &mut homology_map[element_id][genome.genome_id];
-        homology_group.push(element_idx.abs() as usize - 1); // convert back to 0 indexed
         
         new_genome.push(new_element);
     }
@@ -557,7 +554,7 @@ mod tests {
             homology_map.push(vec![vec![0]]);
         }
 
-        mutate_intra_genome(&mut genome, &mut homology_map, &mu, &pos);
+        mutate_intra_genome(&mut genome, &mu, &pos);
 
         let after_strands: Vec<bool> = genome.seq.iter().map(|e| e.strand).collect();
         assert_ne!(before_strands, after_strands, "strands should flip after forced inversion");
@@ -580,8 +577,7 @@ mod tests {
 
         let mu = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
-        let mut homology_map: Vec<Vec<Vec<usize>>> = vec![vec![vec![]], vec![vec![]]];
-        mutate_intra_genome(&mut genome, &mut homology_map, &mu, &pos);
+        mutate_intra_genome(&mut genome, &mu, &pos);
 
         assert!(genome.seq.len() < before_len, "genome should shrink after forced deletion");
     }
@@ -612,7 +608,7 @@ mod tests {
         // Use a non-zero offset so duplicates land somewhere other than position 0.
         let mu = MutationDistribution::new_uniform(0.0, 0.9).unwrap();
         let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
-        mutate_intra_genome(&mut genome, &mut homology_map, &mu, &pos);
+        mutate_intra_genome(&mut genome, &mu, &pos);
 
         assert_eq!(
             genome.seq.len(),
@@ -640,9 +636,8 @@ mod tests {
 
         let mu = MutationDistribution::new_uniform(0.0, 0.9).unwrap();
         let pos = MutationDistribution::new_uniform(0.0, 0.9).unwrap();
-        let mut homology_map: Vec<Vec<Vec<usize>>> = vec![vec![vec![]]; genome.seq.len()];
 
-        mutate_intra_genome(&mut genome, &mut homology_map, &mu, &pos);
+        mutate_intra_genome(&mut genome, &mu, &pos);
 
         let contig_ids: Vec<usize> = genome.seq.iter().map(|e| e.contig_id).collect();
         assert!(!contig_ids.is_empty(), "mutated genome should not be empty");
