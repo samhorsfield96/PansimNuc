@@ -1,6 +1,6 @@
 // in this script, genes can move around, be duplicated and deleted
 
-use crate::{mutation::MutationMap, population::NucElement};
+use crate::population::NucElement;
 use std::collections::HashMap;
 use crate::population::{Genome, Population};
 use rand::seq::SliceRandom;
@@ -8,15 +8,9 @@ use rand::Rng;
 use crate::mutation::Distribution as MutationDistribution;
 extern crate levenshtein;
 use levenshtein::levenshtein;
-use std::collections::HashSet;
 
-// TODO need to think of way of rearranging each feature, and taking into account where insertions
-// and translocations occur. Also need two different TE compartments, one which copies and inserts
-// and one which moves around and inserts. 
-
-// also need to think about how to determine whether a TE inserts into another gene, making it non-functional
+// TODO need to think about how to determine whether a TE inserts into another gene, making it non-functional
 // or whether it is upstream or downstream and can augment its function, having a multiplicative effect on its fitness contribution.
-
 
 // for a given NucElement, store its position in the genome
 // which can then be shuffled around by structural mutations, or copied
@@ -356,7 +350,8 @@ pub fn mutate_inter_genome (population: &mut Population) {
                     homology_group.push(element_idx); // add new position
                 }
 
-                // TODO update contig_ids
+                // update contig_ids
+                recipient_genome.update_contig_starts();
             }
         }
     }
