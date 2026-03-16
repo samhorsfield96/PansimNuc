@@ -10,7 +10,6 @@ use levenshtein::levenshtein;
 use petgraph::graph::{NodeIndex, UnGraph};
 use petgraph::visit::Dfs;
 use std::collections::{HashMap, HashSet};
-use rayon::prelude::*;
 
 // TODO need to think about how to determine whether a TE inserts into another gene, making it non-functional
 // or whether it is upstream or downstream and can augment its function, having a multiplicative effect on its fitness contribution.
@@ -234,16 +233,21 @@ pub fn mutate_inter_genome (population: &mut Population) {
         .flat_map(|i| (0..pop_size).filter(move |&j| j != i).map(move |j| (i as u32, j as u32)))
         .collect();
 
-    let components = connected_components(0..pop_size as u32, &all_pairs);
-
-    // generate list of recombination_maps which can be parralellised over
-    let mut recombination_map_list: Vec<HashMap<usize, Vec<usize>>> = vec![HashMap::new(); components.len()];
-
     let mut recombination_map_tmp: HashMap<usize, Vec<usize>> = HashMap::new();
     for _ in 0..n_recombinations {
         let (donor, recipient) = all_pairs.choose(&mut thread_rng).expect("Failed to select a random pair for recombination");
         recombination_map_tmp.entry(*donor as usize).or_default().push(*recipient as usize);
     }
+
+    let sampled_edges: Vec<(u32, u32)> = recombination_map_tmp
+        .iter()
+        .flat_map(|(&donor, recipients)| recipients.iter().map(move |&recipient| (donor as u32, recipient as u32)))
+        .collect();
+
+    let components = connected_components(0..pop_size as u32, &sampled_edges);
+
+    // generate list of independent recombination maps to process
+    let mut recombination_map_list: Vec<HashMap<usize, Vec<usize>>> = Vec::with_capacity(components.len());
 
     // pull out each connected component
     for component in components {
@@ -253,14 +257,15 @@ pub fn mutate_inter_genome (population: &mut Population) {
                 component_map.insert(donor as usize, recipients.clone());
             }
         }
-        recombination_map_list.push(component_map);
+        if !component_map.is_empty() {
+            recombination_map_list.push(component_map);
+        }
     }
 
-    // iterate through each donor and recipient pair
-    recombination_map_list.par_iter_mut()
-            .for_each(|recombination_map| {
-                   for (donor, recipients) in recombination_map {
-                        for recipient in recipients {
+    // iterate through each donor and recipient pair, in future make parallelisable by processing each independent recombination map separately
+    for recombination_map in recombination_map_list.iter_mut() {
+        for (donor, recipients) in recombination_map {
+            for recipient in recipients {
                             // donor != recipient by construction (from all_pairs)
                             let (donor_genome, recipient_genome): (&Genome, &mut Genome) = if donor < recipient {
                                 let (left, right) = population.pop.split_at_mut(*recipient);
@@ -413,9 +418,9 @@ pub fn mutate_inter_genome (population: &mut Population) {
                                 // update contig_ids
                                 recipient_genome.update_contig_starts();
                             }
-                        }
-                    }
-    });
+            }
+        }
+    }
 }
 
 #[cfg(test)]
