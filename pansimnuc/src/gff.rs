@@ -137,7 +137,6 @@ pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<Vec<Vec<Fe
     for (contig_id, results) in features.iter_mut().enumerate() {
         if let Some(seq) = genome.get(contig_id) {
             let mut last_feature_end: usize = 0;
-            let mut last_feature_id:usize = 0;
             
             for result in &mut **results {
             
@@ -150,7 +149,6 @@ pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<Vec<Vec<Fe
                 result.seq = encode_dna(subseq);
 
                 last_feature_end = result.end;
-                last_feature_id = result.feature_id;
             }
             
             // add final intergenic region, if contig empty adds full contig
