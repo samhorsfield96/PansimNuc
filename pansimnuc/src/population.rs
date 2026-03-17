@@ -75,7 +75,7 @@ impl Population {
         if element.feature_type == "exon" || element.feature_type == "intron" {
             let feature_map_entry = self.feature_map.get(&element.feature_id).expect("Entry missing from feature_map");
             let feature_map_entry_len = feature_map_entry.len();
-        
+
             // get position of element in feature_map_entry
             let position = feature_map_entry.iter().position(|n| n == &element.element_id).expect("Element not found in feature_map_entry");
             
@@ -88,13 +88,15 @@ impl Population {
                 // get expected element
                 let expected_element_id = feature_map_entry[feature_element_idx];
 
+                // TODO - check whether indexing makes sense with reversal
+
                 // expected element and strand matches so continue
                 if actual_element_id == expected_element_id && actual_element.strand == element.strand {
                     continue;
                 } else {
                     // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
                     // check if last feature matches in feature_map_entry
-                    let reversed_feature_id = feature_map_entry[feature_map_entry_len - feature_element_idx];
+                    let reversed_feature_id = feature_map_entry[(feature_map_entry_len - 1) - feature_element_idx];
                     if actual_element_id == reversed_feature_id && actual_element.strand == element.strand {
                         continue;
                     } else {
@@ -121,7 +123,7 @@ impl Population {
                     } else {
                         // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
                         // check if last feature matches in feature_map_entry
-                        let reversed_feature_id = feature_map_entry[feature_map_entry_len - feature_element_idx];
+                        let reversed_feature_id = feature_map_entry[(feature_map_entry_len - 1) - feature_element_idx];
                         if actual_element_id == reversed_feature_id && actual_element.strand == element.strand {
                             continue;
                         } else {
@@ -759,5 +761,217 @@ mod tests {
                 .collect();
             assert_eq!(new_sequences, original_sequences[selected_index]);
         }
+    }
+
+    fn make_check_feature_order_population() -> Population {
+        let mut root = Vec::new();
+        let features = vec![
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 0,
+                feature_type: "intergenic".to_string(),
+                start: 0,
+                end: 4,
+                strand: true,
+                seq: vec![1, 1, 1, 1],
+            },
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 1,
+                feature_type: "exon".to_string(),
+                start: 4,
+                end: 8,
+                strand: true,
+                seq: vec![2, 2, 2, 2],
+            },
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 1,
+                feature_type: "intron".to_string(),
+                start: 8,
+                end: 12,
+                strand: true,
+                seq: vec![4, 4, 4, 4],
+            },
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 1,
+                feature_type: "exon".to_string(),
+                start: 12,
+                end: 16,
+                strand: true,
+                seq: vec![8, 8, 8, 8],
+            },
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 0,
+                feature_type: "intergenic".to_string(),
+                start: 16,
+                end: 20,
+                strand: true,
+                seq: vec![1, 1, 1, 1],
+            },
+        ];
+        root.push(features);
+
+        let exon_dist = MutationDistribution::new_uniform(0.0, 0.1)
+            .expect("failed to create exon selection distribution");
+        let intron_dist = MutationDistribution::new_uniform(0.0, 0.1)
+            .expect("failed to create intron selection distribution");
+        let intergenic_dist = MutationDistribution::new_uniform(0.0, 0.1)
+            .expect("failed to create intergenic selection distribution");
+        let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
+
+        let exon_mu = MutationDistribution::new_uniform(0.0, 0.1)
+            .expect("failed to create exon mutation distribution");
+        let intron_mu = MutationDistribution::new_uniform(0.0, 0.1)
+            .expect("failed to create intron mutation distribution");
+        let intergenic_mu = MutationDistribution::new_uniform(0.0, 0.1)
+            .expect("failed to create intergenic mutation distribution");
+        let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
+
+        let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
+            .expect("failed to create recombination count distribution");
+        let recombination_len_dist = MutationDistribution::new_poisson(1.0)
+            .expect("failed to create recombination length distribution");
+        let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
+
+        let mut rng: StdRng = StdRng::seed_from_u64(123);
+        Population::new(
+            root,
+            1,
+            site_mutation_dists,
+            site_mutation_mus,
+            recombination_dists,
+            1.0,
+            &mut rng,
+        )
+    }
+
+    fn genome_from_seq(seq: Vec<NucElement>) -> Genome {
+        Genome {
+            identifier: "test".to_string(),
+            genome_id: 0,
+            contig_starts: vec![0],
+            parent: "test-parent".to_string(),
+            seq,
+        }
+    }
+
+    fn check_feature_one_intron(pop: &Population, genome: &Genome) -> (bool, f64) {
+        let idx = genome
+            .seq
+            .iter()
+            .position(|element| element.feature_id == 1 && element.feature_type == "intron")
+            .expect("expected intron in feature block");
+        pop.check_feature_order(genome, idx, &genome.seq[idx])
+    }
+
+    #[test]
+    fn test_check_feature_order_identifies_unbroken_gene() {
+        let pop = make_check_feature_order_population();
+        let genome = &pop.pop[0];
+        let (broken, multiplier) = check_feature_one_intron(&pop, genome);
+        assert!(!broken);
+        assert!((multiplier - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_check_feature_order_identifies_gene_broken_by_insertion() {
+        let pop = make_check_feature_order_population();
+        let mut seq = pop.pop[0].seq.clone();
+
+        let mut inserted_te = seq[0].clone();
+        inserted_te.feature_type = "TE".to_string();
+        inserted_te.feature_id = 0;
+        inserted_te.multiplier = 2.0;
+        inserted_te.element_id = 10_000;
+        seq.insert(2, inserted_te);
+
+        let genome = genome_from_seq(seq);
+        let (broken, _) = check_feature_one_intron(&pop, &genome);
+        assert!(broken);
+    }
+
+    #[test]
+    fn test_check_feature_order_identifies_gene_broken_by_deletion() {
+        let pop = make_check_feature_order_population();
+        let mut seq = pop.pop[0].seq.clone();
+        seq.retain(|element| element.element_id != 2);
+
+        let genome = genome_from_seq(seq);
+        let exon_idx = genome
+            .seq
+            .iter()
+            .position(|element| element.feature_id == 1 && element.feature_type == "exon")
+            .expect("expected exon in feature block");
+        let (broken, _) = pop.check_feature_order(&genome, exon_idx, &genome.seq[exon_idx]);
+        assert!(broken);
+    }
+
+    #[test]
+    fn test_check_feature_order_identifies_gene_broken_by_partial_inversion() {
+        let pop = make_check_feature_order_population();
+        let mut seq = pop.pop[0].seq.clone();
+        let intron_idx = seq
+            .iter()
+            .position(|element| element.element_id == 2)
+            .expect("expected intron with element_id=2");
+        seq[intron_idx].strand = !seq[intron_idx].strand;
+
+        let genome = genome_from_seq(seq);
+        let (broken, _) = check_feature_one_intron(&pop, &genome);
+        assert!(broken);
+    }
+
+    #[test]
+    fn test_check_feature_order_identifies_whole_gene_reversal() {
+        let pop = make_check_feature_order_population();
+        let base_seq = &pop.pop[0].seq;
+
+        let left_flank = base_seq[0].clone();
+        let right_flank = base_seq[4].clone();
+        let mut reversed_gene = base_seq[1..=3].to_vec();
+        reversed_gene.reverse();
+        for element in &mut reversed_gene {
+            element.strand = !element.strand;
+        }
+
+        let mut seq = vec![left_flank];
+        seq.extend(reversed_gene);
+        seq.push(right_flank);
+
+        let genome = genome_from_seq(seq);
+        let (broken, multiplier) = check_feature_one_intron(&pop, &genome);
+        assert!(!broken);
+        assert!((multiplier - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_check_feature_order_identifies_te_upstream_and_downstream() {
+        let pop = make_check_feature_order_population();
+        let mut seq = pop.pop[0].seq.clone();
+
+        let mut upstream_te = seq[0].clone();
+        upstream_te.feature_type = "TE".to_string();
+        upstream_te.feature_id = 0;
+        upstream_te.multiplier = 2.0;
+        upstream_te.element_id = 20_000;
+        seq.insert(1, upstream_te);
+
+        let mut downstream_te = seq[0].clone();
+        downstream_te.feature_type = "TE".to_string();
+        downstream_te.feature_id = 0;
+        downstream_te.multiplier = 3.5;
+        downstream_te.element_id = 20_001;
+        seq.insert(5, downstream_te);
+
+        println!("Sequence with TEs: {:?}", seq.iter().map(|e| (e.feature_type.clone(), e.feature_id, e.element_id)).collect::<Vec<_>>());
+
+        let genome = genome_from_seq(seq);
+        let (broken, multiplier) = check_feature_one_intron(&pop, &genome);
+        assert!(!broken);
+        println!("Multiplier with TEs: {}", multiplier);
+        assert!((multiplier - 3.5).abs() < 1e-12);
     }
 }
