@@ -6,6 +6,8 @@ mod mutation;
 
 use clap::Parser;
 use gff::read_gff_lines;
+#[cfg(debug_assertions)]
+use gff::write_root_genome_gff;
 use population::Population;
 use config::Config;
 use std::collections::HashMap;
@@ -70,6 +72,20 @@ fn main() {
 		match read_gff_lines(&gff_path, &fasta_path, Some(&earlgrey_gff_path)) {
 			Ok(features) => {
 				println!("Loaded {} contigs with features", features.len());
+
+				#[cfg(debug_assertions)]
+				{
+					let root_gff_path = configuration
+						.get("output.root_gff_file")
+						.cloned()
+						.unwrap_or_else(|| "root_genome.debug.gff3".to_string());
+
+					if let Err(err) = write_root_genome_gff(&features, &root_gff_path) {
+						eprintln!("Failed to write debug root genome GFF: {err}");
+					} else {
+						println!("Wrote debug root genome GFF: {}", root_gff_path);
+					}
+				}
 
 				if let (Some(n_individuals_str), Some(n_generation_str)) = (configuration.get("population.n_individuals"), configuration.get("population.n_generations")) {
 					

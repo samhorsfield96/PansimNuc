@@ -3,7 +3,7 @@ use noodles_gff::feature::record::Strand;
 use noodles_fasta as fasta;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, BufReader};
+use std::io::{self, BufReader, BufWriter, Write};
 
 #[derive(Clone)]
 struct TeInterval {
@@ -291,7 +291,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
 pub fn read_gff_lines(
     gff_path: &str,
     fasta_path: &str,
-        earlgrey_gff_path: Option<&str>,
+    earlgrey_gff_path: Option<&str>,
 ) -> io::Result<Vec<Vec<FeaturePos>>> {
     let file_gff = File::open(gff_path)?;
     let file_fasta = File::open(fasta_path)?;
@@ -367,6 +367,48 @@ pub fn read_gff_lines(
     }
 
     Ok(features)
+}
+
+#[cfg(debug_assertions)]
+pub fn write_root_genome_gff(features: &[Vec<FeaturePos>], output_path: &str) -> io::Result<()> {
+    let file = File::create(output_path)?;
+    let mut writer = BufWriter::new(file);
+
+    writeln!(writer, "##gff-version 3")?;
+
+    let mut record_id: usize = 1;
+    for (contig_idx, contig_features) in features.iter().enumerate() {
+        for feature in contig_features {
+            if feature.start >= feature.end {
+                continue;
+            }
+
+            let seq_id = format!("contig_{}", contig_idx + 1);
+            let start_1based = feature.start + 1;
+            let end_1based = feature.end;
+            let strand = if feature.strand { "+" } else { "-" };
+            let attributes = format!(
+                "ID=root_feature_{};feature_id={};feature_type={}",
+                record_id, feature.feature_id, feature.feature_type
+            );
+
+            writeln!(
+                writer,
+                "{}\tPansimNuc\t{}\t{}\t{}\t.\t{}\t.\t{}",
+                seq_id,
+                feature.feature_type,
+                start_1based,
+                end_1based,
+                strand,
+                attributes
+            )?;
+
+            record_id += 1;
+        }
+    }
+
+    writer.flush()?;
+    Ok(())
 }
 
 #[cfg(test)]
