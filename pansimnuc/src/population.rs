@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use noodles_gff::feature;
 use rayon::prelude::*;
 use logsumexp::LogSumExp;
 use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
@@ -257,13 +258,12 @@ impl Population {
             .map(|genome| {
                 let mut log_sum = 0.0;
 
-                // TODO determine whether there is feature multiplier
-                let mut feature_multiplier = 1.0;
-
                 for (element_idx, element) in genome.seq.iter().enumerate() {
                     let mut element_log_sum = 0.0;
 
                     let mut feature_broken = false;
+
+                    let mut feature_multiplier = 1.0;
 
                     // identify regions where order matters
                     if element.feature_type == "exon" || element.feature_type == "intron" {
@@ -274,7 +274,7 @@ impl Population {
                         // get position of element in feature_map_entry
                         let position = feature_map_entry.iter().position(|n| n == &element.element_id).expect("Element not found in feature_map_entry");
                         
-                        // check upstream  elements in feature_map_entry
+                        // check upstream elements in feature_map_entry
                         for feature_element_idx in 0..position {
                             // get upstream feature in genome
                             let actual_element = &genome.seq[element_idx - (position - feature_element_idx)];
@@ -300,6 +300,7 @@ impl Population {
                                 }
                             }
                         }
+
 
                         // check downstream elements in feature_map_entry
                         if !feature_broken {
@@ -327,6 +328,22 @@ impl Population {
                                         break;
                                     }
                                 }  
+                            }
+                        }
+
+                        // check if TE is present upstream or downstream, if so increase multiplier, as likely to increase expression of gene, and thus fitness contribution
+                        if !feature_broken {
+                            let upstream_element = &genome.seq[element_idx - position];
+                            let downstream_element = &genome.seq[element_idx + (feature_map_entry_len - position - 1)];
+
+                            if upstream_element.feature_type == "TE" {
+                                feature_multiplier = upstream_element.multiplier;
+                            }
+
+                            if downstream_element.feature_type == "TE" {
+                                if feature_multiplier.abs() < downstream_element.multiplier {
+                                    feature_multiplier = downstream_element.multiplier;
+                                }
                             }
                         }
                     }
