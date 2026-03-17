@@ -137,16 +137,22 @@ impl Population {
 
             // check if TE is present upstream or downstream, if so increase multiplier, as likely to increase expression of gene, and thus fitness contribution
             if !feature_broken {
-                let upstream_element = &genome.seq[element_idx - position];
-                let downstream_element = &genome.seq[element_idx + (feature_map_entry_len - position - 1)];
-
-                if upstream_element.feature_type == "TE" {
-                    feature_multiplier = upstream_element.multiplier;
+                // check not at beginning of genome
+                if element_idx >= position + 1 {
+                    let upstream_element = &genome.seq[element_idx - (position + 1)];
+                    if upstream_element.feature_type == "TE" {
+                        feature_multiplier = upstream_element.multiplier;
+                    }
                 }
 
-                if downstream_element.feature_type == "TE" {
-                    if feature_multiplier.abs() < downstream_element.multiplier {
-                        feature_multiplier = downstream_element.multiplier;
+                // check not at end of genome
+                if element_idx + (feature_map_entry_len - position) < genome.seq.len() {
+                    let downstream_element = &genome.seq[element_idx + (feature_map_entry_len - position)];
+                    
+                    if downstream_element.feature_type == "TE" {
+                        if feature_multiplier.abs() < downstream_element.multiplier.abs() {
+                            feature_multiplier = downstream_element.multiplier;
+                        }
                     }
                 }
             }
@@ -962,16 +968,13 @@ mod tests {
         let mut downstream_te = seq[0].clone();
         downstream_te.feature_type = "TE".to_string();
         downstream_te.feature_id = 0;
-        downstream_te.multiplier = 3.5;
+        downstream_te.multiplier = -3.5;
         downstream_te.element_id = 20_001;
         seq.insert(5, downstream_te);
-
-        println!("Sequence with TEs: {:?}", seq.iter().map(|e| (e.feature_type.clone(), e.feature_id, e.element_id)).collect::<Vec<_>>());
-
+        
         let genome = genome_from_seq(seq);
         let (broken, multiplier) = check_feature_one_intron(&pop, &genome);
         assert!(!broken);
-        println!("Multiplier with TEs: {}", multiplier);
-        assert!((multiplier - 3.5).abs() < 1e-12);
+        assert!(multiplier == -3.5);
     }
 }
