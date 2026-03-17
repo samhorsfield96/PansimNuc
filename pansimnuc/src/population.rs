@@ -67,6 +67,92 @@ pub struct Population{
 }
 
 impl Population {
+    fn check_feature_order (&self, genome: &Genome, element_idx: usize, element: &NucElement) -> (bool, f64) {
+        let mut feature_broken = false;
+        let mut feature_multiplier = 1.0;
+        
+        // identify regions where order matters
+        if element.feature_type == "exon" || element.feature_type == "intron" {
+            let feature_map_entry = self.feature_map.get(&element.feature_id).expect("Entry missing from feature_map");
+            let feature_map_entry_len = feature_map_entry.len();
+        
+            // get position of element in feature_map_entry
+            let position = feature_map_entry.iter().position(|n| n == &element.element_id).expect("Element not found in feature_map_entry");
+            
+            // check upstream elements in feature_map_entry
+            for feature_element_idx in 0..position {
+                // get upstream feature in genome
+                let actual_element = &genome.seq[element_idx - (position - feature_element_idx)];
+                let actual_element_id = actual_element.element_id;
+
+                // get expected element
+                let expected_element_id = feature_map_entry[feature_element_idx];
+
+                // expected element and strand matches so continue
+                if actual_element_id == expected_element_id && actual_element.strand == element.strand {
+                    continue;
+                } else {
+                    // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
+                    // check if last feature matches in feature_map_entry
+                    let reversed_feature_id = feature_map_entry[feature_map_entry_len - feature_element_idx];
+                    if actual_element_id == reversed_feature_id && actual_element.strand == element.strand {
+                        continue;
+                    } else {
+                        // if not, set multiplier to 0, as likely to be non-functional
+                        feature_broken = true;
+                        break;
+                    }
+                }
+            }
+
+            // check downstream elements in feature_map_entry
+            if !feature_broken {
+                for feature_element_idx in position + 1..feature_map_entry_len {
+                    // get downstream feature in genome
+                    let actual_element = &genome.seq[element_idx + (feature_element_idx - position)];
+                    let actual_element_id = actual_element.element_id;
+
+                    // get expected element
+                    let expected_element_id = feature_map_entry[feature_element_idx];
+
+                    // expected element and strand matches so continue
+                    if actual_element_id == expected_element_id && actual_element.strand == element.strand {
+                        continue;
+                    } else {
+                        // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
+                        // check if last feature matches in feature_map_entry
+                        let reversed_feature_id = feature_map_entry[feature_map_entry_len - feature_element_idx];
+                        if actual_element_id == reversed_feature_id && actual_element.strand == element.strand {
+                            continue;
+                        } else {
+                            // if not, set multiplier to 0, as likely to be non-functional
+                            feature_broken = true;
+                            break;
+                        }
+                    }  
+                }
+            }
+
+            // check if TE is present upstream or downstream, if so increase multiplier, as likely to increase expression of gene, and thus fitness contribution
+            if !feature_broken {
+                let upstream_element = &genome.seq[element_idx - position];
+                let downstream_element = &genome.seq[element_idx + (feature_map_entry_len - position - 1)];
+
+                if upstream_element.feature_type == "TE" {
+                    feature_multiplier = upstream_element.multiplier;
+                }
+
+                if downstream_element.feature_type == "TE" {
+                    if feature_multiplier.abs() < downstream_element.multiplier {
+                        feature_multiplier = downstream_element.multiplier;
+                    }
+                }
+            }
+        }
+        
+        (feature_broken, feature_multiplier)
+    }
+
     fn genome_output_path(output_path: &str, genome_index: usize) -> io::Result<PathBuf> {
         let path = Path::new(output_path);
         let file_name = path.file_name().ok_or_else(|| {
@@ -254,99 +340,14 @@ impl Population {
         let mut selection_weights: Vec<f64> = vec![1.0; self.pop.len()];
         
         selection_weights = self.pop
-            .par_iter_mut()
-            .map(|genome| {
+            .par_iter()
+            .map(|genome: &Genome| {
                 let mut log_sum = 0.0;
 
                 for (element_idx, element) in genome.seq.iter().enumerate() {
                     let mut element_log_sum = 0.0;
 
-                    let mut feature_broken = false;
-
-                    let mut feature_multiplier = 1.0;
-
-                    // identify regions where order matters
-                    if element.feature_type == "exon" || element.feature_type == "intron" {
-                        let feature_map_entry = self.feature_map.get(&element.feature_id).expect("Entry missing from feature_map");
-                        let feature_map_entry_len = feature_map_entry.len();
-                        // TODO add check for whether features are in correct order and all in same strand, if not set multiplier to 0, as likely to be non-functional
-
-                        // get position of element in feature_map_entry
-                        let position = feature_map_entry.iter().position(|n| n == &element.element_id).expect("Element not found in feature_map_entry");
-                        
-                        // check upstream elements in feature_map_entry
-                        for feature_element_idx in 0..position {
-                            // get upstream feature in genome
-                            let actual_element = &genome.seq[element_idx - (position - feature_element_idx)];
-                            let actual_element_id = actual_element.element_id;
-
-                            // get expected element
-                            let expected_element_id = feature_map_entry[feature_element_idx];
-
-                            // expected element and strand matches so continue
-                            if actual_element_id == expected_element_id && actual_element.strand == element.strand {
-                                continue;
-                            } else {
-                                // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
-                                // check if last feature matches in feature_map_entry
-                                let reversed_feature_id = feature_map_entry[feature_map_entry_len - feature_element_idx];
-                                if actual_element_id == reversed_feature_id && actual_element.strand == element.strand {
-                                    continue;
-                                } else {
-                                    // if not, set multiplier to 0, as likely to be non-functional
-                                    element_log_sum = 0.0;
-                                    feature_broken = true;
-                                    break;
-                                }
-                            }
-                        }
-
-
-                        // check downstream elements in feature_map_entry
-                        if !feature_broken {
-                            for feature_element_idx in position + 1..feature_map_entry_len {
-                                // get downstream feature in genome
-                                let actual_element = &genome.seq[element_idx + (feature_element_idx - position)];
-                                let actual_element_id = actual_element.element_id;
-
-                                // get expected element
-                                let expected_element_id = feature_map_entry[feature_element_idx];
-
-                                // expected element and strand matches so continue
-                                if actual_element_id == expected_element_id && actual_element.strand == element.strand {
-                                    continue;
-                                } else {
-                                    // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
-                                    // check if last feature matches in feature_map_entry
-                                    let reversed_feature_id = feature_map_entry[feature_map_entry_len - feature_element_idx];
-                                    if actual_element_id == reversed_feature_id && actual_element.strand == element.strand {
-                                        continue;
-                                    } else {
-                                        // if not, set multiplier to 0, as likely to be non-functional
-                                        element_log_sum = 0.0;
-                                        feature_broken = true;
-                                        break;
-                                    }
-                                }  
-                            }
-                        }
-
-                        // check if TE is present upstream or downstream, if so increase multiplier, as likely to increase expression of gene, and thus fitness contribution
-                        if !feature_broken {
-                            let upstream_element = &genome.seq[element_idx - position];
-                            let downstream_element = &genome.seq[element_idx + (feature_map_entry_len - position - 1)];
-
-                            if upstream_element.feature_type == "TE" {
-                                feature_multiplier = upstream_element.multiplier;
-                            }
-
-                            if downstream_element.feature_type == "TE" {
-                                if feature_multiplier.abs() < downstream_element.multiplier {
-                                    feature_multiplier = downstream_element.multiplier;
-                                }
-                            }
-                        }
-                    }
+                    let (feature_broken, feature_multiplier) = self.check_feature_order(genome, element_idx, element);
                     
                     // if feature not broken, add up sites
                     if !feature_broken {
