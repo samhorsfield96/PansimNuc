@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use noodles_gff::feature;
 use rayon::prelude::*;
 use logsumexp::LogSumExp;
 use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
@@ -344,7 +343,7 @@ impl Population {
             
             for (element_idx, element) in genome.seq.iter().enumerate() {
                 let element_id = element.element_id;
-                let mut homology_group = &mut self.homology_map[element_id][genome.genome_id];
+                let homology_group = &mut self.homology_map[element_id][genome.genome_id];
                 homology_group.push(element_idx); // convert back to 0 indexed
             }
         }

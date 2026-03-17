@@ -7,9 +7,7 @@ use rand::Rng;
 use crate::mutation::Distribution as MutationDistribution;
 extern crate levenshtein;
 use levenshtein::levenshtein;
-use petgraph::graph::{NodeIndex, UnGraph};
-use petgraph::visit::Dfs;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 // TODO need to think about how to determine whether a TE inserts into another gene, making it non-functional
 // or whether it is upstream or downstream and can augment its function, having a multiplicative effect on its fitness contribution.

@@ -159,9 +159,11 @@ fn main() {
 					}
 
 					// recombination distributions
-					let recombination_prob_dist = Distribution::new_poisson(5.0).expect("Failed to create recombination probability distribution");
-					let recombination_size_dist = Distribution::new_poisson(1000.0).expect("Failed to create recombination distance probability distribution");
-					let recombination_threshold = 0.90;
+					let recombination_rate = parse_f64("population.recombination_rate");
+					let recombination_size_mean = parse_f64("population.recombination_size_mean");
+					let recombination_prob_dist = Distribution::new_poisson(recombination_rate).expect("Failed to create recombination probability distribution");
+					let recombination_size_dist = Distribution::new_poisson(recombination_size_mean).expect("Failed to create recombination distance probability distribution");
+					let recombination_threshold = parse_f64("population.recombination_threshold");
 
 					let recombination_dists = vec![recombination_prob_dist, recombination_size_dist];
 
