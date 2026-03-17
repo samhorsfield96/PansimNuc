@@ -65,12 +65,13 @@ fn main() {
 	let seed: u64 = seed_str.parse::<u64>().expect("seed must be an integer.");
 	let mut rng: StdRng = StdRng::seed_from_u64(seed);
 
-	if let (Some(gff_path), Some(fasta_path), Some(earlgrey_gff_path)) = (
+	let earlgrey_gff_path: Option<&str> = configuration.get("input.earlgrey_gff_file").map(|s| s.as_str());
+
+	if let (Some(gff_path), Some(fasta_path)) = (
 		configuration.get("input.gff_file"),
-		configuration.get("input.fasta_file"),
-		configuration.get("input.earlgrey_gff_file"),
+		configuration.get("input.fasta_file")
 	) {
-		match read_gff_lines(&gff_path, &fasta_path, Some(&earlgrey_gff_path)) {
+		match read_gff_lines(&gff_path, &fasta_path, earlgrey_gff_path) {
 			Ok(features) => {
 				println!("Loaded {} contigs with features", features.len());
 
@@ -222,6 +223,6 @@ fn main() {
 			}
 		}
 	} else {
-		eprintln!("Failed to read required input files: input.gff_file, input.fasta_file, input.earlgrey_gff_file");
+		eprintln!("Failed to read required input files: input.gff_file, input.fasta_file");
 	}
 }

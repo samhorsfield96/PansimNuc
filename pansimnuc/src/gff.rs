@@ -205,6 +205,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
 
     // keep track of previous feature end
     let mut last_feature_end: usize = 0;
+    let mut last_feature_type: String = "gene".to_string();
     
     // hold features
     let mut features: Vec<Vec<FeaturePos>> = Vec::new();
@@ -227,7 +228,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
         let feature_type: String = record.ty().to_string();
 
         // if last feature was a gene, then region must be intergenic
-        if feature_type == "Gene" {
+        if feature_type == "gene" {
             // increment feature ID
             current_feature_id += 1;
 
@@ -247,12 +248,14 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
 
             // update last_feature_end
             last_feature_end = feature_end;
+            last_feature_type = feature_type.clone();
         } 
-        // if next feature is exon, need to check than current end is not identical otherwise still at start of gene
+        // if next feature is exon or intron, need to check than current end is not identical otherwise still at start of gene
         else if feature_type == "exon" {
             
             // if next feature is exon, need to check than current end is not identical otherwise still at start of gene
-            if feature_start > last_feature_end {
+            if feature_start > last_feature_end && last_feature_type == "exon" {
+                // add intron feature between last exon and current exon
                 features[contig_id as usize]
                     .push(FeaturePos {
                         contig_id: contig_id as usize,
@@ -263,10 +266,8 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
                         strand: true,
                         seq: vec![0]
                     });
-            }
 
-            // only add exons as features
-            if feature_type == "exon" {
+                // only add exons as features
                 features[contig_id as usize]
                     .push(FeaturePos {
                         contig_id: contig_id as usize,
@@ -276,13 +277,34 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
                         end: feature_end,
                         strand: record.strand() == Strand::Forward,
                         seq: vec![0]
-                    });
+                });
+            // avoid exon overlap, merge into single exon
+            } 
+            else if feature_start < last_feature_end && last_feature_type == "exon"  {
+                if let Some(last_feature) = features[contig_id as usize].last_mut() {
+                    if last_feature.feature_type == "exon" {
+                        last_feature.start = feature_start.min(last_feature.start);
+                        last_feature.end = feature_end.max(last_feature.end);
+                    }
+                }
+            } else {
+                // only add exons as features
+                features[contig_id as usize]
+                    .push(FeaturePos {
+                        contig_id: contig_id as usize,
+                        feature_id: current_feature_id,
+                        feature_type: feature_type.clone(),
+                        start: feature_start,
+                        end: feature_end,
+                        strand: record.strand() == Strand::Forward,
+                        seq: vec![0]
+                });
             }
 
             // update last_feature_end
             last_feature_end = feature_end;
+            last_feature_type = feature_type.clone();
         }
-        
     }
 
     Ok(features)
@@ -431,9 +453,9 @@ mod tests {
     #[test]
     fn test_read_multi_contig_gff() {
         let gff_content = "##gff-version 3
-contig1\t.\tGene\t100\t200\t.\t+\t.\tID=gene1
+contig1\t.\tgene\t100\t200\t.\t+\t.\tID=gene1
 contig1\t.\texon\t100\t200\t.\t+\t.\tID=exon1
-contig2\t.\tGene\t50\t150\t.\t+\t.\tID=gene2
+contig2\t.\tgene\t50\t150\t.\t+\t.\tID=gene2
 contig2\t.\texon\t50\t150\t.\t+\t.\tID=exon2";
 
         let fasta_content = ">contig1
@@ -469,9 +491,9 @@ ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
     #[test]
     fn test_extract_multi_contig_features() {
         let gff_content = "##gff-version 3
-contig1\t.\tGene\t100\t200\t.\t+\t.\tID=gene1
+contig1\t.\tgene\t100\t200\t.\t+\t.\tID=gene1
 contig1\t.\texon\t100\t200\t.\t+\t.\tID=exon1
-contig2\t.\tGene\t50\t150\t.\t+\t.\tID=gene2
+contig2\t.\tgene\t50\t150\t.\t+\t.\tID=gene2
 contig2\t.\texon\t50\t150\t.\t+\t.\tID=exon2";
 
         let gff_file = create_temp_file("test", ".gff", gff_content);
@@ -500,7 +522,7 @@ contig2\t.\texon\t50\t150\t.\t+\t.\tID=exon2";
     #[test]
     fn test_earlgrey_overlay_replaces_overlaps_and_skips_unclassified() {
         let gff_content = "##gff-version 3
-contig1\t.\tGene\t100\t200\t.\t+\t.\tID=gene1
+contig1\t.\tgene\t100\t200\t.\t+\t.\tID=gene1
 contig1\t.\texon\t100\t200\t.\t+\t.\tID=exon1";
 
         let mut fasta_content = String::from(">contig1\n");
