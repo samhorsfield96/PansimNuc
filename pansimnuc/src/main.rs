@@ -12,6 +12,7 @@ use population::Population;
 use config::Config;
 use std::collections::HashMap;
 use crate::mutation::Distribution;
+use crate::structural::StructureMutationMap;
 use rand::rngs::StdRng;
 use rand::{SeedableRng};
 
@@ -88,31 +89,95 @@ fn main() {
 				}
 
 				if let (Some(n_individuals_str), Some(n_generation_str)) = (configuration.get("population.n_individuals"), configuration.get("population.n_generations")) {
+					let parse_f64 = |key: &str| -> f64 {
+						let value = configuration
+							.get(key)
+							.unwrap_or_else(|| panic!("Missing required config key: {}", key));
+						value
+							.parse::<f64>()
+							.unwrap_or_else(|_| panic!("Config key '{}' must be a float", key))
+					};
+
+					let parse_usize = |key: &str| -> usize {
+						let value = configuration
+							.get(key)
+							.unwrap_or_else(|| panic!("Missing required config key: {}", key));
+						value
+							.parse::<usize>()
+							.unwrap_or_else(|_| panic!("Config key '{}' must be an integer", key))
+					};
+
+					let feature_sections = ["exons", "introns", "intergenic", "TE-CUT", "TE-COPY"];
 					
 					// generate distributions to draw mutations from
-					// selection distrubtions
-        			let exon_dist = Distribution::new_double_exp(1.0, 10.0, 0.5).expect("Failed to create selection distribution for exon features");
-        			let intron_dist = Distribution::new_normal(0.0, 1.0).expect("Failed to create selection distribution for intron features");
-        			let intergenic_dist = Distribution::new_exp(1.0).expect("Failed to create selection distribution for intergenic features");
+					let mut site_mutation_dists: Vec<Distribution> = Vec::new();
+					let mut site_mutation_mus: Vec<Distribution> = Vec::new();
+					let mut structural_dists: Vec<StructureMutationMap> = Vec::new();
 
-					// mutation rate distributions
-					let exon_mu = Distribution::new_poisson(0.000001).expect("Failed to create mu dist for exon features");
-        			let intron_mu = Distribution::new_poisson(0.00001).expect("Failed to create mu dist for intron features");
-        			let intergenic_mu = Distribution::new_poisson(0.0001).expect("Failed to create mu dist for intergenic features");
+					for section in feature_sections {
+						let selection_key = format!("{}.selection_coefficient", section);
+						let mutation_rate_key = format!("{}.mutation_rate", section);
+						let duplication_rate_key = format!("{}.duplication_rate", section);
+						let deletion_rate_key = format!("{}.deletion_rate", section);
+						let inversion_rate_key = format!("{}.inversion_rate", section);
+						let max_duplications_key = format!("{}.max_duplications", section);
+						let duplication_insertion_prob_key =
+							format!("{}.duplication_insertion_prob", section);
+
+						let selection_coeff = parse_f64(&selection_key);
+						let mutation_rate = parse_f64(&mutation_rate_key);
+
+						site_mutation_dists.push(
+							Distribution::new_exp(selection_coeff).unwrap_or_else(|_| {
+								panic!(
+									"Failed to create selection distribution for section '{}' from key '{}'",
+									section, selection_key
+								)
+							}),
+						);
+
+						site_mutation_mus.push(
+							Distribution::new_poisson(mutation_rate).unwrap_or_else(|_| {
+								panic!(
+									"Failed to create mutation-rate distribution for section '{}' from key '{}'",
+									section, mutation_rate_key
+								)
+							}),
+						);
+
+						let max_duplications = configuration
+							.get(&max_duplications_key)
+							.map(|_| parse_usize(&max_duplications_key));
+
+						structural_dists.push(StructureMutationMap {
+							duplication_rate: parse_f64(&duplication_rate_key),
+							deletion_rate: parse_f64(&deletion_rate_key),
+							inversion_rate: parse_f64(&inversion_rate_key),
+							max_duplications,
+							duplication_insertion_prob: parse_f64(&duplication_insertion_prob_key),
+						});
+					}
 
 					// recombination distributions
 					let recombination_prob_dist = Distribution::new_poisson(5.0).expect("Failed to create recombination probability distribution");
 					let recombination_size_dist = Distribution::new_poisson(1000.0).expect("Failed to create recombination distance probability distribution");
 					let recombination_threshold = 0.90;
 
-					let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
-					let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
 					let recombination_dists = vec![recombination_prob_dist, recombination_size_dist];
 
 					// generate initial population
 					let n_individuals: usize = n_individuals_str.parse::<usize>().expect("n_individuals must be an integer.");
 					println!("Initialising population...");
-					let mut population = Population::new(features, n_individuals, site_mutation_dists, site_mutation_mus, recombination_dists, recombination_threshold, &mut rng);
+					let mut population = Population::new(
+						features,
+						n_individuals,
+						site_mutation_dists,
+						site_mutation_mus,
+						recombination_dists,
+						recombination_threshold,
+						structural_dists,
+						&mut rng,
+					);
 					println!("Finished initialising population...");
 
 					// mutate population

@@ -196,6 +196,7 @@ impl Population {
         mu_dists: Vec<MutationDistribution>,
         recombination_dists: Vec<MutationDistribution>,
         recombination_threshold: f64,
+        structural_dists: Vec<StructureMutationMap>,
         rng: &mut StdRng,
     ) -> Self {
         // initialise population
@@ -221,8 +222,8 @@ impl Population {
                     "exon" => 0,
                     "intron" => 1,
                     "intergenic" => 2,
-                    "TE-CUT" => 2,
-                    "TE-COPY" => 2,
+                    "TE-CUT" => 3,
+                    "TE-COPY" => 4,
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
                 
@@ -230,8 +231,17 @@ impl Population {
                     "exon" => 0,
                     "intron" => 1,
                     "intergenic" => 2,
-                    "TE-CUT" => 2,
-                    "TE-COPY" => 2,
+                    "TE-CUT" => 3,
+                    "TE-COPY" => 4,
+                    _ => panic!("Unknown feature type: {}", feature.feature_type),
+                };
+
+                let structural_map:StructureMutationMap = match feature.feature_type.as_str() {
+                    "exon" => structural_dists[0].clone(),
+                    "intron" => structural_dists[1].clone(),
+                    "intergenic" => structural_dists[2].clone(),
+                    "TE-CUT" => structural_dists[3].clone(),
+                    "TE-COPY" => structural_dists[4].clone(),
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
@@ -248,13 +258,7 @@ impl Population {
                     seq: feature.seq.clone(),
                     strand: feature.strand,
                     mutation_map: MutationMap::new(selection_dist_id, mu_dist_id, &feature.seq, &selection_dists[selection_dist_id], rng),
-                    structure_mutation_map: StructureMutationMap {
-                        duplication_rate: 0.0,
-                        deletion_rate: 0.0,
-                        inversion_rate: 0.0,
-                        max_duplications: None,
-                        duplication_insertion_prob: 0.5,
-                    },
+                    structure_mutation_map: structural_map.clone(),
                     multiplier: 1.0, // Initialize with a default value, can be updated later
                 });
                 element_id += 1;
@@ -500,6 +504,46 @@ mod tests {
     use std::fs;
     use std::io::Read;
 
+    fn default_structural_dists() -> Vec<StructureMutationMap> {
+        vec![
+            StructureMutationMap {
+                duplication_rate: 0.0,
+                deletion_rate: 0.0,
+                inversion_rate: 0.0,
+                max_duplications: None,
+                duplication_insertion_prob: 0.5,
+            },
+            StructureMutationMap {
+                duplication_rate: 0.0,
+                deletion_rate: 0.0,
+                inversion_rate: 0.0,
+                max_duplications: None,
+                duplication_insertion_prob: 0.5,
+            },
+            StructureMutationMap {
+                duplication_rate: 0.0,
+                deletion_rate: 0.0,
+                inversion_rate: 0.0,
+                max_duplications: None,
+                duplication_insertion_prob: 0.5,
+            },
+            StructureMutationMap {
+                duplication_rate: 0.0,
+                deletion_rate: 0.0,
+                inversion_rate: 0.0,
+                max_duplications: None,
+                duplication_insertion_prob: 0.5,
+            },
+            StructureMutationMap {
+                duplication_rate: 0.0,
+                deletion_rate: 0.0,
+                inversion_rate: 0.0,
+                max_duplications: None,
+                duplication_insertion_prob: 0.5,
+            },
+        ]
+    }
+
     #[test]
     fn test_population_new() {
         // Create test data
@@ -543,7 +587,16 @@ mod tests {
         let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
 
         let mut rng: StdRng = StdRng::seed_from_u64(42);
-        let pop = Population::new(root, n_genomes, site_mutation_dists, site_mutation_mus, recombination_dists, 1.0, &mut rng);
+        let pop = Population::new(
+            root,
+            n_genomes,
+            site_mutation_dists,
+            site_mutation_mus,
+            recombination_dists,
+            1.0,
+            default_structural_dists(),
+            &mut rng,
+        );
 
         // Check population was created correctly
         assert_eq!(pop.generation, 0);
@@ -603,7 +656,16 @@ mod tests {
         let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
 
         let mut rng: StdRng = StdRng::seed_from_u64(42);
-        let pop = Population::new(root, 1, site_mutation_dists, site_mutation_mus, recombination_dists, 1.0, &mut rng);
+        let pop = Population::new(
+            root,
+            1,
+            site_mutation_dists,
+            site_mutation_mus,
+            recombination_dists,
+            1.0,
+            default_structural_dists(),
+            &mut rng,
+        );
 
         let temp_path = std::env::temp_dir().join(format!(
             "pansimnuc_pop_{}.fasta",
@@ -670,7 +732,16 @@ mod tests {
         let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
 
         let mut rng: StdRng = StdRng::seed_from_u64(42);
-        let mut pop = Population::new(root, 1, site_mutation_dists, site_mutation_mus, recombination_dists, 1.0, &mut rng);
+        let mut pop = Population::new(
+            root,
+            1,
+            site_mutation_dists,
+            site_mutation_mus,
+            recombination_dists,
+            1.0,
+            default_structural_dists(),
+            &mut rng,
+        );
 
         let original_seq = pop.pop[0].seq[0].seq.clone();
         let original_map = pop.pop[0].seq[0].mutation_map.clone();
@@ -738,7 +809,16 @@ mod tests {
             .expect("Failed to create uniform distribution for recombination");
         let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
 
-        let mut pop = Population::new(root, 3, site_mutation_dists, site_mutation_mus, recombination_dists, 1.0, &mut rng);
+        let mut pop = Population::new(
+            root,
+            3,
+            site_mutation_dists,
+            site_mutation_mus,
+            recombination_dists,
+            1.0,
+            default_structural_dists(),
+            &mut rng,
+        );
 
         let original_identifiers: Vec<String> = pop
             .pop
@@ -858,6 +938,7 @@ mod tests {
             site_mutation_mus,
             recombination_dists,
             1.0,
+            default_structural_dists(),
             &mut rng,
         )
     }
