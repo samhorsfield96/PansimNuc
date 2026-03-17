@@ -968,13 +968,13 @@ mod tests {
         let mut downstream_te = seq[0].clone();
         downstream_te.feature_type = "TE".to_string();
         downstream_te.feature_id = 0;
-        downstream_te.multiplier = -3.5;
+        downstream_te.multiplier = 3.5;
         downstream_te.element_id = 20_001;
         seq.insert(5, downstream_te);
-        
+
         let genome = genome_from_seq(seq);
         let (broken, multiplier) = check_feature_one_intron(&pop, &genome);
         assert!(!broken);
-        assert!(multiplier == -3.5);
+        assert!(multiplier == 3.5);
     }
 }
