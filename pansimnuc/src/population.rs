@@ -257,11 +257,13 @@ impl Population {
             .map(|genome| {
                 let mut log_sum = 0.0;
 
-                // TODO iterate through genome.seq, pulling out features and determining whether they are in correct order and all in same strand
+                // TODO determine whether there is feature multiplier
                 let mut feature_multiplier = 1.0;
 
                 for (element_idx, element) in genome.seq.iter().enumerate() {
                     let mut element_log_sum = 0.0;
+
+                    let mut feature_broken = false;
 
                     // identify regions where order matters
                     if element.feature_type == "exon" || element.feature_type == "intron" {
@@ -271,11 +273,11 @@ impl Population {
 
                         // get position of element in feature_map_entry
                         let position = feature_map_entry.iter().position(|n| n == &element.element_id).expect("Element not found in feature_map_entry");
-
-                        // check upstream and downstream elements in feature_map_entry, if they exist, to determine whether order is correct and all in same strand
+                        
+                        // check upstream  elements in feature_map_entry
                         for feature_element_idx in 0..position {
                             // get upstream feature in genome
-                            let actual_element = &genome.seq[element_idx - position + feature_element_idx];
+                            let actual_element = &genome.seq[element_idx - (position - feature_element_idx)];
                             let actual_element_id = actual_element.element_id;
 
                             // get expected element
@@ -287,33 +289,65 @@ impl Population {
                             } else {
                                 // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
                                 // check if last feature matches in feature_map_entry
-                                let last_feature_id = feature_map_entry[feature_map_entry_len - feature_element_idx];
-                                if actual_element_id == last_feature_id && actual_element.strand == element.strand {
+                                let reversed_feature_id = feature_map_entry[feature_map_entry_len - feature_element_idx];
+                                if actual_element_id == reversed_feature_id && actual_element.strand == element.strand {
                                     continue;
                                 } else {
                                     // if not, set multiplier to 0, as likely to be non-functional
                                     element_log_sum = 0.0;
+                                    feature_broken = true;
                                     break;
                                 }
                             }
                         }
 
-                        // check downstream elements in feature_map_entry, if they exist, to determine whether order is correct and all in same strand
-                    }
+                        // check downstream elements in feature_map_entry
+                        if !feature_broken {
+                            for feature_element_idx in position + 1..feature_map_entry_len {
+                                // get downstream feature in genome
+                                let actual_element = &genome.seq[element_idx + (feature_element_idx - position)];
+                                let actual_element_id = actual_element.element_id;
 
-                    
-                    for (site, allele) in element.seq.iter().enumerate() {
-                        let allele_shifted = 1 >> allele;
-                        if let Some(coeff) = element.mutation_map.get(*allele, site) {
-                            log_sum += coeff;
-                            element_log_sum += coeff;
-                        } else {
-                            panic!(
-                                "Failed to generate selection coefficient for genome {} allele {} (shifted {}) at site {}",
-                                genome.identifier, allele, allele_shifted, site
-                            );
+                                // get expected element
+                                let expected_element_id = feature_map_entry[feature_element_idx];
+
+                                // expected element and strand matches so continue
+                                if actual_element_id == expected_element_id && actual_element.strand == element.strand {
+                                    continue;
+                                } else {
+                                    // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
+                                    // check if last feature matches in feature_map_entry
+                                    let reversed_feature_id = feature_map_entry[feature_map_entry_len - feature_element_idx];
+                                    if actual_element_id == reversed_feature_id && actual_element.strand == element.strand {
+                                        continue;
+                                    } else {
+                                        // if not, set multiplier to 0, as likely to be non-functional
+                                        element_log_sum = 0.0;
+                                        feature_broken = true;
+                                        break;
+                                    }
+                                }  
+                            }
                         }
                     }
+                    
+                    // if feature not broken, add up sites
+                    if !feature_broken {
+                        for (site, allele) in element.seq.iter().enumerate() {
+                            let allele_shifted = 1 >> allele;
+                            if let Some(coeff) = element.mutation_map.get(*allele, site) {
+                                element_log_sum += coeff;
+                            } else {
+                                panic!(
+                                    "Failed to generate selection coefficient for genome {} allele {} (shifted {}) at site {}",
+                                    genome.identifier, allele, allele_shifted, site
+                                );
+                            }
+                        }
+                    }
+
+                    log_sum += element_log_sum * feature_multiplier;
+
                 }
                 log_sum
             })
