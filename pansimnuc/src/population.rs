@@ -14,13 +14,18 @@ use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
 use rand::rngs::StdRng;
 use rand::{SeedableRng};
 
+// TODO all elements with same feature ID have collective product of multipliers, 
+// allows accounting for insertion of TEs upstream or downstream of genes, which can increase their expression and thus fitness contribution, without needing to model the exact position of the TE insertion, which is likely to be less important than whether it is upstream or downstream of the gene, and whether it is in an exon or intron, which can be modelled with different distributions of multiplier effects for insertions in exons vs introns vs intergenic regions. Also allows modelling of gene loss through deletion or TE insertion by setting multiplier to 0, without needing to model exact position of deletion or insertion, which is likely to be less important than whether it affects an exon or intron, which can be modelled with different distributions of multiplier effects and insertions into gene regions
+
+// for a gene block, keep track of with exons and introns exist together, take into account whether TE inserts upstream or downstream, then use multiplier to dictate the effect on overall gene fitness
+
 #[derive(Clone)]
 pub struct NucElement {
     pub contig_id: usize,
     pub element_id: usize,
     pub feature_id: usize,
     pub feature_type: String,
-    pub selection_coefficient: f64,
+    pub multiplier: f64,
     pub seq: Vec<u8>,
     pub mutation_map: MutationMap,
     pub strand: bool,
@@ -32,7 +37,7 @@ pub struct Genome {
     pub genome_id: usize,
     pub contig_starts: Vec<usize>,
     pub parent: String,
-    pub seq: Vec<NucElement>
+    pub seq: Vec<NucElement>,
 }
 
 impl Genome {
@@ -56,9 +61,8 @@ pub struct Population{
     pub mu_dists: Vec<MutationDistribution>,
     pub recombination_dists: Vec<MutationDistribution>,
     pub recombination_threshold: f64,
-    // Map from original element ID to positions of homologous regions in other genomes
-    //outermost loop is the homology group, middle loop is genomes, inner loop is positions
-    pub homology_map: Vec<Vec<Vec<usize>>>
+    pub homology_map: Vec<Vec<Vec<usize>>>, // Map from original element ID to positions of homologous regions in other genomes, outermost loop is the homology group, middle loop is genomes, inner loop is positions
+    pub feature_map: HashMap<usize, Vec<usize>>, // Map from feature ID to genes that share same ID
 }
 
 impl Population {
@@ -105,6 +109,9 @@ impl Population {
         // initialise homology map, outermost loop is the homology group, middle loop is genomes, inner loop is positions
         let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
 
+        // initialise feature map, maps feature ID to number of genes that should share same ID
+        let mut feature_map: HashMap<usize, Vec<usize>> = HashMap::new();
+
         // generate starting genome
         for (contig_id, features) in root.iter().enumerate() {
             for feature in features {
@@ -125,6 +132,11 @@ impl Population {
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
+                // Update feature_map, keeping track of how many features there are
+                if feature.feature_id != 0 {
+                    feature_map.entry(feature.feature_id).or_default().push(element_id);
+                }
+
                 genome.push(NucElement {
                     contig_id: contig_id,
                     element_id: element_id,
@@ -140,7 +152,7 @@ impl Population {
                         max_duplications: None,
                         duplication_insertion_prob: 0.5,
                     },
-                    selection_coefficient: 0.0, // Initialize with a default value, can be updated later
+                    multiplier: 1.0, // Initialize with a default value, can be updated later
                 });
                 element_id += 1;
 
@@ -152,7 +164,6 @@ impl Population {
                 homology_map.push(element_homology_map);
             }
         }
-
 
         // copy whole genome to start
         for i in 0..n_genomes {
@@ -179,7 +190,8 @@ impl Population {
             mu_dists,
             recombination_dists,
             recombination_threshold,
-            homology_map
+            homology_map,
+            feature_map
         }
     }
 
@@ -244,6 +256,10 @@ impl Population {
             .par_iter_mut()
             .map(|genome| {
                 let mut log_sum = 0.0;
+
+                // TODO iterate through genome.seq, pulling out features and determining whether they are in correct order and all in same strand
+
+
                 for element in &mut genome.seq {
                     let mut element_log_sum = 0.0;
                     for (site, allele) in element.seq.iter().enumerate() {
@@ -258,8 +274,6 @@ impl Population {
                             );
                         }
                     }
-                    
-                    element.selection_coefficient = element_log_sum;
                 }
                 log_sum
             })

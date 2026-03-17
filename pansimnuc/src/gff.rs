@@ -31,7 +31,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
     let mut gff_reader = gff::io::Reader::new(BufReader::new(file_gff));
 
     // keep track of current feature ID, dictacted by gene and its upstream region
-    let mut current_feature_id: usize = 0;
+    let mut current_feature_id: usize = 1;
 
     // keep track of previous feature end
     let mut last_feature_end: usize = 0;
@@ -61,12 +61,12 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
             // increment feature ID
             current_feature_id += 1;
 
-            // in case gene is start of contig
+            // in case gene is start of contig, feature_id always 0
             if feature_start > last_feature_end {
                 features[contig_id as usize]
                     .push(FeaturePos {
                         contig_id: contig_id as usize,
-                        feature_id: current_feature_id,
+                        feature_id: 0,
                         feature_type: "intergenic".to_string(),
                         start: last_feature_end,
                         end: feature_start,
@@ -161,7 +161,7 @@ pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<Vec<Vec<Fe
 
             results.push(FeaturePos {
                 contig_id: contig_id,
-                feature_id: last_feature_id + 1,
+                feature_id: 0,
                 feature_type: "intergenic".to_string(),
                 start: feature_start,
                 end: feature_end,

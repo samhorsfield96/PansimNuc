@@ -14,6 +14,9 @@ use std::collections::{HashMap, HashSet};
 // TODO need to think about how to determine whether a TE inserts into another gene, making it non-functional
 // or whether it is upstream or downstream and can augment its function, having a multiplicative effect on its fitness contribution.
 
+// TODO Add multiplier effect if insertion non-exon upstream or downstram of exon
+// TODO if exon or intron moved, negate effect of whole gene, as it is likely to be non-functional, unless it is moved in its entirety, in which case it is likely to be functional but with different expression level, so can model with a multiplier effect on fitness contribution of gene, which can be sampled from a distribution
+
 // TODO identify independent recombinations to enable parralellisation
 
 // for a given NucElement, store its position in the genome
@@ -386,7 +389,7 @@ mod tests {
                     element_id: 0,
                     feature_id: 0,
                     feature_type: "exon".to_string(),
-                    selection_coefficient: 0.0,
+                    multiplier: 1.0,
                     seq: vec![],
                     mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
                     strand: true,
@@ -397,7 +400,7 @@ mod tests {
                     element_id: 1,
                     feature_id: 1,
                     feature_type: "exon".to_string(),
-                    selection_coefficient: 0.0,
+                    multiplier: 1.0,
                     seq: vec![],
                     mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
                     strand: false,
@@ -408,7 +411,7 @@ mod tests {
                     element_id: 2,
                     feature_id: 2,
                     feature_type: "exon".to_string(),
-                    selection_coefficient: 0.0,
+                    multiplier: 1.0,
                     seq: vec![],
                     mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
                     strand: false,
@@ -440,7 +443,7 @@ mod tests {
             element_id,
             feature_id,
             feature_type: "exon".to_string(),
-            selection_coefficient: 0.0,
+            multiplier: 1.0,
             seq: vec![],
             mutation_map: MutationMap::new(0, 0, &vec![], sel_dist, rng),
             strand,
@@ -482,7 +485,7 @@ mod tests {
                 element_id: idx,
                 feature_id: idx,
                 feature_type: "exon".to_string(),
-                selection_coefficient: 0.0,
+                multiplier: 1.0,
                 seq: marker_seq.clone(),
                 mutation_map: MutationMap::new(0, 0, &marker_seq, &sel_dist, &mut rng),
                 strand: if idx % 2 == 0 { strand_seed } else { !strand_seed },
@@ -521,6 +524,7 @@ mod tests {
             recombination_dists: vec![recombination_count, recombination_len],
             recombination_threshold: 0.0,
             homology_map,
+            feature_map: HashMap::new(),
         }
     }
 
