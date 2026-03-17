@@ -15,7 +15,7 @@ use rand::{SeedableRng};
 
 #[derive(Parser, Debug)]
 #[command(name = "pansimnuc")]
-#[command(about = "Forward simulation of base genome at nucleotide level", long_about = None)]
+#[command(about = "Forward simulation of base genomes at nucleotide level", long_about = None)]
 struct Args {
 	#[arg(long, help = "Optional path to config file")]
 	config: Option<String>,
@@ -62,8 +62,12 @@ fn main() {
 	let seed: u64 = seed_str.parse::<u64>().expect("seed must be an integer.");
 	let mut rng: StdRng = StdRng::seed_from_u64(seed);
 
-	if let (Some(gff_path), Some(fasta_path)) = (configuration.get("input.gff_file"), configuration.get("input.fasta_file")) {
-		match read_gff_lines(&gff_path, &fasta_path) {
+	if let (Some(gff_path), Some(fasta_path), Some(earlgrey_gff_path)) = (
+		configuration.get("input.gff_file"),
+		configuration.get("input.fasta_file"),
+		configuration.get("input.earlgrey_gff_file"),
+	) {
+		match read_gff_lines(&gff_path, &fasta_path, Some(&earlgrey_gff_path)) {
 			Ok(features) => {
 				println!("Loaded {} contigs with features", features.len());
 
@@ -135,6 +139,6 @@ fn main() {
 			}
 		}
 	} else {
-		eprintln!("Failed to read input gff and fasta files");
+		eprintln!("Failed to read required input files: input.gff_file, input.fasta_file, input.earlgrey_gff_file");
 	}
 }

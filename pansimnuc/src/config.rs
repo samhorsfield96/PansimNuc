@@ -148,6 +148,25 @@ option2=value2";
     }
 
     #[test]
+    fn test_config_input_with_earlgrey_gff_file() {
+        let content = "[input]
+gff_file=/tmp/main.gff3
+fasta_file=/tmp/ref.fa
+earlgrey_gff_file=/tmp/te.gff";
+
+        let path = create_test_config(content);
+        let config = Config::from_file(&path);
+        assert!(config.is_ok());
+
+        let config = config.unwrap();
+        assert_eq!(config.get("input", "gff_file"), Some("/tmp/main.gff3".to_string()));
+        assert_eq!(config.get("input", "fasta_file"), Some("/tmp/ref.fa".to_string()));
+        assert_eq!(config.get("input", "earlgrey_gff_file"), Some("/tmp/te.gff".to_string()));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn test_config_keys_in_section() {
         let content = "[features]
 exon=true

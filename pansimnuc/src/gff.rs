@@ -5,6 +5,14 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader};
 
+#[derive(Clone)]
+struct TeInterval {
+    start: usize,
+    end: usize,
+    feature_type: String,
+    strand: bool,
+}
+
 pub struct FeaturePos {
     pub contig_id: usize,
     pub feature_id: usize,
@@ -25,6 +33,168 @@ fn encode_dna(seq: &str) -> Vec<u8> {
             _ => 16, // N or any other non-ACGT character
         })
         .collect()
+}
+
+fn classify_te_feature_type(raw_type: &str) -> Option<String> {
+    let upper = raw_type.to_ascii_uppercase();
+
+    if upper.contains("UNCLASSIFIED") {
+        return None;
+    }
+
+    if upper.contains("DNA") || upper.contains("MITE") {
+        Some("TE-CUT".to_string())
+    } else {
+        Some("TE-COPY".to_string())
+    }
+}
+
+fn get_contig_order_from_gff(gff_path: &str) -> io::Result<Vec<String>> {
+    let file_gff = File::open(gff_path)?;
+    let mut gff_reader = gff::io::Reader::new(BufReader::new(file_gff));
+    let mut contigs: Vec<String> = Vec::new();
+
+    for result in gff_reader.record_bufs() {
+        let record: noodles_gff::feature::RecordBuf = result?;
+        let seqname = record.reference_sequence_name().to_string();
+        if contigs.last().map_or(true, |last| last != &seqname) {
+            contigs.push(seqname);
+        }
+    }
+
+    Ok(contigs)
+}
+
+fn parse_earlgrey_intervals(
+    earlgrey_gff_path: &str,
+    contig_map: &HashMap<String, usize>,
+) -> io::Result<HashMap<usize, Vec<TeInterval>>> {
+    let file_gff = File::open(earlgrey_gff_path)?;
+    let mut gff_reader = gff::io::Reader::new(BufReader::new(file_gff));
+    let mut intervals_by_contig: HashMap<usize, Vec<TeInterval>> = HashMap::new();
+
+    for result in gff_reader.record_bufs() {
+        let record: noodles_gff::feature::RecordBuf = result?;
+        let seqname = record.reference_sequence_name().to_string();
+        let Some(&contig_id) = contig_map.get(&seqname) else {
+            continue;
+        };
+
+        let Some(feature_type) = classify_te_feature_type(&record.ty().to_string()) else {
+            continue;
+        };
+
+        let start = usize::from(record.start()).saturating_sub(1);
+        let end = usize::from(record.end());
+        if start >= end {
+            continue;
+        }
+
+        intervals_by_contig
+            .entry(contig_id)
+            .or_default()
+            .push(TeInterval {
+                start,
+                end,
+                feature_type,
+                strand: record.strand() == Strand::Forward,
+            });
+    }
+
+    for intervals in intervals_by_contig.values_mut() {
+        intervals.sort_by_key(|interval| interval.start);
+    }
+
+    Ok(intervals_by_contig)
+}
+
+fn push_feature_segment(
+    out: &mut Vec<FeaturePos>,
+    contig_id: usize,
+    feature_id: usize,
+    feature_type: &str,
+    start: usize,
+    end: usize,
+    strand: bool,
+    seq: &str,
+) {
+    if start >= end || end > seq.len() {
+        return;
+    }
+
+    out.push(FeaturePos {
+        contig_id,
+        feature_id,
+        feature_type: feature_type.to_string(),
+        start,
+        end,
+        strand,
+        seq: encode_dna(&seq[start..end]),
+    });
+}
+
+fn overlay_te_intervals(
+    features: &mut Vec<FeaturePos>,
+    intervals: &[TeInterval],
+    contig_id: usize,
+    contig_seq: &str,
+) {
+    for interval in intervals {
+        let mut updated: Vec<FeaturePos> = Vec::new();
+
+        for feature in &*features {
+            let overlap_start = feature.start.max(interval.start);
+            let overlap_end = feature.end.min(interval.end);
+
+            if overlap_start >= overlap_end {
+                updated.push(FeaturePos {
+                    contig_id: feature.contig_id,
+                    feature_id: feature.feature_id,
+                    feature_type: feature.feature_type.clone(),
+                    start: feature.start,
+                    end: feature.end,
+                    strand: feature.strand,
+                    seq: feature.seq.clone(),
+                });
+                continue;
+            }
+
+            push_feature_segment(
+                &mut updated,
+                contig_id,
+                feature.feature_id,
+                &feature.feature_type,
+                feature.start,
+                overlap_start,
+                feature.strand,
+                contig_seq,
+            );
+
+            push_feature_segment(
+                &mut updated,
+                contig_id,
+                0,
+                &interval.feature_type,
+                overlap_start,
+                overlap_end,
+                interval.strand,
+                contig_seq,
+            );
+
+            push_feature_segment(
+                &mut updated,
+                contig_id,
+                feature.feature_id,
+                &feature.feature_type,
+                overlap_end,
+                feature.end,
+                feature.strand,
+                contig_seq,
+            );
+        }
+
+        *features = updated;
+    }
 }
 
 pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePos>>> {
@@ -118,7 +288,11 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
     Ok(features)
 }
 
-pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<Vec<Vec<FeaturePos>>> {
+pub fn read_gff_lines(
+    gff_path: &str,
+    fasta_path: &str,
+        earlgrey_gff_path: Option<&str>,
+) -> io::Result<Vec<Vec<FeaturePos>>> {
     let file_gff = File::open(gff_path)?;
     let file_fasta = File::open(fasta_path)?;
 
@@ -169,6 +343,29 @@ pub fn read_gff_lines(gff_path: &str, fasta_path: &str) -> io::Result<Vec<Vec<Fe
         }
     }
 
+    if let Some(earlgrey_path) = earlgrey_gff_path {
+        let contig_order = get_contig_order_from_gff(gff_path)?;
+        let contig_map: HashMap<String, usize> = contig_order
+            .iter()
+            .enumerate()
+            .map(|(idx, name)| (name.clone(), idx))
+            .collect();
+
+        let intervals_by_contig = parse_earlgrey_intervals(earlgrey_path, &contig_map)?;
+
+        for (contig_id, results) in features.iter_mut().enumerate() {
+            let Some(seq) = genome.get(contig_id) else {
+                continue;
+            };
+
+            let Some(intervals) = intervals_by_contig.get(&contig_id) else {
+                continue;
+            };
+
+            overlay_te_intervals(results, intervals, contig_id, seq);
+        }
+    }
+
     Ok(features)
 }
 
@@ -205,7 +402,7 @@ ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
         let gff_file = create_temp_file("test", ".gff", gff_content);
         let fasta_file = create_temp_file("test", ".fasta", fasta_content);
 
-        let result = read_gff_lines(&gff_file, &fasta_file);
+        let result = read_gff_lines(&gff_file, &fasta_file, None);
         assert!(result.is_ok());
 
         let features = result.unwrap();
@@ -256,5 +453,62 @@ contig2\t.\texon\t50\t150\t.\t+\t.\tID=exon2";
         assert_eq!(exon.end, 150);
 
         let _ = std::fs::remove_file(&gff_file);
+    }
+
+    #[test]
+    fn test_earlgrey_overlay_replaces_overlaps_and_skips_unclassified() {
+        let gff_content = "##gff-version 3
+contig1\t.\tGene\t100\t200\t.\t+\t.\tID=gene1
+contig1\t.\texon\t100\t200\t.\t+\t.\tID=exon1";
+
+        let mut fasta_content = String::from(">contig1\n");
+        fasta_content.push_str(&"A".repeat(260));
+
+        let earlgrey_content = "##gff-version 3
+contig1\t.\tDNA\t120\t130\t.\t+\t.\tID=te_cut
+contig1\t.\tLINE\t10\t20\t.\t-\t.\tID=te_copy
+contig1\t.\tUnclassified\t140\t145\t.\t+\t.\tID=skip_me";
+
+        let gff_file = create_temp_file("test", ".gff", gff_content);
+        let fasta_file = create_temp_file("test", ".fasta", &fasta_content);
+        let earlgrey_file = create_temp_file("test", ".earlgrey.gff", earlgrey_content);
+
+        let result = read_gff_lines(&gff_file, &fasta_file, Some(&earlgrey_file));
+        assert!(result.is_ok());
+
+        let features = result.unwrap();
+        assert_eq!(features.len(), 1);
+        let contig_features = &features[0];
+
+        // DNA -> TE-CUT and overlaps exon coordinates.
+        let te_cut = contig_features
+            .iter()
+            .find(|f| f.feature_type == "TE-CUT" && f.start == 119 && f.end == 130)
+            .expect("Expected TE-CUT segment at overlapped exon coordinates");
+        assert!(te_cut.strand);
+
+        // LINE -> TE-COPY and replaces intergenic segment.
+        let te_copy = contig_features
+            .iter()
+            .find(|f| f.feature_type == "TE-COPY" && f.start == 9 && f.end == 20)
+            .expect("Expected TE-COPY segment in intergenic coordinates");
+        assert!(!te_copy.strand);
+
+        // Exon should be split around TE-CUT overlap.
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 99 && f.end == 119));
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 130 && f.end == 200));
+
+        // Unclassified entries must not be added.
+        assert!(!contig_features
+            .iter()
+            .any(|f| f.feature_type.to_ascii_uppercase().contains("UNCLASSIFIED")));
+
+        let _ = std::fs::remove_file(&gff_file);
+        let _ = std::fs::remove_file(&fasta_file);
+        let _ = std::fs::remove_file(&earlgrey_file);
     }
 }

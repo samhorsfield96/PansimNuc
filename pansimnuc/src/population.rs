@@ -67,6 +67,10 @@ pub struct Population{
 }
 
 impl Population {
+    fn is_te_feature(feature_type: &str) -> bool {
+        feature_type == "TE-CUT" || feature_type == "TE-COPY"
+    }
+
     fn check_feature_order (&self, genome: &Genome, element_idx: usize, element: &NucElement) -> (bool, f64) {
         let mut feature_broken = false;
         let mut feature_multiplier = 1.0;
@@ -140,7 +144,7 @@ impl Population {
                 // check not at beginning of genome
                 if element_idx >= position + 1 {
                     let upstream_element = &genome.seq[element_idx - (position + 1)];
-                    if upstream_element.feature_type == "TE" {
+                    if Self::is_te_feature(&upstream_element.feature_type) {
                         feature_multiplier = upstream_element.multiplier;
                     }
                 }
@@ -149,7 +153,7 @@ impl Population {
                 if element_idx + (feature_map_entry_len - position) < genome.seq.len() {
                     let downstream_element = &genome.seq[element_idx + (feature_map_entry_len - position)];
                     
-                    if downstream_element.feature_type == "TE" {
+                    if Self::is_te_feature(&downstream_element.feature_type) {
                         if feature_multiplier.abs() < downstream_element.multiplier.abs() {
                             feature_multiplier = downstream_element.multiplier;
                         }
@@ -217,6 +221,8 @@ impl Population {
                     "exon" => 0,
                     "intron" => 1,
                     "intergenic" => 2,
+                    "TE-CUT" => 2,
+                    "TE-COPY" => 2,
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
                 
@@ -224,6 +230,8 @@ impl Population {
                     "exon" => 0,
                     "intron" => 1,
                     "intergenic" => 2,
+                    "TE-CUT" => 2,
+                    "TE-COPY" => 2,
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
@@ -888,7 +896,7 @@ mod tests {
         let mut seq = pop.pop[0].seq.clone();
 
         let mut inserted_te = seq[0].clone();
-        inserted_te.feature_type = "TE".to_string();
+        inserted_te.feature_type = "TE-CUT".to_string();
         inserted_te.feature_id = 0;
         inserted_te.multiplier = 2.0;
         inserted_te.element_id = 10_000;
@@ -959,14 +967,14 @@ mod tests {
         let mut seq = pop.pop[0].seq.clone();
 
         let mut upstream_te = seq[0].clone();
-        upstream_te.feature_type = "TE".to_string();
+        upstream_te.feature_type = "TE-CUT".to_string();
         upstream_te.feature_id = 0;
         upstream_te.multiplier = 2.0;
         upstream_te.element_id = 20_000;
         seq.insert(1, upstream_te);
 
         let mut downstream_te = seq[0].clone();
-        downstream_te.feature_type = "TE".to_string();
+        downstream_te.feature_type = "TE-COPY".to_string();
         downstream_te.feature_id = 0;
         downstream_te.multiplier = 3.5;
         downstream_te.element_id = 20_001;
