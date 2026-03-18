@@ -846,8 +846,9 @@ mod tests {
         assert!(content.contains("##gff-version 3"));
         assert!(content.contains("\tintergenic\t"));
         assert!(content.contains("feature_id=0"));
-        assert!(content.contains("sequence=ACGT"));
-        assert!(content.contains("overall_selection_coefficient="));
+        assert!(content.contains("sequence_length=4"));
+        assert!(content.contains("genome_selection_coefficient="));
+        assert!(content.contains("element_selection_coefficient="));
         assert!(content.contains("sv_duplication_rate="));
         assert!(content.contains("sv_deletion_rate="));
         assert!(content.contains("sv_inversion_rate="));
