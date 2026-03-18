@@ -516,6 +516,7 @@ mod tests {
             recombination_threshold: 0.0,
             homology_map,
             feature_map: HashMap::new(),
+            max_multiplier_dist: 10,
         }
     }
 

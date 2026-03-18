@@ -183,6 +183,7 @@ fn main() {
 						recombination_dists,
 						recombination_threshold,
 						structural_dists,
+						parse_usize("population.max_multiplier_dist"),
 						&mut rng,
 					);
 					println!("Finished initialising population...");

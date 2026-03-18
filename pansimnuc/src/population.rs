@@ -76,6 +76,7 @@ pub struct Population{
     pub recombination_threshold: f64,
     pub homology_map: Vec<Vec<Vec<usize>>>, // Map from original element ID to positions of homologous regions in other genomes, outermost loop is the homology group, middle loop is genomes, inner loop is positions
     pub feature_map: HashMap<usize, Vec<usize>>, // Map from feature ID to genes that share same ID
+    pub max_multiplier_dist: usize,
 }
 
 impl Population {
@@ -87,6 +88,8 @@ impl Population {
     fn check_feature_order (&self, genome: &Genome, element_idx: usize, element: &NucElement) -> (bool, f64) {
         let mut feature_broken = false;
         let mut feature_multiplier = 1.0;
+
+        let max_multiplier_dist = self.max_multiplier_dist;
         
         // identify regions where order matters
         if element.feature_type == "exon" || element.feature_type == "intron" {
@@ -157,18 +160,37 @@ impl Population {
                 // check not at beginning of genome
                 if element_idx >= position + 1 {
                     let upstream_element = &genome.seq[element_idx - (position + 1)];
+                    let upstream_size = upstream_element.seq.len();
                     if Self::is_te_feature(&upstream_element.feature_type) {
                         feature_multiplier = upstream_element.multiplier;
+                    } 
+                    // check two down and see if TE
+                    else if element_idx >= position + 2 && upstream_size <= max_multiplier_dist {
+                        let upstream_element2 = &genome.seq[element_idx - (position + 2)];
+                        if Self::is_te_feature(&upstream_element2.feature_type) {
+                            if feature_multiplier.abs() < upstream_element2.multiplier.abs() {
+                                feature_multiplier = upstream_element2.multiplier;
+                            }
+                        }
                     }
                 }
 
                 // check not at end of genome
                 if element_idx + (feature_map_entry_len - position) < genome.seq.len() {
                     let downstream_element = &genome.seq[element_idx + (feature_map_entry_len - position)];
-                    
+                    let downstream_size = downstream_element.seq.len();
                     if Self::is_te_feature(&downstream_element.feature_type) {
                         if feature_multiplier.abs() < downstream_element.multiplier.abs() {
                             feature_multiplier = downstream_element.multiplier;
+                        }
+                    } 
+                    // check two down and see if TE
+                    else if element_idx + ((feature_map_entry_len - position) + 1) < genome.seq.len() && downstream_size <= max_multiplier_dist {
+                        let downstream_element2 = &genome.seq[element_idx + ((feature_map_entry_len - position) + 1)];
+                        if Self::is_te_feature(&downstream_element2.feature_type) {
+                            if feature_multiplier.abs() < downstream_element2.multiplier.abs() {
+                                feature_multiplier = downstream_element2.multiplier;
+                            }
                         }
                     }
                 }
@@ -243,6 +265,7 @@ impl Population {
         recombination_dists: Vec<MutationDistribution>,
         recombination_threshold: f64,
         structural_dists: Vec<StructureMutationMap>,
+        max_multiplier_dist: usize,
         rng: &mut StdRng,
     ) -> Self {
         // initialise population
@@ -344,7 +367,8 @@ impl Population {
             recombination_dists,
             recombination_threshold,
             homology_map,
-            feature_map
+            feature_map,
+            max_multiplier_dist
         }
     }
 
@@ -694,6 +718,7 @@ mod tests {
             recombination_dists,
             1.0,
             default_structural_dists(),
+            10, // max_multiplier_dist
             &mut rng,
         );
 
@@ -763,6 +788,7 @@ mod tests {
             recombination_dists,
             1.0,
             default_structural_dists(),
+            10, // max_multiplier_dist
             &mut rng,
         );
 
@@ -837,6 +863,7 @@ mod tests {
             recombination_dists,
             1.0,
             default_structural_dists(),
+            10, // max_multiplier_dist
             &mut rng,
         );
 
@@ -921,6 +948,7 @@ mod tests {
             recombination_dists,
             1.0,
             default_structural_dists(),
+            10, // max_multiplier_dist
             &mut rng,
         );
 
@@ -997,6 +1025,7 @@ mod tests {
             recombination_dists,
             1.0,
             default_structural_dists(),
+            10, // max_multiplier_dist
             &mut rng,
         );
 
@@ -1119,6 +1148,7 @@ mod tests {
             recombination_dists,
             1.0,
             default_structural_dists(),
+            10, // max_multiplier_dist
             &mut rng,
         )
     }
