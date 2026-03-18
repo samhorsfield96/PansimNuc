@@ -38,7 +38,7 @@ fn main() {
 				// Flatten config into a single HashMap for easy access
 				configuration = config.flatten();
 				println!("Configuration values:");
-				for (key, value) in configuration.iter().sorted() {
+				for (key, value) in configuration.iter().sorted_by_key(|x| x.0) {
 					println!("  {} = {}", key, value);
 				}
 			}
