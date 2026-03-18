@@ -742,4 +742,160 @@ contig1\t.\tUnclassified\t140\t145\t.\t+\t.\tID=skip_me";
         let _ = std::fs::remove_file(&fasta_file);
         let _ = std::fs::remove_file(&earlgrey_file);
     }
+
+    #[test]
+    fn test_earlgrey_overlay_is_ordered_non_overlapping_and_continuous() {
+        let gff_content = "##gff-version 3
+contig1\t.\tgene\t10\t40\t.\t+\t.\tID=gene1
+contig1\t.\texon\t10\t20\t.\t+\t.\tID=exon1
+contig1\t.\texon\t30\t40\t.\t+\t.\tID=exon2";
+
+        let mut fasta_content = String::from(">contig1\n");
+        fasta_content.push_str(&"A".repeat(60));
+
+        let earlgrey_content = "##gff-version 3
+contig1\t.\tLINE\t1\t5\t.\t-\t.\tID=te_copy_1
+contig1\t.\tDNA\t15\t18\t.\t+\t.\tID=te_cut_1
+contig1\t.\tLINE\t35\t45\t.\t-\t.\tID=te_copy_2";
+
+        let gff_file = create_temp_file("test", ".gff", gff_content);
+        let fasta_file = create_temp_file("test", ".fasta", &fasta_content);
+        let earlgrey_file = create_temp_file("test", ".earlgrey.gff", earlgrey_content);
+
+        let result = read_gff_lines(&gff_file, &fasta_file, Some(&earlgrey_file));
+        assert!(result.is_ok());
+
+        let features = result.unwrap();
+        assert_eq!(features.len(), 1);
+        let contig_features = &features[0];
+        assert!(!contig_features.is_empty());
+
+        // Coverage should start at 0 and end at full contig length.
+        assert_eq!(contig_features[0].start, 0);
+        assert_eq!(contig_features.last().unwrap().end, 60);
+
+        for window in contig_features.windows(2) {
+            let left = &window[0];
+            let right = &window[1];
+
+            // Correct ordering and no overlaps.
+            assert!(left.start <= right.start);
+            assert!(left.end <= right.start);
+            // Continuous coverage.
+            assert_eq!(left.end, right.start);
+        }
+
+        // Confirm inserted TE coordinates and inferred classes.
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "TE-COPY" && f.start == 0 && f.end == 5));
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "TE-CUT" && f.start == 14 && f.end == 18));
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "TE-COPY" && f.start == 34 && f.end == 40));
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "TE-COPY" && f.start == 40 && f.end == 45));
+
+        // Non-TE segments should still be represented correctly.
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "intergenic" && f.start == 5 && f.end == 9));
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 14));
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 18 && f.end == 20));
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "intron" && f.start == 20 && f.end == 29));
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 29 && f.end == 34));
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "intergenic" && f.start == 45 && f.end == 60));
+
+        let _ = std::fs::remove_file(&gff_file);
+        let _ = std::fs::remove_file(&fasta_file);
+        let _ = std::fs::remove_file(&earlgrey_file);
+    }
+
+    #[test]
+    fn test_earlgrey_overlay_multi_contig_coordinates_and_classification() {
+        let gff_content = "##gff-version 3
+contig1\t.\tgene\t10\t25\t.\t+\t.\tID=c1g1
+contig1\t.\texon\t10\t25\t.\t+\t.\tID=c1e1
+contig2\t.\tgene\t20\t35\t.\t-\t.\tID=c2g1
+contig2\t.\texon\t20\t35\t.\t-\t.\tID=c2e1";
+
+        let mut fasta_content = String::from(">contig1\n");
+        fasta_content.push_str(&"A".repeat(50));
+        fasta_content.push_str("\n>contig2\n");
+        fasta_content.push_str(&"C".repeat(60));
+
+        let earlgrey_content = "##gff-version 3
+contig1\t.\tDNA\t12\t14\t.\t+\t.\tID=c1_te_cut
+contig2\t.\tLINE\t30\t40\t.\t-\t.\tID=c2_te_copy
+contig2\t.\tUnclassified\t22\t24\t.\t+\t.\tID=skip_me";
+
+        let gff_file = create_temp_file("test", ".gff", gff_content);
+        let fasta_file = create_temp_file("test", ".fasta", &fasta_content);
+        let earlgrey_file = create_temp_file("test", ".earlgrey.gff", earlgrey_content);
+
+        let result = read_gff_lines(&gff_file, &fasta_file, Some(&earlgrey_file));
+        assert!(result.is_ok());
+
+        let features = result.unwrap();
+        assert_eq!(features.len(), 2);
+
+        let contig1_features = &features[0];
+        let contig2_features = &features[1];
+
+        assert!(contig1_features
+            .iter()
+            .any(|f| f.feature_type == "TE-CUT" && f.start == 11 && f.end == 14));
+        assert!(contig2_features
+            .iter()
+            .any(|f| f.feature_type == "TE-COPY" && f.start == 29 && f.end == 35));
+        assert!(contig2_features
+            .iter()
+            .any(|f| f.feature_type == "TE-COPY" && f.start == 35 && f.end == 40));
+
+        // Non-TE segments should still be represented correctly on both contigs.
+        assert!(contig1_features
+            .iter()
+            .any(|f| f.feature_type == "intergenic" && f.start == 0 && f.end == 9));
+        assert!(contig1_features
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 11));
+        assert!(contig1_features
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 14 && f.end == 25));
+        assert!(contig1_features
+            .iter()
+            .any(|f| f.feature_type == "intergenic" && f.start == 25 && f.end == 50));
+
+        assert!(contig2_features
+            .iter()
+            .any(|f| f.feature_type == "intergenic" && f.start == 0 && f.end == 19));
+        assert!(contig2_features
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 19 && f.end == 29));
+        assert!(contig2_features
+            .iter()
+            .any(|f| f.feature_type == "intergenic" && f.start == 40 && f.end == 60));
+
+        assert!(!contig1_features
+            .iter()
+            .chain(contig2_features.iter())
+            .any(|f| f.feature_type.to_ascii_uppercase().contains("UNCLASSIFIED")));
+
+        let _ = std::fs::remove_file(&gff_file);
+        let _ = std::fs::remove_file(&fasta_file);
+        let _ = std::fs::remove_file(&earlgrey_file);
+    }
 }
