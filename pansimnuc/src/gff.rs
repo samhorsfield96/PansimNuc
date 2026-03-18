@@ -228,6 +228,19 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
                     last.seq = encode_dna(&contig_seq[last.start..last.end]);
                 }
                 continue;
+            } 
+            // make introns bordering intergenic regions into intergenic to avoid small introns around TEs
+            else if last.feature_type == "intergenic"
+                && current.feature_type == "intron"
+                && last.end >= current.start
+            {
+                last.end = last.end.max(current.end);
+                last.feature_id = 0;
+                last.strand = true;
+                if last.start < last.end && last.end <= contig_seq.len() {
+                    last.seq = encode_dna(&contig_seq[last.start..last.end]);
+                }
+                continue;
             }
         }
 
@@ -733,10 +746,12 @@ contig1\t.\texon\t20\t50\t.\t+\t.\tID=gene2_exon1";
     fn test_earlgrey_overlay_replaces_overlaps_and_skips_unclassified() {
         let gff_content = "##gff-version 3
 contig1\t.\tgene\t100\t200\t.\t+\t.\tID=gene1
-contig1\t.\texon\t100\t200\t.\t+\t.\tID=exon1";
+contig1\t.\texon\t100\t200\t.\t+\t.\tID=exon1
+contig1\t.\texon\t250\t300\t.\t+\t.\tID=exon1";
+
 
         let mut fasta_content = String::from(">contig1\n");
-        fasta_content.push_str(&"A".repeat(260));
+        fasta_content.push_str(&"A".repeat(400));
 
         let earlgrey_content = "##gff-version 3
 contig1\t.\tDNA\t120\t130\t.\t+\t.\tID=te_cut
@@ -753,6 +768,11 @@ contig1\t.\tUnclassified\t140\t145\t.\t+\t.\tID=skip_me";
         let features = result.unwrap();
         assert_eq!(features.len(), 1);
         let contig_features = &features[0];
+
+        println!("Contig features after overlay:");
+        for feature in contig_features {
+            println!("{}: {}-{} ({}) [{}]", feature.feature_type, feature.start, feature.end, if feature.strand { "+" } else { "-" }, String::from_utf8_lossy(&feature.seq));
+        }
 
         // DNA -> TE-CUT and overlaps exon coordinates.
         let te_cut = contig_features
@@ -774,7 +794,10 @@ contig1\t.\tUnclassified\t140\t145\t.\t+\t.\tID=skip_me";
             .any(|f| f.feature_type == "intergenic" && f.start == 20 && f.end == 119));
         assert!(contig_features
             .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 130 && f.end == 260));
+            .any(|f| f.feature_type == "intergenic" && f.start == 130 && f.end == 249));
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "intergenic" && f.start == 300 && f.end == 400));
 
         // Unclassified entries must not be added.
         assert!(!contig_features
@@ -784,6 +807,10 @@ contig1\t.\tUnclassified\t140\t145\t.\t+\t.\tID=skip_me";
             .iter()
             .filter(|f| f.feature_type == "intergenic")
             .all(|f| f.strand));
+
+        // non-overlapping exon should still be represented correctly
+        assert!(contig_features            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 249 && f.end == 300));
 
         let _ = std::fs::remove_file(&gff_file);
         let _ = std::fs::remove_file(&fasta_file);
@@ -795,10 +822,14 @@ contig1\t.\tUnclassified\t140\t145\t.\t+\t.\tID=skip_me";
         let gff_content = "##gff-version 3
 contig1\t.\tgene\t10\t40\t.\t+\t.\tID=gene1
 contig1\t.\texon\t10\t20\t.\t+\t.\tID=exon1
-contig1\t.\texon\t30\t40\t.\t+\t.\tID=exon2";
+contig1\t.\texon\t30\t40\t.\t+\t.\tID=exon2
+contig1\t.\tgene\t50\t100\t.\t+\t.\tID=gene2
+contig1\t.\texon\t50\t70\t.\t+\t.\tID=exon3
+contig1\t.\texon\t75\t100\t.\t+\t.\tID=exon4
+";
 
         let mut fasta_content = String::from(">contig1\n");
-        fasta_content.push_str(&"A".repeat(60));
+        fasta_content.push_str(&"A".repeat(110));
 
         let earlgrey_content = "##gff-version 3
 contig1\t.\tLINE\t1\t5\t.\t-\t.\tID=te_copy_1
@@ -817,9 +848,14 @@ contig1\t.\tLINE\t35\t45\t.\t-\t.\tID=te_copy_2";
         let contig_features = &features[0];
         assert!(!contig_features.is_empty());
 
+        println!("Contig features after overlay:");
+        for feature in contig_features {
+            println!("{}: {}-{} ({}) [{}]", feature.feature_type, feature.start, feature.end, if feature.strand { "+" } else { "-" }, String::from_utf8_lossy(&feature.seq));
+        }
+
         // Coverage should start at 0 and end at full contig length.
         assert_eq!(contig_features[0].start, 0);
-        assert_eq!(contig_features.last().unwrap().end, 60);
+        assert_eq!(contig_features.last().unwrap().end, 110);
 
         for window in contig_features.windows(2) {
             let left = &window[0];
@@ -852,16 +888,22 @@ contig1\t.\tLINE\t35\t45\t.\t-\t.\tID=te_copy_2";
             .any(|f| f.feature_type == "intergenic" && f.start == 5 && f.end == 14));
         assert!(contig_features
             .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 18 && f.end == 20));
+            .any(|f| f.feature_type == "intergenic" && f.start == 18 && f.end == 34));
         assert!(contig_features
             .iter()
-            .any(|f| f.feature_type == "intron" && f.start == 20 && f.end == 29));
+            .any(|f| f.feature_type == "intergenic" && f.start == 45 && f.end == 49));
         assert!(contig_features
             .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 29 && f.end == 34));
+            .any(|f| f.feature_type == "exon" && f.start == 49 && f.end == 70));
         assert!(contig_features
             .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 45 && f.end == 60));
+            .any(|f| f.feature_type == "intron" && f.start == 70 && f.end == 74));
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 74 && f.end == 100));
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "intergenic" && f.start == 100 && f.end == 110));
         assert!(contig_features
             .iter()
             .filter(|f| f.feature_type == "intergenic")
