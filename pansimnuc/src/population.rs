@@ -792,6 +792,87 @@ mod tests {
     }
 
     #[test]
+    fn test_write_gff_generates_expected_output() {
+        let mut root = Vec::new();
+        let features = vec![FeaturePos {
+            contig_id: 0,
+            feature_id: 0,
+            feature_type: "intergenic".to_string(),
+            start: 0,
+            end: 4,
+            strand: true,
+            seq: vec![1, 2, 4, 8],
+        }];
+        root.push(features);
+
+        let exon_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create distribution for exon features");
+        let intron_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create distribution for intron features");
+        let intergenic_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create distribution for intergenic features");
+        let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
+
+        let exon_mu = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create mutation distribution for exon features");
+        let intron_mu = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create mutation distribution for intron features");
+        let intergenic_mu = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create mutation distribution for intergenic features");
+        let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
+
+        let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
+            .expect("Failed to create recombination probability distribution");
+        let recombination_len_dist = MutationDistribution::new_poisson(1.0)
+            .expect("Failed to create recombination length distribution");
+        let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
+
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let pop = Population::new(
+            root,
+            1,
+            site_mutation_dists,
+            site_mutation_mus,
+            recombination_dists,
+            1.0,
+            default_structural_dists(),
+            &mut rng,
+        );
+
+        let temp_path = std::env::temp_dir().join(format!(
+            "pansimnuc_pop_{}.gff3",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time before UNIX_EPOCH")
+                .as_nanos()
+        ));
+        let output_path = temp_path.to_string_lossy().into_owned();
+        let genome_output_path = Population::genome_output_path(&output_path, 0)
+            .expect("failed to construct per-genome output path");
+
+        pop.write_gff(&output_path)
+            .expect("failed to write test GFF file");
+
+        let mut content = String::new();
+        fs::File::open(&genome_output_path)
+            .expect("failed to open test GFF file")
+            .read_to_string(&mut content)
+            .expect("failed to read test GFF file");
+
+        assert!(content.contains("##gff-version 3"));
+        assert!(content.contains("\tintergenic\t"));
+        assert!(content.contains("feature_id=0"));
+        assert!(content.contains("sequence=ACGT"));
+        assert!(content.contains("overall_selection_coefficient="));
+        assert!(content.contains("sv_duplication_rate="));
+        assert!(content.contains("sv_deletion_rate="));
+        assert!(content.contains("sv_inversion_rate="));
+        assert!(content.contains("sv_duplication_insertion_prob="));
+
+        let _ = fs::remove_file(genome_output_path);
+    }
+
+    #[test]
     fn test_mutate_changes_sequence_and_mutation_map() {
         let mut root = Vec::new();
         let features = vec![FeaturePos {
