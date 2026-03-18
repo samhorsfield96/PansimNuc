@@ -13,6 +13,7 @@ struct TeInterval {
     strand: bool,
 }
 
+#[derive(Clone)]
 pub struct FeaturePos {
     pub contig_id: usize,
     pub feature_id: usize,
@@ -145,6 +146,11 @@ fn overlay_te_intervals(
         for feature in &*features {
             let overlap_start = feature.start.max(interval.start);
             let overlap_end = feature.end.min(interval.end);
+            let flank_feature_type = if feature.feature_type == "exon" || feature.feature_type == "intron" {
+                "intergenic"
+            } else {
+                feature.feature_type.as_str()
+            };
 
             if overlap_start >= overlap_end {
                 updated.push(FeaturePos {
@@ -163,7 +169,7 @@ fn overlay_te_intervals(
                 &mut updated,
                 contig_id,
                 feature.feature_id,
-                &feature.feature_type,
+                flank_feature_type,
                 feature.start,
                 overlap_start,
                 feature.strand,
@@ -185,7 +191,7 @@ fn overlay_te_intervals(
                 &mut updated,
                 contig_id,
                 feature.feature_id,
-                &feature.feature_type,
+                flank_feature_type,
                 overlap_end,
                 feature.end,
                 feature.strand,
@@ -195,6 +201,40 @@ fn overlay_te_intervals(
 
         *features = updated;
     }
+}
+
+fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &str) {
+    let mut normalized: Vec<FeaturePos> = Vec::new();
+
+    for feature in &*features {
+        let mut current = feature.clone();
+        if current.feature_type == "intergenic" {
+            current.feature_id = 0;
+            current.strand = true;
+            if current.start < current.end && current.end <= contig_seq.len() {
+                current.seq = encode_dna(&contig_seq[current.start..current.end]);
+            }
+        }
+
+        if let Some(last) = normalized.last_mut() {
+            if last.feature_type == "intergenic"
+                && current.feature_type == "intergenic"
+                && last.end >= current.start
+            {
+                last.end = last.end.max(current.end);
+                last.feature_id = 0;
+                last.strand = true;
+                if last.start < last.end && last.end <= contig_seq.len() {
+                    last.seq = encode_dna(&contig_seq[last.start..last.end]);
+                }
+                continue;
+            }
+        }
+
+        normalized.push(current);
+    }
+
+    *features = normalized;
 }
 
 pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePos>>> {
@@ -242,7 +282,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
                             feature_type: "intergenic".to_string(),
                             start: last_feature_end,
                             end: feature_start,
-                            strand: record.strand() == Strand::Forward,
+                            strand: true,
                             seq: vec![0]
                         });
                 }
@@ -258,7 +298,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
                             feature_type: "intergenic".to_string(),
                             start: last_feature_end,
                             end: feature_start,
-                            strand: record.strand() == Strand::Forward,
+                            strand: true,
                             seq: vec![0]
                         });
                 } else {
@@ -391,6 +431,8 @@ pub fn read_gff_lines(
                 strand: true,
                 seq: subseq
             });
+
+            normalize_intergenic_features(results, seq);
         }
     }
 
@@ -414,6 +456,7 @@ pub fn read_gff_lines(
             };
 
             overlay_te_intervals(results, intervals, contig_id, seq);
+            normalize_intergenic_features(results, seq);
         }
     }
 
@@ -725,18 +768,22 @@ contig1\t.\tUnclassified\t140\t145\t.\t+\t.\tID=skip_me";
             .expect("Expected TE-COPY segment in intergenic coordinates");
         assert!(!te_copy.strand);
 
-        // Exon should be split around TE-CUT overlap.
+        // Exon flanks should be converted to intergenic around TE-CUT overlap.
         assert!(contig_features
             .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 99 && f.end == 119));
+            .any(|f| f.feature_type == "intergenic" && f.start == 20 && f.end == 119));
         assert!(contig_features
             .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 130 && f.end == 200));
+            .any(|f| f.feature_type == "intergenic" && f.start == 130 && f.end == 260));
 
         // Unclassified entries must not be added.
         assert!(!contig_features
             .iter()
             .any(|f| f.feature_type.to_ascii_uppercase().contains("UNCLASSIFIED")));
+        assert!(contig_features
+            .iter()
+            .filter(|f| f.feature_type == "intergenic")
+            .all(|f| f.strand));
 
         let _ = std::fs::remove_file(&gff_file);
         let _ = std::fs::remove_file(&fasta_file);
@@ -802,22 +849,23 @@ contig1\t.\tLINE\t35\t45\t.\t-\t.\tID=te_copy_2";
         // Non-TE segments should still be represented correctly.
         assert!(contig_features
             .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 5 && f.end == 9));
+            .any(|f| f.feature_type == "intergenic" && f.start == 5 && f.end == 14));
         assert!(contig_features
             .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 14));
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 18 && f.end == 20));
+            .any(|f| f.feature_type == "intergenic" && f.start == 18 && f.end == 20));
         assert!(contig_features
             .iter()
             .any(|f| f.feature_type == "intron" && f.start == 20 && f.end == 29));
         assert!(contig_features
             .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 29 && f.end == 34));
+            .any(|f| f.feature_type == "intergenic" && f.start == 29 && f.end == 34));
         assert!(contig_features
             .iter()
             .any(|f| f.feature_type == "intergenic" && f.start == 45 && f.end == 60));
+        assert!(contig_features
+            .iter()
+            .filter(|f| f.feature_type == "intergenic")
+            .all(|f| f.strand));
 
         let _ = std::fs::remove_file(&gff_file);
         let _ = std::fs::remove_file(&fasta_file);
@@ -868,26 +916,22 @@ contig2\t.\tUnclassified\t22\t24\t.\t+\t.\tID=skip_me";
         // Non-TE segments should still be represented correctly on both contigs.
         assert!(contig1_features
             .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 0 && f.end == 9));
+            .any(|f| f.feature_type == "intergenic" && f.start == 0 && f.end == 11));
         assert!(contig1_features
             .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 11));
-        assert!(contig1_features
-            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 14 && f.end == 25));
-        assert!(contig1_features
-            .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 25 && f.end == 50));
+            .any(|f| f.feature_type == "intergenic" && f.start == 14 && f.end == 50));
 
         assert!(contig2_features
             .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 0 && f.end == 19));
-        assert!(contig2_features
-            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 19 && f.end == 29));
+            .any(|f| f.feature_type == "intergenic" && f.start == 0 && f.end == 29));
         assert!(contig2_features
             .iter()
             .any(|f| f.feature_type == "intergenic" && f.start == 40 && f.end == 60));
+        assert!(contig1_features
+            .iter()
+            .chain(contig2_features.iter())
+            .filter(|f| f.feature_type == "intergenic")
+            .all(|f| f.strand));
 
         assert!(!contig1_features
             .iter()
