@@ -202,10 +202,6 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
 
     // keep track of current feature ID, dictacted by gene and its upstream region
     let mut current_feature_id: usize = 1;
-
-    // keep track of previous feature end
-    let mut last_feature_end: usize = 0;
-    let mut last_feature_type: String = "gene".to_string();
     
     // hold features
     let mut features: Vec<Vec<FeaturePos>> = Vec::new();
@@ -217,44 +213,88 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
         let feature_start: usize = usize::from(record.start()).saturating_sub(1);
         let feature_end: usize = usize::from(record.end());
         let seqname: String = record.reference_sequence_name().to_string();
+        let feature_type: String = record.ty().to_string();
 
         if prev_seqname != seqname {
             contig_id += 1;
             prev_seqname = seqname.clone();
             features.push(Vec::new());
-            last_feature_end = 0;
         }
 
-        let feature_type: String = record.ty().to_string();
+        // get last record if present
+        if let Some(last_feature) = features[contig_id as usize].last_mut() {
 
-        // if last feature was a gene, then region must be intergenic
-        if feature_type == "gene" {
-            // increment feature ID
-            current_feature_id += 1;
+            // determine if there is overlap
+            let last_feature_end = last_feature.end.clone();
+            let last_feature_type = last_feature.feature_type.clone();
+            let last_feature_id = last_feature.feature_id.clone();
 
-            // in case gene is start of contig, feature_id always 0
-            if feature_start > last_feature_end {
+            // TODO issue is that exon starts are not ordered, so can have next exon begging later than later exon, need to think about how to use gene coordinates
+            // FIX, just add non-overlapping exons
+
+            // if at new gene that is non-overlapping, previous region must be intergenic
+            if feature_type == "gene" && last_feature_type == "exon" {
+                current_feature_id += 1;
+
+                // add intergenic region between last exon and current gene, if non-overlapping
+                if feature_start >= last_feature_end {
+                    features[contig_id as usize]
+                        .push(FeaturePos {
+                            contig_id: contig_id as usize,
+                            feature_id: 0,
+                            feature_type: "intergenic".to_string(),
+                            start: last_feature_end,
+                            end: feature_start,
+                            strand: record.strand() == Strand::Forward,
+                            seq: vec![0]
+                        });
+                }
+            } 
+            // non-overlapping exon after intergenic region
+            else if feature_type == "exon" && feature_start >= last_feature_end && current_feature_id != last_feature_id {
+
+                println!("Adding exon feature for contig {}, feature_id {}, start {}, end {}",
+                    contig_id, current_feature_id, feature_start, feature_end);
+                println!("Last feature end {}, type {}", last_feature_end, last_feature_type);
+                println!("{} >= {} {}", feature_start, last_feature_end, feature_start >= last_feature_end);
+                println!("{} < {} {}", feature_start, last_feature_end, feature_start < last_feature_end);
+
+                // if no intergenic region, need to add due to gene overlap
+                if last_feature_type != "intergenic" {
+                    features[contig_id as usize]
+                        .push(FeaturePos {
+                            contig_id: contig_id as usize,
+                            feature_id: 0,
+                            feature_type: "intergenic".to_string(),
+                            start: last_feature_end,
+                            end: feature_start,
+                            strand: record.strand() == Strand::Forward,
+                            seq: vec![0]
+                        });
+                } else {
+                    // if intergenic region, need to update end coordinate to current exon start
+                    last_feature.end = feature_start;
+                }
+
                 features[contig_id as usize]
                     .push(FeaturePos {
                         contig_id: contig_id as usize,
-                        feature_id: 0,
-                        feature_type: "intergenic".to_string(),
-                        start: last_feature_end,
-                        end: feature_start,
-                        strand: true,
+                        feature_id: current_feature_id,
+                        feature_type: feature_type.clone(),
+                        start: feature_start,
+                        end: feature_end,
+                        strand: record.strand() == Strand::Forward,
                         seq: vec![0]
-                    });
-            }
+                });
+            } else if feature_type == "exon" && feature_start >= last_feature_end && last_feature_type == "exon" {
 
-            // update last_feature_end
-            last_feature_end = feature_end;
-            last_feature_type = feature_type.clone();
-        } 
-        // if next feature is exon or intron, need to check than current end is not identical otherwise still at start of gene
-        else if feature_type == "exon" {
-            
-            // if next feature is exon, need to check than current end is not identical otherwise still at start of gene
-            if feature_start > last_feature_end && last_feature_type == "exon" {
+                println!("Adding exon feature for contig {}, feature_id {}, start {}, end {}",
+                    contig_id, current_feature_id, feature_start, feature_end);
+                println!("Last feature end {}, type {}", last_feature_end, last_feature_type);
+                println!("{} >= {} {}", feature_start, last_feature_end, feature_start >= last_feature_end);
+                println!("{} < {} {}", feature_start, last_feature_end, feature_start < last_feature_end);
+
+
                 // add intron feature between last exon and current exon
                 features[contig_id as usize]
                     .push(FeaturePos {
@@ -263,7 +303,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
                         feature_type: "intron".to_string(),
                         start: last_feature_end,
                         end: feature_start,
-                        strand: true,
+                        strand: record.strand() == Strand::Forward,
                         seq: vec![0]
                     });
 
@@ -277,34 +317,133 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
                         end: feature_end,
                         strand: record.strand() == Strand::Forward,
                         seq: vec![0]
-                });
-            // avoid exon overlap, merge into single exon
+                });    
             } 
-            else if feature_start < last_feature_end && last_feature_type == "exon"  {
-                if let Some(last_feature) = features[contig_id as usize].last_mut() {
-                    if last_feature.feature_type == "exon" {
-                        last_feature.start = feature_start.min(last_feature.start);
-                        last_feature.end = feature_end.max(last_feature.end);
-                    }
-                }
-            } else {
-                // only add exons as features
+            // overlapping exon, needs to be combined into single exon with previous
+            // else if feature_type == "exon" && feature_start < last_feature_end && last_feature_type == "exon" {
+
+            //     println!("Updating exon feature for contig {}, feature_id {}, start {}, end {}",
+            //         contig_id, current_feature_id, feature_start, feature_end);
+            //     println!("Last feature end {}, type {}", last_feature_end, last_feature_type);
+            //     println!("{} >= {} {}", feature_start, last_feature_end, feature_start >= last_feature_end);
+            //     println!("{} < {} {}", feature_start, last_feature_end, feature_start < last_feature_end);
+
+            //     last_feature.start = feature_start.min(last_feature.start);
+            //     last_feature.end = feature_end.max(last_feature.end);
+            // }
+        } else { 
+            // if no last feature, add intergenic region from start of contig to first feature
+            if feature_start > 0 {
                 features[contig_id as usize]
                     .push(FeaturePos {
                         contig_id: contig_id as usize,
-                        feature_id: current_feature_id,
-                        feature_type: feature_type.clone(),
-                        start: feature_start,
-                        end: feature_end,
-                        strand: record.strand() == Strand::Forward,
+                        feature_id: 0,
+                        feature_type: "intergenic".to_string(),
+                        start: 0,
+                        end: feature_start,
+                        strand: true,
                         seq: vec![0]
-                });
+                    });
+            } else  {
+                // unless if first feature starts at 0 add feature
+                if feature_type == "gene" {
+                    current_feature_id += 1;
+                }
+                else if feature_type == "exon" {
+                    features[contig_id as usize]
+                        .push(FeaturePos {
+                            contig_id: contig_id as usize,
+                            feature_id: current_feature_id,
+                            feature_type: feature_type,
+                            start: feature_start,
+                            end: feature_end,
+                            strand: record.strand() == Strand::Forward,
+                            seq: vec![0]
+                        });
+                }
             }
-
-            // update last_feature_end
-            last_feature_end = feature_end;
-            last_feature_type = feature_type.clone();
         }
+
+        // if last feature was a gene, then region must be intergenic
+        // if feature_type == "gene" {
+        //     current_feature_id += 1;
+
+        //     // in case gene is start of contig, feature_id always 0
+        //     // only add if new sequence is non-overlapping
+        //     if feature_start > last_feature_end {
+        //         features[contig_id as usize]
+        //             .push(FeaturePos {
+        //                 contig_id: contig_id as usize,
+        //                 feature_id: 0,
+        //                 feature_type: "intergenic".to_string(),
+        //                 start: last_feature_end,
+        //                 end: feature_start,
+        //                 strand: true,
+        //                 seq: vec![0]
+        //             });
+        //     }
+            
+        //     // update last_feature_end
+        //     last_feature_end = feature_end;
+        //     last_feature_type = feature_type.clone();
+        // } 
+
+        // TODO need to prevent exons from two different genes overlapping
+
+        // if next feature is exon or intron, need to check than current end is not identical otherwise still at start of gene
+        // else if feature_type == "exon" {
+        //     // if next feature is exon, need to check than current end is not identical otherwise still at start of gene
+        //     if feature_start > last_feature_end && last_feature_type == "exon" {
+        //         // add intron feature between last exon and current exon
+        //         features[contig_id as usize]
+        //             .push(FeaturePos {
+        //                 contig_id: contig_id as usize,
+        //                 feature_id: current_feature_id,
+        //                 feature_type: "intron".to_string(),
+        //                 start: last_feature_end,
+        //                 end: feature_start,
+        //                 strand: true,
+        //                 seq: vec![0]
+        //             });
+
+        //         // only add exons as features
+        //         features[contig_id as usize]
+        //             .push(FeaturePos {
+        //                 contig_id: contig_id as usize,
+        //                 feature_id: current_feature_id,
+        //                 feature_type: feature_type.clone(),
+        //                 start: feature_start,
+        //                 end: feature_end,
+        //                 strand: record.strand() == Strand::Forward,
+        //                 seq: vec![0]
+        //         });
+        //     // avoid exon overlap, merge into single exon
+        //     } 
+        //     else if feature_start < last_feature_end && last_feature_type == "exon"  {
+        //         if let Some(last_feature) = features[contig_id as usize].last_mut() {
+        //             if last_feature.feature_type == "exon" {
+        //                 last_feature.start = feature_start.min(last_feature.start);
+        //                 last_feature.end = feature_end.max(last_feature.end);
+        //             }
+        //         }
+        //     } else {
+        //         // only add exons as features
+        //         features[contig_id as usize]
+        //             .push(FeaturePos {
+        //                 contig_id: contig_id as usize,
+        //                 feature_id: current_feature_id,
+        //                 feature_type: feature_type.clone(),
+        //                 start: feature_start,
+        //                 end: feature_end,
+        //                 strand: record.strand() == Strand::Forward,
+        //                 seq: vec![0]
+        //         });
+        //     }
+
+        //     // update last_feature_end
+        //     last_feature_end = feature_end;
+        //     last_feature_type = feature_type.clone();
+        // }
     }
 
     Ok(features)
