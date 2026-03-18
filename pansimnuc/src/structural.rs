@@ -9,19 +9,12 @@ extern crate levenshtein;
 use levenshtein::levenshtein;
 use std::collections::HashMap;
 
-// TODO need to think about how to determine whether a TE inserts into another gene, making it non-functional
-// or whether it is upstream or downstream and can augment its function, having a multiplicative effect on its fitness contribution.
-
-// TODO Add multiplier effect if insertion non-exon upstream or downstram of exon
-// TODO if exon or intron moved, negate effect of whole gene, as it is likely to be non-functional, unless it is moved in its entirety, in which case it is likely to be functional but with different expression level, so can model with a multiplier effect on fitness contribution of gene, which can be sampled from a distribution
-
-// TODO identify independent recombinations to enable parralellisation
-
 // for a given NucElement, store its position in the genome
 // which can then be shuffled around by structural mutations, or copied
 
 // hold probability of structural mutation for a given element.
 // can then sample from uniform distribution to determine whether a structural mutation occurs, and if so, which one, and where it moves to.
+
 #[derive(Clone)]
 pub struct StructureMutationMap {
     pub duplication_rate: f64,

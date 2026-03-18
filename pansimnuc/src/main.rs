@@ -186,7 +186,7 @@ fn main() {
 					// mutate population
 					let n_generation: usize = n_generation_str.parse::<usize>().expect("n_generation must be an integer.");
 										
-					for generation in 0..n_generation {
+					for generation in 1..=n_generation {
 						// mutate at nucleotide level
 						population.mutate();
 
@@ -202,12 +202,19 @@ fn main() {
 						eprintln!("Finished generation {generation}");
 					}
 					
-
 					println!("Writing output...");
 					let output_fasta = configuration
 						.get("output.fasta_file")
 						.cloned()
 						.unwrap_or_else(|| "final_population.fasta".to_string());
+
+					if let Some(output_gff) = configuration.get("output.gff_file") {
+						if let Err(err) = population.write_gff(output_gff) {
+							eprintln!("Failed to write final population GFF files: {err}");
+							std::process::exit(1);
+						}
+						println!("Wrote final population GFF files with per-genome prefixes based on: {}", output_gff);
+					}
 
 					if let Err(err) = population.write_fasta(&output_fasta) {
 						eprintln!("Failed to write final population FASTA files: {err}");

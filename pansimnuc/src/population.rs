@@ -14,11 +14,6 @@ use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
 use rand::rngs::StdRng;
 use rand::{SeedableRng};
 
-// TODO all elements with same feature ID have collective product of multipliers, 
-// allows accounting for insertion of TEs upstream or downstream of genes, which can increase their expression and thus fitness contribution, without needing to model the exact position of the TE insertion, which is likely to be less important than whether it is upstream or downstream of the gene, and whether it is in an exon or intron, which can be modelled with different distributions of multiplier effects for insertions in exons vs introns vs intergenic regions. Also allows modelling of gene loss through deletion or TE insertion by setting multiplier to 0, without needing to model exact position of deletion or insertion, which is likely to be less important than whether it affects an exon or intron, which can be modelled with different distributions of multiplier effects and insertions into gene regions
-
-// for a gene block, keep track of with exons and introns exist together, take into account whether TE inserts upstream or downstream, then use multiplier to dictate the effect on overall gene fitness
-
 #[derive(Clone)]
 pub struct NucElement {
     pub contig_id: usize,
@@ -186,6 +181,31 @@ impl Population {
             16 => b'N',
             _ => panic!("Invalid base encoding: {}", base),
         }
+    }
+
+    fn decode_sequence(seq: &[u8]) -> String {
+        seq.iter().map(|&base| Self::decode_base(base) as char).collect()
+    }
+
+    fn genome_overall_selection_coefficient(&self, genome: &Genome) -> f64 {
+        let mut log_sum = 0.0;
+
+        for (element_idx, element) in genome.seq.iter().enumerate() {
+            let mut element_log_sum = 0.0;
+            let (feature_broken, feature_multiplier) = self.check_feature_order(genome, element_idx, element);
+
+            if !feature_broken {
+                for (site, allele) in element.seq.iter().enumerate() {
+                    if let Some(coeff) = element.mutation_map.get(*allele, site) {
+                        element_log_sum += coeff;
+                    }
+                }
+            }
+
+            log_sum += element_log_sum * feature_multiplier;
+        }
+
+        log_sum
     }
 
     pub fn new(
@@ -487,6 +507,85 @@ impl Population {
                 if wrapped_line_len > 0 {
                     writer.write_all(b"\n")?;
                 }
+            }
+
+            writer.flush()?;
+        }
+
+        Ok(())
+    }
+
+    pub fn write_gff(&self, output_path: &str) -> io::Result<()> {
+        for (genome_index, genome) in self.pop.iter().enumerate() {
+            let genome_output_path = Self::genome_output_path(output_path, genome_index)?;
+            let file = File::create(&genome_output_path)?;
+            let mut writer = BufWriter::new(file);
+
+            writeln!(writer, "##gff-version 3")?;
+
+            let overall_selection = self.genome_overall_selection_coefficient(genome);
+            let mut contig_offsets: HashMap<usize, usize> = HashMap::new();
+
+            for element in &genome.seq {
+                let offset = contig_offsets.entry(element.contig_id).or_insert(0);
+                let start_0 = *offset;
+                let end_0 = start_0 + element.seq.len();
+                *offset = end_0;
+
+                if start_0 >= end_0 {
+                    continue;
+                }
+
+                let seq_id = format!("contig_{}", element.contig_id + 1);
+                let start_1based = start_0 + 1;
+                let end_1based = end_0;
+                let strand = if element.strand { "+" } else { "-" };
+                let seq_decoded = Self::decode_sequence(&element.seq);
+                let mutation_map = element.mutation_map.to_gff_attribute_value();
+                let max_duplications = element
+                    .structure_mutation_map
+                    .max_duplications
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "none".to_string());
+
+                let attributes = format!(
+                    "ID=genome{}_element{};Name={};label={};label_id={};contig_id={};genome_id={};genome_identifier={};parent={};element_id={};feature_id={};feature_type={};multiplier={:.6};sequence_length={};sequence={};selection_dist_id={};mu_dist_id={};mutation_map={};overall_selection_coefficient={:.6};sv_duplication_rate={:.6};sv_deletion_rate={:.6};sv_inversion_rate={:.6};sv_max_duplications={};sv_duplication_insertion_prob={:.6}",
+                    genome.genome_id,
+                    element.element_id,
+                    element.feature_type,
+                    element.feature_type,
+                    element.feature_id,
+                    element.contig_id,
+                    genome.genome_id,
+                    genome.identifier,
+                    genome.parent,
+                    element.element_id,
+                    element.feature_id,
+                    element.feature_type,
+                    element.multiplier,
+                    element.seq.len(),
+                    seq_decoded,
+                    element.mutation_map.selection_dist_id,
+                    element.mutation_map.mu_dist_id,
+                    mutation_map,
+                    overall_selection,
+                    element.structure_mutation_map.duplication_rate,
+                    element.structure_mutation_map.deletion_rate,
+                    element.structure_mutation_map.inversion_rate,
+                    max_duplications,
+                    element.structure_mutation_map.duplication_insertion_prob,
+                );
+
+                writeln!(
+                    writer,
+                    "{}\tPansimNuc\t{}\t{}\t{}\t.\t{}\t.\t{}",
+                    seq_id,
+                    element.feature_type,
+                    start_1based,
+                    end_1based,
+                    strand,
+                    attributes
+                )?;
             }
 
             writer.flush()?;

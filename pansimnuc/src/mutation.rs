@@ -1,18 +1,3 @@
-// TODO - each site has a selection coefficient drawn at start time
-// if a new mutation arises, store the selection coefficient for that allele
-// so that repeated mutations go back to the same selection coefficient
-// means don't have to store all selection coefficients until mutation to that one occurs
-// then selection coefficient for the whole block is based on the product of all
-// variants in the block
-
-// also need to come up with way of insertion into/out of block e.g. by TE
-// which negates all selection coefficient of gene
-// could be beneficial or deleterious with insertion, depending on effect of the 
-// given gene in first place.
-
-// recombination is done by block (could do whole blocks) - needs to be homologous, could have shared
-// ancestry that is held in parent/id? Or calculate edit distance? Probably will take too long
-
 use rustc_hash::FxHashMap;
 use rand::rngs::StdRng;
 use rand::{Rng};
@@ -146,6 +131,17 @@ pub struct MutationMap {
 }
 
 impl MutationMap {
+    fn allele_index_to_label(index: usize) -> &'static str {
+        match index {
+            0 => "A",
+            1 => "C",
+            2 => "G",
+            3 => "T",
+            4 => "N",
+            _ => "?",
+        }
+    }
+
     fn allele_to_index(level: u8) -> Option<usize> {
         // Convert one-hot allele code to zero-based index using bit shifting:
         // 1 -> 0, 2 -> 1, 4 -> 2, 8 -> 3.
@@ -194,7 +190,38 @@ impl MutationMap {
         let allele_index = Self::allele_to_index(level)
             .expect("Cannot lookup selection coefficient for invalid allele code");
         self.data[allele_index].get(&key)
-    }    
+    }
+
+    pub fn to_gff_attribute_value(&self) -> String {
+        let mut entries: Vec<(usize, usize, f64)> = Vec::new();
+
+        for (allele_index, site_map) in self.data.iter().enumerate() {
+            for (site, coeff) in site_map {
+                entries.push((allele_index, *site, *coeff));
+            }
+        }
+
+        entries.sort_by(|a, b| {
+            if a.0 != b.0 {
+                a.0.cmp(&b.0)
+            } else {
+                a.1.cmp(&b.1)
+            }
+        });
+
+        entries
+            .into_iter()
+            .map(|(allele_index, site, coeff)| {
+                format!(
+                    "{}:{}:{:.6}",
+                    Self::allele_index_to_label(allele_index),
+                    site,
+                    coeff
+                )
+            })
+            .collect::<Vec<String>>()
+            .join("|")
+    }
 
     pub fn mutate (& mut self, core_vec: &Vec<Vec<u8>>, seq: &mut Vec<u8>, selection_dist: &Distribution, mu_dist: &Distribution) {
         // thread-specific random number generator
