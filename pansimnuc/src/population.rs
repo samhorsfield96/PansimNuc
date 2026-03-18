@@ -83,6 +83,7 @@ impl Population {
         feature_type == "TE-CUT" || feature_type == "TE-COPY"
     }
 
+    // TODO intergenic regions normally upstream of gene, so need to set some threshold, if one/ two elements upsteam of exon is TE and within distance i.e. intergenic region is less than N bases long, then has an effect
     fn check_feature_order (&self, genome: &Genome, element_idx: usize, element: &NucElement) -> (bool, f64) {
         let mut feature_broken = false;
         let mut feature_multiplier = 1.0;
@@ -218,6 +219,20 @@ impl Population {
         }
 
         log_sum
+    }
+
+    fn log_sum_exp(&self) -> (Vec<f64>, f64) {
+        let selection_weights = self.pop
+            .par_iter()
+            .map(|genome| {
+                let log_sum = self.genome_selection_coefficient(genome);
+                log_sum
+            })
+            .collect::<Vec<f64>>();
+
+        // logsumexp normalization to prevent underflow/overflow issues with very small/large weights
+        let logsumexp_value = selection_weights.iter().ln_sum_exp();
+        (selection_weights, logsumexp_value)
     }
 
     pub fn new(
@@ -388,18 +403,8 @@ impl Population {
 
     // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights
     pub fn sample_individuals (&mut self, rng: &mut StdRng) -> Vec<usize> {
-        let mut selection_weights: Vec<f64> = vec![1.0; self.pop.len()];
         
-        selection_weights = self.pop
-            .par_iter()
-            .map(|genome| {
-                let log_sum = self.genome_selection_coefficient(genome);
-                log_sum
-            })
-            .collect();
-
-        // logsumexp normalization to prevent underflow/overflow issues with very small/large weights
-        let logsumexp_value = selection_weights.iter().ln_sum_exp();
+        let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
 
         selection_weights = selection_weights.into_iter()
             .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
@@ -504,6 +509,16 @@ impl Population {
     }
 
     pub fn write_gff(&self, output_path: &str) -> io::Result<()> {
+        // calculate selection coefficients for all genomes once to avoid redundant calculations when writing attributes
+        let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
+
+        selection_weights = selection_weights.into_iter()
+            .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
+            .collect();
+
+        let sum_weights: f64 = selection_weights.iter().sum();
+        selection_weights = selection_weights.iter().map(|&w| if w != std::f64::NEG_INFINITY {w / sum_weights} else {0.0}).collect();
+
         for (genome_index, genome) in self.pop.iter().enumerate() {
             let genome_output_path = Self::genome_output_path(output_path, genome_index)?;
             let file = File::create(&genome_output_path)?;
@@ -511,7 +526,7 @@ impl Population {
 
             writeln!(writer, "##gff-version 3")?;
 
-            let genome_selection_coefficient = self.genome_selection_coefficient(genome);
+            let genome_selection_coefficient = selection_weights[genome_index];
             let mut contig_offsets: HashMap<usize, usize> = HashMap::new();
 
             for element in &genome.seq {
@@ -524,7 +539,13 @@ impl Population {
                     continue;
                 }
 
-                let element_selection_coefficient = element.element_selection_coefficient(&genome.identifier);
+                // calculate element selection coefficient
+                let log_element_selection_coefficient = element.element_selection_coefficient(&genome.identifier);
+                let element_selection_coefficient = if log_element_selection_coefficient == std::f64::NEG_INFINITY {
+                    0.0
+                } else {
+                    (log_element_selection_coefficient - logsumexp_value).exp() / sum_weights // exp(log(w) - logsumexp)
+                };
 
                 let seq_id = format!("contig_{}", element.contig_id + 1);
                 let start_1based = start_0 + 1;

@@ -1,3 +1,6 @@
+// TODO allow for any of the selected distributions to be used for any mutation type for any variant
+// TODO allow TEs to have specific multiplative effects governed by a distribution
+
 mod gff;
 mod config;
 mod population;
@@ -214,15 +217,12 @@ fn main() {
 							eprintln!("Failed to write final population GFF files: {err}");
 							std::process::exit(1);
 						}
-						println!("Wrote final population GFF files with per-genome prefixes based on: {}", output_gff);
 					}
 
 					if let Err(err) = population.write_fasta(&output_fasta) {
 						eprintln!("Failed to write final population FASTA files: {err}");
 						std::process::exit(1);
 					}
-
-					println!("Wrote final population FASTA files with per-genome prefixes based on: {}", output_fasta);
 				}
 			}
 			Err(err) => {
