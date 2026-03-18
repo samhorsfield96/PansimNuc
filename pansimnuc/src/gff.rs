@@ -207,6 +207,11 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
     let mut normalized: Vec<FeaturePos> = Vec::new();
 
     for feature in &*features {
+        // ignore features with 0 length or invalid coordinates
+        if feature.start >= feature.end || feature.end > contig_seq.len() {
+            continue;
+        }
+
         let mut current = feature.clone();
         if current.feature_type == "intergenic" {
             current.feature_id = 0;
