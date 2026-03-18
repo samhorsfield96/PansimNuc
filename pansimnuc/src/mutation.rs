@@ -131,17 +131,6 @@ pub struct MutationMap {
 }
 
 impl MutationMap {
-    fn allele_index_to_label(index: usize) -> &'static str {
-        match index {
-            0 => "A",
-            1 => "C",
-            2 => "G",
-            3 => "T",
-            4 => "N",
-            _ => "?",
-        }
-    }
-
     fn allele_to_index(level: u8) -> Option<usize> {
         // Convert one-hot allele code to zero-based index using bit shifting:
         // 1 -> 0, 2 -> 1, 4 -> 2, 8 -> 3.

@@ -201,10 +201,6 @@ impl Population {
         }
     }
 
-    fn decode_sequence(seq: &[u8]) -> String {
-        seq.iter().map(|&base| Self::decode_base(base) as char).collect()
-    }
-
     fn genome_selection_coefficient(&self, genome: &Genome) -> f64 {
         let mut log_sum = 0.0;
 
@@ -908,7 +904,6 @@ mod tests {
         );
 
         let original_seq = pop.pop[0].seq[0].seq.clone();
-        let original_map = pop.pop[0].seq[0].mutation_map.clone();
 
         pop.mutate();
 

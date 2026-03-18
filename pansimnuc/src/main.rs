@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use crate::mutation::Distribution;
 use crate::structural::StructureMutationMap;
 use rand::rngs::StdRng;
+use itertools::Itertools;
 use rand::{SeedableRng};
 
 #[derive(Parser, Debug)]
@@ -37,7 +38,7 @@ fn main() {
 				// Flatten config into a single HashMap for easy access
 				configuration = config.flatten();
 				println!("Configuration values:");
-				for (key, value) in &configuration {
+				for (key, value) in configuration.iter().sorted() {
 					println!("  {} = {}", key, value);
 				}
 			}

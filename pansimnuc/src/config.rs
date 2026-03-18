@@ -75,11 +75,6 @@ impl Config {
         }
         flat
     }
-
-    /// Get all values from all sections as a flat HashMap
-    pub fn to_flat_hashmap(&self) -> HashMap<String, String> {
-        self.flatten()
-    }
 }
 
 #[cfg(test)]
