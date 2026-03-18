@@ -549,6 +549,144 @@ contig2\t.\texon\t50\t150\t.\t+\t.\tID=exon2";
     }
 
     #[test]
+    fn test_extract_feature_positions_are_ordered_non_overlapping_and_continuous() {
+        let gff_content = "##gff-version 3
+contig1\t.\tgene\t10\t40\t.\t+\t.\tID=gene1
+contig1\t.\texon\t10\t20\t.\t+\t.\tID=exon1
+contig1\t.\texon\t30\t40\t.\t+\t.\tID=exon2";
+
+        let gff_file = create_temp_file("test", ".gff", gff_content);
+        let file = File::open(&gff_file).expect("Failed to open test file");
+
+        let result = extract_feature_positions(file);
+        assert!(result.is_ok());
+
+        let features = result.unwrap();
+        assert_eq!(features.len(), 1);
+
+        let contig_features = &features[0];
+        assert!(!contig_features.is_empty());
+
+        // Coverage starts at contig start via leading intergenic segment.
+        assert_eq!(contig_features[0].start, 0);
+        // Coverage reaches the end of the last exon in this synthetic input.
+        assert_eq!(contig_features.last().unwrap().end, 40);
+
+        for window in contig_features.windows(2) {
+            let left = &window[0];
+            let right = &window[1];
+
+            // Correct order by start coordinate.
+            assert!(left.start <= right.start);
+            // Non-overlapping intervals.
+            assert!(left.end <= right.start);
+            // Continuous coverage across generated range.
+            assert_eq!(left.end, right.start);
+        }
+
+        let _ = std::fs::remove_file(&gff_file);
+    }
+
+    #[test]
+    fn test_extract_feature_positions_ignores_overlapping_exons_multi_contig_multi_gene() {
+        let gff_content = "##gff-version 3
+contig1\t.\tgene\t10\t80\t.\t+\t.\tID=c1g1
+contig1\t.\texon\t10\t30\t.\t+\t.\tID=c1g1e1
+contig1\t.\texon\t20\t40\t.\t+\t.\tID=c1g1e2
+contig1\t.\texon\t50\t60\t.\t+\t.\tID=c1g1e3
+contig1\t.\tgene\t120\t160\t.\t+\t.\tID=c1g2
+contig1\t.\texon\t120\t130\t.\t+\t.\tID=c1g2e1
+contig1\t.\texon\t125\t140\t.\t+\t.\tID=c1g2e2
+contig2\t.\tgene\t5\t50\t.\t-\t.\tID=c2g1
+contig2\t.\texon\t5\t20\t.\t-\t.\tID=c2g1e1
+contig2\t.\texon\t15\t25\t.\t-\t.\tID=c2g1e2
+contig2\t.\tgene\t70\t120\t.\t-\t.\tID=c2g2
+contig2\t.\texon\t70\t85\t.\t-\t.\tID=c2g2e1
+contig2\t.\texon\t80\t100\t.\t-\t.\tID=c2g2e2";
+
+        let gff_file = create_temp_file("test", ".gff", gff_content);
+        let file = File::open(&gff_file).expect("Failed to open test file");
+
+        let result = extract_feature_positions(file);
+        assert!(result.is_ok());
+
+        let features = result.unwrap();
+        assert_eq!(features.len(), 2);
+
+        for contig_features in &features {
+            assert!(!contig_features.is_empty());
+            assert_eq!(contig_features[0].start, 0);
+
+            for window in contig_features.windows(2) {
+                let left = &window[0];
+                let right = &window[1];
+
+                // Correct order by start coordinate.
+                assert!(left.start <= right.start);
+                // Non-overlapping intervals.
+                assert!(left.end <= right.start);
+                // Continuous coverage across generated range.
+                assert_eq!(left.end, right.start);
+            }
+        }
+
+        // Overlapping exons are currently not merged; overlapping records are not represented.
+        let contig1 = &features[0];
+        assert!(contig1
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 30));
+        assert!(!contig1
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 19 && f.end == 40));
+        assert!(!contig1
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 40));
+
+        // Same expectation on contig2 gene2.
+        let contig2 = &features[1];
+        assert!(contig2
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 69 && f.end == 85));
+        assert!(!contig2
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 79 && f.end == 100));
+        assert!(!contig2
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 69 && f.end == 100));
+
+        let _ = std::fs::remove_file(&gff_file);
+    }
+
+    #[test]
+    fn test_extract_feature_positions_does_not_merge_overlaps_across_genes() {
+        let gff_content = "##gff-version 3
+contig1\t.\tgene\t10\t40\t.\t+\t.\tID=gene1
+contig1\t.\texon\t10\t30\t.\t+\t.\tID=gene1_exon1
+contig1\t.\tgene\t20\t60\t.\t+\t.\tID=gene2
+contig1\t.\texon\t20\t50\t.\t+\t.\tID=gene2_exon1";
+
+        let gff_file = create_temp_file("test", ".gff", gff_content);
+        let file = File::open(&gff_file).expect("Failed to open test file");
+
+        let result = extract_feature_positions(file);
+        assert!(result.is_ok());
+
+        let features = result.unwrap();
+        assert_eq!(features.len(), 1);
+        let contig_features = &features[0];
+
+        // Exons from different genes must not be merged into one larger overlapping exon.
+        assert!(contig_features
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 30));
+        assert!(!contig_features
+            .iter()
+            .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 50));
+
+        let _ = std::fs::remove_file(&gff_file);
+    }
+
+    #[test]
     fn test_earlgrey_overlay_replaces_overlaps_and_skips_unclassified() {
         let gff_content = "##gff-version 3
 contig1\t.\tgene\t100\t200\t.\t+\t.\tID=gene1
