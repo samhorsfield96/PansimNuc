@@ -192,37 +192,6 @@ impl MutationMap {
         self.data[allele_index].get(&key)
     }
 
-    pub fn to_gff_attribute_value(&self) -> String {
-        let mut entries: Vec<(usize, usize, f64)> = Vec::new();
-
-        for (allele_index, site_map) in self.data.iter().enumerate() {
-            for (site, coeff) in site_map {
-                entries.push((allele_index, *site, *coeff));
-            }
-        }
-
-        entries.sort_by(|a, b| {
-            if a.0 != b.0 {
-                a.0.cmp(&b.0)
-            } else {
-                a.1.cmp(&b.1)
-            }
-        });
-
-        entries
-            .into_iter()
-            .map(|(allele_index, site, coeff)| {
-                format!(
-                    "{}:{}:{:.6}",
-                    Self::allele_index_to_label(allele_index),
-                    site,
-                    coeff
-                )
-            })
-            .collect::<Vec<String>>()
-            .join("|")
-    }
-
     pub fn mutate (& mut self, core_vec: &Vec<Vec<u8>>, seq: &mut Vec<u8>, selection_dist: &Distribution, mu_dist: &Distribution) {
         // thread-specific random number generator
         let mut thread_rng = rand::thread_rng();
