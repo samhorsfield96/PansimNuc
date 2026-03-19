@@ -9,6 +9,7 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 extern crate levenshtein;
 use levenshtein::levenshtein;
+use rand_distr::num_traits::ToBytes;
 use rand_distr::num_traits::float::TotalOrder;
 use std::collections::HashMap;
 
@@ -54,7 +55,7 @@ pub fn mutate_intra_genome(
     genome: &mut Genome,
     mu_dist: &MutationDistribution,
     pos_dist: &MutationDistribution,
-) {
+) -> (usize, usize, usize, usize, usize, usize, usize) {
     let mut thread_rng = rand::thread_rng();
 
     // For all intra genome comparisons, sample from uniform distribution to determine if variant occurs
@@ -66,6 +67,14 @@ pub fn mutate_intra_genome(
 
     // check which contig each block will be inserted into
     let contig_starts = &genome.contig_starts;
+
+    let mut total_non_te_duplications = 0;
+    let mut total_non_te_deletions = 0;
+    let mut te_cut_duplications = 0;
+    let mut te_copy_duplications = 0;
+    let mut te_cut_deletions = 0;
+    let mut te_copy_deletions = 0;
+    let mut total_inversions = 0;
 
     for (current_pos, element) in &mut genome.seq.iter().enumerate() {
         // determine maximum position
@@ -97,9 +106,15 @@ pub fn mutate_intra_genome(
                 // determine what is max dist to end from current position
                 let max_dist = (genome.seq.len() - current_pos).max(current_pos);
 
+                if feature_type == "TE-CUT" {
+                    te_cut_duplications += 1;
+                } else {
+                    te_copy_duplications += 1;
+                }
                 // for TEs, sample from uniform distribution to determine where duplication goes, with equal probability of anywhere in genome
                 thread_rng.gen_range(0..=max_dist) as f64
             } else {
+                total_non_te_duplications += 1;
                 pos_dist.sample(&mut thread_rng)
             };
             let duplication_pos = duplication_pos as i64;
@@ -155,11 +170,21 @@ pub fn mutate_intra_genome(
         if feature_type == "TE-CUT" && dup_count > 0 {
             // if element is a TE-COPY and has already been duplicated, force deletion of original copy, to capture cut and paste mechanism of TE-COPYs
             let _ = new_positions_vec.remove(0);
+            te_cut_deletions += 1;
         } else {
             // All other gene features
             rand_val = mu_dist.sample(&mut thread_rng);
             if rand_val < element.structure_mutation_map.deletion_rate {
                 let _ = new_positions_vec.remove(0);
+            }
+            else if feature_type.contains("TE") {
+                if feature_type == "TE-CUT" {
+                        te_cut_deletions += 1;
+                    } else {
+                        te_copy_deletions += 1;
+                    }
+            } else {
+                    total_non_te_deletions += 1;
             }
         }
 
@@ -173,6 +198,7 @@ pub fn mutate_intra_genome(
             rand_val = mu_dist.sample(&mut thread_rng);
             if rand_val < element.structure_mutation_map.inversion_rate {
                 inversion = -1;
+                total_inversions += 1;
             }
 
             // now update new_positions, indexed by new position,
@@ -228,6 +254,8 @@ pub fn mutate_intra_genome(
 
     // update contig start positions
     genome.update_contig_starts();
+
+    (total_non_te_duplications, total_non_te_deletions, te_cut_duplications, te_copy_duplications, te_cut_deletions, te_copy_deletions, total_inversions)
 }
 
 pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize) {
@@ -279,9 +307,10 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
 
             while !donor_site_chosen && attempts < max_attempts {
                 let recombination_pos = thread_rng.gen_range(0..donor_genome.seq.len());
+                let recombination_pos_idx = donor_genome.seq[recombination_pos].element_id;
 
                 // determine if position in both donor and recipient genome, if not, resample
-                let recomb_element = &population.homology_map[recombination_pos];
+                let recomb_element = &population.homology_map[recombination_pos_idx];
 
                 let donor_has_site = !recomb_element[donor].is_empty();
                 let recipient_has_site =

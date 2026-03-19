@@ -465,9 +465,40 @@ impl Population {
             .expect("Failed to create poisson distribution for structural variations");
 
         // iterate over genomes
-        self.pop.par_iter_mut().for_each(|genome| {
-            mutate_intra_genome(genome, &mu_dist, &pos_dist);
-        });
+        let totals = self
+            .pop
+            .par_iter_mut()
+            .map(|genome| mutate_intra_genome(genome, &mu_dist, &pos_dist))
+            .reduce(
+                || (0usize, 0usize, 0usize, 0usize, 0usize, 0usize, 0usize),
+                |a, b| (
+                    a.0 + b.0, // total_non_te_duplications
+                    a.1 + b.1, // total_non_te_deletions
+                    a.2 + b.2, // te_cut_duplications
+                    a.3 + b.3, // te_copy_duplications
+                    a.4 + b.4, // te_cut_deletions
+                    a.5 + b.5, // te_copy_deletions
+                    a.6 + b.6, // total_inversions
+                ),
+            );
+
+        let (
+            total_non_te_duplications,
+            total_non_te_deletions,
+            te_cut_duplications,
+            te_copy_duplications,
+            te_cut_deletions,
+            te_copy_deletions,
+            total_inversions,
+        ) = totals;
+
+        println!("Total non-TE duplications: {}", total_non_te_duplications);
+        println!("Total non-TE deletions: {}", total_non_te_deletions);
+        println!("Total TE-CUT duplications: {}", te_cut_duplications);
+        println!("Total TE-COPY duplications: {}", te_copy_duplications);
+        println!("Total TE-CUT deletions: {}", te_cut_deletions);
+        println!("Total TE-COPY deletions: {}", te_copy_deletions);
+        println!("Total inversions: {}", total_inversions);
 
         // update homology map for all new elements
         for genome in &self.pop {
