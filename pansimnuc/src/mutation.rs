@@ -1,10 +1,11 @@
-use rustc_hash::FxHashMap;
+use rand::Rng;
 use rand::rngs::StdRng;
-use rand::{Rng};
 use rand::seq::IteratorRandom;
-use rand_distr::{Normal, Uniform, Exp, Distribution as RandDist};
-use std::fmt;
+use rand_distr::{Distribution as RandDist, Exp, Normal, Uniform};
+use rustc_hash::FxHashMap;
 use statrs::distribution::Poisson;
+use std::collections::HashMap;
+use std::fmt;
 
 #[derive(Debug)]
 pub enum DistributionError {
@@ -22,13 +23,22 @@ impl fmt::Display for DistributionError {
                 write!(f, "Invalid Normal distribution: std_dev must be positive")
             }
             DistributionError::InvalidUniformParameters => {
-                write!(f, "Invalid Uniform distribution: low must be less than high")
+                write!(
+                    f,
+                    "Invalid Uniform distribution: low must be less than high"
+                )
             }
             DistributionError::InvalidExponentialParameters => {
-                write!(f, "Invalid Exponential distribution: lambda must be positive")
+                write!(
+                    f,
+                    "Invalid Exponential distribution: lambda must be positive"
+                )
             }
             DistributionError::InvalidDoubleExpParameters => {
-                write!(f, "Invalid DoubleExp distribution: lambdas must be positive and cutoff must be between 0 and 1")
+                write!(
+                    f,
+                    "Invalid DoubleExp distribution: lambdas must be positive and cutoff must be between 0 and 1"
+                )
             }
             DistributionError::InvalidPoissonParameters => {
                 write!(f, "Invalid Poisson distribution: lambda must be positive")
@@ -39,6 +49,87 @@ impl fmt::Display for DistributionError {
 
 impl std::error::Error for DistributionError {}
 
+#[derive(Debug)]
+pub enum DistributionConfigError {
+    MissingDistributionType {
+        section: String,
+        distribution_key: String,
+        legacy_key: String,
+    },
+    MissingParameter {
+        section: String,
+        distribution: String,
+        parameter: String,
+    },
+    InvalidParameterValue {
+        section: String,
+        key: String,
+        value: String,
+    },
+    UnsupportedDistribution {
+        section: String,
+        distribution: String,
+    },
+    InvalidDistributionParameters {
+        section: String,
+        distribution: String,
+        source: DistributionError,
+    },
+}
+
+impl fmt::Display for DistributionConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DistributionConfigError::MissingDistributionType {
+                section,
+                distribution_key,
+                legacy_key,
+            } => write!(
+                f,
+                "Missing selection distribution for section '{}'. Set '{}' or use legacy key '{}'.",
+                section, distribution_key, legacy_key
+            ),
+            DistributionConfigError::MissingParameter {
+                section,
+                distribution,
+                parameter,
+            } => write!(
+                f,
+                "Missing required parameter '{}' for selection distribution '{}' in section '{}'.",
+                parameter, distribution, section
+            ),
+            DistributionConfigError::InvalidParameterValue {
+                section,
+                key,
+                value,
+            } => write!(
+                f,
+                "Invalid value '{}' for config key '{}' in section '{}'. Expected a float.",
+                value, key, section
+            ),
+            DistributionConfigError::UnsupportedDistribution {
+                section,
+                distribution,
+            } => write!(
+                f,
+                "Unsupported selection distribution '{}' in section '{}'. Supported values: normal, uniform, exp, double_exp, poisson.",
+                distribution, section
+            ),
+            DistributionConfigError::InvalidDistributionParameters {
+                section,
+                distribution,
+                source,
+            } => write!(
+                f,
+                "Invalid parameters for selection distribution '{}' in section '{}': {}",
+                distribution, section, source
+            ),
+        }
+    }
+}
+
+impl std::error::Error for DistributionConfigError {}
+
 pub struct DoubleExponential {
     exp1: Exp<f64>,
     exp2: Exp<f64>,
@@ -47,15 +138,25 @@ pub struct DoubleExponential {
 }
 
 impl DoubleExponential {
-    pub fn new(lambda1: f64, lambda2: f64, cutoff: f64, weight: f64) -> Result<Self, DistributionError> {
+    pub fn new(
+        lambda1: f64,
+        lambda2: f64,
+        cutoff: f64,
+        weight: f64,
+    ) -> Result<Self, DistributionError> {
         if lambda1 <= 0.0 || lambda2 <= 0.0 || cutoff < 0.0 || cutoff > 1.0 {
             return Err(DistributionError::InvalidDoubleExpParameters);
         }
-        
+
         let exp1 = Exp::new(lambda1).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
         let exp2 = Exp::new(lambda2).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
-        
-        Ok(Self { exp1, exp2, cutoff, weight })
+
+        Ok(Self {
+            exp1,
+            exp2,
+            cutoff,
+            weight,
+        })
     }
 
     pub fn weight<R: Rng>(&mut self, uniform: &Uniform<f64>, rng: &mut R) {
@@ -78,10 +179,175 @@ pub enum Distribution {
     Uniform(Uniform<f64>),
     Exp(Exp<f64>),
     DoubleExp(DoubleExponential),
-    Poisson(Poisson)
+    Poisson(Poisson),
 }
 
 impl Distribution {
+    fn parse_required_f64(
+        configuration: &HashMap<String, String>,
+        section: &str,
+        distribution: &str,
+        key: &str,
+    ) -> Result<f64, DistributionConfigError> {
+        let value =
+            configuration
+                .get(key)
+                .ok_or_else(|| DistributionConfigError::MissingParameter {
+                    section: section.to_string(),
+                    distribution: distribution.to_string(),
+                    parameter: key.rsplit('.').next().unwrap_or(key).to_string(),
+                })?;
+
+        value
+            .parse::<f64>()
+            .map_err(|_| DistributionConfigError::InvalidParameterValue {
+                section: section.to_string(),
+                key: key.to_string(),
+                value: value.clone(),
+            })
+    }
+
+    pub fn from_selection_config(
+        configuration: &HashMap<String, String>,
+        section: &str,
+    ) -> Result<Self, DistributionConfigError> {
+        let distribution_key = format!("{}.selection_distribution", section);
+        let legacy_key = format!("{}.selection_coefficient", section);
+
+        let raw_distribution = if let Some(distribution) = configuration.get(&distribution_key) {
+            distribution.clone()
+        } else if configuration.contains_key(&legacy_key) {
+            "exp".to_string()
+        } else {
+            return Err(DistributionConfigError::MissingDistributionType {
+                section: section.to_string(),
+                distribution_key,
+                legacy_key,
+            });
+        };
+
+        let normalized_distribution = raw_distribution
+            .trim()
+            .to_ascii_lowercase()
+            .replace('-', "_");
+
+        match normalized_distribution.as_str() {
+            "normal" => {
+                let mean = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_mean", section),
+                )?;
+                let std_dev = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_std_dev", section),
+                )?;
+
+                Self::new_normal(mean, std_dev).map_err(|source| {
+                    DistributionConfigError::InvalidDistributionParameters {
+                        section: section.to_string(),
+                        distribution: raw_distribution,
+                        source,
+                    }
+                })
+            }
+            "uniform" => {
+                let low = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_low", section),
+                )?;
+                let high = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_high", section),
+                )?;
+
+                Self::new_uniform(low, high).map_err(|source| {
+                    DistributionConfigError::InvalidDistributionParameters {
+                        section: section.to_string(),
+                        distribution: raw_distribution,
+                        source,
+                    }
+                })
+            }
+            "exp" | "exponential" => {
+                let lambda_key = if configuration.contains_key(&distribution_key) {
+                    format!("{}.selection_lambda", section)
+                } else {
+                    legacy_key.clone()
+                };
+                let lambda = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &lambda_key,
+                )?;
+
+                Self::new_exp(lambda).map_err(|source| {
+                    DistributionConfigError::InvalidDistributionParameters {
+                        section: section.to_string(),
+                        distribution: raw_distribution,
+                        source,
+                    }
+                })
+            }
+            "double_exp" | "doubleexponential" | "double_exponential" => {
+                let lambda1 = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_lambda1", section),
+                )?;
+                let lambda2 = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_lambda2", section),
+                )?;
+                let cutoff = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_cutoff", section),
+                )?;
+
+                Self::new_double_exp(lambda1, lambda2, cutoff).map_err(|source| {
+                    DistributionConfigError::InvalidDistributionParameters {
+                        section: section.to_string(),
+                        distribution: raw_distribution,
+                        source,
+                    }
+                })
+            }
+            "poisson" => {
+                let lambda = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_lambda", section),
+                )?;
+
+                Self::new_poisson(lambda).map_err(|source| {
+                    DistributionConfigError::InvalidDistributionParameters {
+                        section: section.to_string(),
+                        distribution: raw_distribution,
+                        source,
+                    }
+                })
+            }
+            _ => Err(DistributionConfigError::UnsupportedDistribution {
+                section: section.to_string(),
+                distribution: raw_distribution,
+            }),
+        }
+    }
+
     pub fn new_normal(mean: f64, std_dev: f64) -> Result<Self, DistributionError> {
         Normal::new(mean, std_dev)
             .map(Distribution::Normal)
@@ -101,9 +367,12 @@ impl Distribution {
             .map_err(|_| DistributionError::InvalidExponentialParameters)
     }
 
-    pub fn new_double_exp(lambda1: f64, lambda2: f64, cutoff: f64) -> Result<Self, DistributionError> {
-        DoubleExponential::new(lambda1, lambda2, cutoff, 0.0)
-            .map(Distribution::DoubleExp)
+    pub fn new_double_exp(
+        lambda1: f64,
+        lambda2: f64,
+        cutoff: f64,
+    ) -> Result<Self, DistributionError> {
+        DoubleExponential::new(lambda1, lambda2, cutoff, 0.0).map(Distribution::DoubleExp)
     }
 
     pub fn new_poisson(lambda: f64) -> Result<Self, DistributionError> {
@@ -157,16 +426,26 @@ impl MutationMap {
         Some(idx)
     }
 
-    pub fn new(selection_dist_id: usize, mu_dist_id: usize, seq: &Vec<u8>, selection_dist: &Distribution, rng: &mut StdRng) -> Self {
+    pub fn new(
+        selection_dist_id: usize,
+        mu_dist_id: usize,
+        seq: &Vec<u8>,
+        selection_dist: &Distribution,
+        rng: &mut StdRng,
+    ) -> Self {
         let mut data = std::array::from_fn(|_| FxHashMap::default());
-        
+
         for (site, allele) in seq.iter().enumerate() {
             let allele_index = Self::allele_to_index(*allele)
                 .expect("Allele code conversion failed while building mutation map");
             data[allele_index].insert(site, selection_dist.sample(rng));
         }
 
-        Self {selection_dist_id, mu_dist_id, data}
+        Self {
+            selection_dist_id,
+            mu_dist_id,
+            data,
+        }
     }
 
     fn insert(&mut self, level: u8, key: usize, value: f64) {
@@ -181,7 +460,13 @@ impl MutationMap {
         self.data[allele_index].get(&key)
     }
 
-    pub fn mutate (& mut self, core_vec: &Vec<Vec<u8>>, seq: &mut Vec<u8>, selection_dist: &Distribution, mu_dist: &Distribution) {
+    pub fn mutate(
+        &mut self,
+        core_vec: &Vec<Vec<u8>>,
+        seq: &mut Vec<u8>,
+        selection_dist: &Distribution,
+        mu_dist: &Distribution,
+    ) {
         // thread-specific random number generator
         let mut thread_rng = rand::thread_rng();
 
@@ -199,9 +484,9 @@ impl MutationMap {
             if value == 16 {
                 continue;
             }
-            
-            let allele_index = Self::allele_to_index(value)
-                .expect("Sampled non-mutable N allele for mutation");
+
+            let allele_index =
+                Self::allele_to_index(value).expect("Sampled non-mutable N allele for mutation");
             let values = &core_vec[allele_index];
 
             // sample new allele
@@ -228,6 +513,15 @@ mod tests {
     use super::*;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use std::collections::HashMap;
+
+    fn selection_config(section: &str, entries: &[(&str, &str)]) -> HashMap<String, String> {
+        let mut config = HashMap::new();
+        for (key, value) in entries {
+            config.insert(format!("{}.{}", section, key), (*value).to_string());
+        }
+        config
+    }
 
     #[test]
     fn test_normal_distribution_creation() {
@@ -245,7 +539,7 @@ mod tests {
     fn test_uniform_distribution_invalid_range() {
         let dist = Distribution::new_uniform(1.0, 1.0);
         assert!(dist.is_err());
-        
+
         let dist2 = Distribution::new_uniform(2.0, 1.0);
         assert!(dist2.is_err());
     }
@@ -279,15 +573,15 @@ mod tests {
         // Invalid lambda1
         let dist1 = Distribution::new_double_exp(-0.5, 2.0, 0.3);
         assert!(dist1.is_err());
-        
+
         // Invalid lambda2
         let dist2 = Distribution::new_double_exp(0.5, 0.0, 0.3);
         assert!(dist2.is_err());
-        
+
         // Invalid cutoff
         let dist3 = Distribution::new_double_exp(0.5, 2.0, 1.5);
         assert!(dist3.is_err());
-        
+
         let dist4 = Distribution::new_double_exp(0.5, 2.0, -0.1);
         assert!(dist4.is_err());
     }
@@ -295,15 +589,15 @@ mod tests {
     #[test]
     fn test_distribution_sampling() {
         let mut rng = StdRng::seed_from_u64(42);
-        
+
         let normal = Distribution::new_normal(0.0, 1.0).unwrap();
         let sample = normal.sample(&mut rng);
         assert!(sample.is_finite());
-        
+
         let uniform = Distribution::new_uniform(-1.0, 1.0).unwrap();
         let sample = uniform.sample(&mut rng);
         assert!(sample >= -1.0 && sample <= 1.0);
-        
+
         let exp = Distribution::new_exp(1.0).unwrap();
         let sample = exp.sample(&mut rng);
         assert!(sample >= 0.0);
@@ -314,26 +608,113 @@ mod tests {
     }
 
     #[test]
+    fn test_selection_distribution_from_config_normal() {
+        let config = selection_config(
+            "exons",
+            &[
+                ("selection_distribution", "normal"),
+                ("selection_mean", "0.1"),
+                ("selection_std_dev", "0.2"),
+            ],
+        );
+
+        let result = Distribution::from_selection_config(&config, "exons");
+        assert!(matches!(result, Ok(Distribution::Normal(_))));
+    }
+
+    #[test]
+    fn test_selection_distribution_from_config_uniform() {
+        let config = selection_config(
+            "introns",
+            &[
+                ("selection_distribution", "uniform"),
+                ("selection_low", "0.0"),
+                ("selection_high", "1.0"),
+            ],
+        );
+
+        let result = Distribution::from_selection_config(&config, "introns");
+        assert!(matches!(result, Ok(Distribution::Uniform(_))));
+    }
+
+    #[test]
+    fn test_selection_distribution_from_config_exp_legacy_key() {
+        let config = selection_config("intergenic", &[("selection_coefficient", "0.02")]);
+
+        let result = Distribution::from_selection_config(&config, "intergenic");
+        assert!(matches!(result, Ok(Distribution::Exp(_))));
+    }
+
+    #[test]
+    fn test_selection_distribution_from_config_double_exp() {
+        let config = selection_config(
+            "TE-CUT",
+            &[
+                ("selection_distribution", "double_exp"),
+                ("selection_lambda1", "0.5"),
+                ("selection_lambda2", "2.0"),
+                ("selection_cutoff", "0.3"),
+            ],
+        );
+
+        let result = Distribution::from_selection_config(&config, "TE-CUT");
+        assert!(matches!(result, Ok(Distribution::DoubleExp(_))));
+    }
+
+    #[test]
+    fn test_selection_distribution_from_config_poisson() {
+        let config = selection_config(
+            "TE-COPY",
+            &[
+                ("selection_distribution", "poisson"),
+                ("selection_lambda", "1.0"),
+            ],
+        );
+
+        let result = Distribution::from_selection_config(&config, "TE-COPY");
+        assert!(matches!(result, Ok(Distribution::Poisson(_))));
+    }
+
+    #[test]
+    fn test_selection_distribution_from_config_missing_parameter() {
+        let config = selection_config(
+            "exons",
+            &[
+                ("selection_distribution", "normal"),
+                ("selection_mean", "0.1"),
+            ],
+        );
+
+        let result = Distribution::from_selection_config(&config, "exons");
+        assert!(matches!(
+            result,
+            Err(DistributionConfigError::MissingParameter { .. })
+        ));
+    }
+
+    #[test]
     fn test_mutation_map_creation() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
-        let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
+        let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3)
+            .expect("Failed to create double exponential distribution for exon features");
         let test_seq = vec![1, 1, 4, 8, 2, 1, 2, 4];
 
-        let map = MutationMap::new(1, 1, &test_seq,  &test_dist, &mut rng);
+        let map = MutationMap::new(1, 1, &test_seq, &test_dist, &mut rng);
         assert_eq!(map.selection_dist_id, 1);
     }
 
     #[test]
     fn test_mutation_map_insert_and_get() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
-        let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
+        let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3)
+            .expect("Failed to create double exponential distribution for exon features");
         let test_seq = vec![1, 1, 4, 8, 2, 1, 2, 4];
         let mut map = MutationMap::new(0, 0, &test_seq, &test_dist, &mut rng);
-        
+
         map.insert(1, 100, 0.5);
         let value = map.get(1, 100);
         assert_eq!(value, Some(&0.5));
-        
+
         let missing = map.get(2, 100);
         assert_eq!(missing, None);
     }
@@ -341,15 +722,16 @@ mod tests {
     #[test]
     fn test_mutation_map_multiple_levels() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
-        let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
+        let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3)
+            .expect("Failed to create double exponential distribution for exon features");
         let test_seq = vec![1, 1, 4, 8, 2, 1, 2, 4];
         let mut map = MutationMap::new(0, 0, &test_seq, &test_dist, &mut rng);
-        
+
         map.insert(1, 10, 0.1);
         map.insert(2, 10, 0.2);
         map.insert(4, 10, 0.3);
         map.insert(8, 10, 0.4);
-        
+
         assert_eq!(map.get(1, 10), Some(&0.1));
         assert_eq!(map.get(4, 10), Some(&0.3));
         assert_eq!(map.get(2, 10), Some(&0.2));
@@ -359,11 +741,12 @@ mod tests {
     #[test]
     fn test_n_allele_is_non_mutable_and_unmapped() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
-        let selection_dist = Distribution::new_uniform(0.0, 1.0)
-            .expect("failed to create selection distribution");
-        let mu_dist = Distribution::new_poisson(10.0)
-            .expect("failed to create mutation-rate distribution");
-        let core_vec: Vec<Vec<u8>> = vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
+        let selection_dist =
+            Distribution::new_uniform(0.0, 1.0).expect("failed to create selection distribution");
+        let mu_dist =
+            Distribution::new_poisson(10.0).expect("failed to create mutation-rate distribution");
+        let core_vec: Vec<Vec<u8>> =
+            vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
 
         let mut seq = vec![16, 1, 16, 2, 4, 8, 16];
         let original_n_sites: Vec<u8> = seq.iter().copied().filter(|&x| x == 16).collect();
@@ -387,15 +770,14 @@ mod tests {
         let mut double_exp = DoubleExponential::new(1.0, 2.0, 0.5, 0.0).unwrap();
         let uniform = Uniform::new(0.0, 1.0);
         let mut rng = StdRng::seed_from_u64(123);
-        
+
         let old_weight = double_exp.weight;
         double_exp.weight(&uniform, &mut rng);
         let new_weight = double_exp.weight;
-        
+
         // Weight should be in valid range
         assert!(new_weight >= 0.0 && new_weight <= 1.0);
         // With seeded RNG, weight should have changed (unless by coincidence)
         assert_ne!(old_weight, new_weight);
     }
 }
-
