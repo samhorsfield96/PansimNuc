@@ -442,22 +442,22 @@ impl Population {
 
     // mutate individuals in the population according to their mutation maps and the provided distributions
     pub fn mutate(&mut self) {
+        let mut total_sites = 0;
         for genome in &mut self.pop {
             for element in &mut genome.seq {
-                element.mutation_map.mutate(
+                let n_sites = element.mutation_map.mutate(
                     &self.core_vec,
                     &mut element.seq,
                     &self.selection_dists[element.mutation_map.selection_dist_id],
                     &self.mu_dists[element.mutation_map.mu_dist_id],
                 );
+                total_sites += n_sites;
             }
         }
+        println!("Total mutated sites: {}", total_sites);
     }
 
     pub fn structural_intra_genome(&mut self) {
-        // TODO remove hard coded distributions, allow for duplications mainly tandem, or translocations randomly throughout genome
-        // TODO rethink this, need to think about non-TEs mainly duplicating tandemly, then TE-CUT transposing randomly, TE-COPY duplicating randomly.
-
         // probabilities for structural variations
         let mu_dist = MutationDistribution::new_uniform(0.0, 1.0)
             .expect("Failed to create uniform distribution for structural variations");

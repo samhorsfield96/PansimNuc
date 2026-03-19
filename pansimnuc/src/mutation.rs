@@ -507,7 +507,7 @@ impl MutationMap {
         seq: &mut Vec<u8>,
         selection_dist: &Distribution,
         mu_dist: &Distribution,
-    ) {
+    ) -> usize {
         // thread-specific random number generator
         let mut thread_rng = rand::thread_rng();
 
@@ -546,6 +546,7 @@ impl MutationMap {
             seq[mutant_site] = *new_allele;
             self.insert(*new_allele, mutant_site, selection_coefficient);
         }
+        n_sites
     }
 }
 
