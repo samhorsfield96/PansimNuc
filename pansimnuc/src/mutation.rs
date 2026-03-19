@@ -1,7 +1,7 @@
 use rand::Rng;
 use rand::rngs::StdRng;
 use rand::seq::IteratorRandom;
-use rand_distr::{Distribution as RandDist, Exp, Normal, Uniform};
+use rand_distr::{Distribution as RandDist, Exp, Normal, Uniform, Gamma};
 use rustc_hash::FxHashMap;
 use statrs::distribution::Poisson;
 use std::collections::HashMap;
@@ -14,6 +14,7 @@ pub enum DistributionError {
     InvalidExponentialParameters,
     InvalidDoubleExpParameters,
     InvalidPoissonParameters,
+    InvalidGammaParameters,
 }
 
 impl fmt::Display for DistributionError {
@@ -42,6 +43,9 @@ impl fmt::Display for DistributionError {
             }
             DistributionError::InvalidPoissonParameters => {
                 write!(f, "Invalid Poisson distribution: lambda must be positive")
+            }
+            DistributionError::InvalidGammaParameters => {
+                write!(f, "Invalid Gamma distribution: shape and scale must be positive")
             }
         }
     }
@@ -112,7 +116,7 @@ impl fmt::Display for DistributionConfigError {
                 distribution,
             } => write!(
                 f,
-                "Unsupported selection distribution '{}' in section '{}'. Supported values: normal, uniform, exp, double_exp, poisson.",
+                "Unsupported selection distribution '{}' in section '{}'. Supported values: normal, uniform, exp, double_exp, poisson, gamma.",
                 distribution, section
             ),
             DistributionConfigError::InvalidDistributionParameters {
@@ -130,6 +134,7 @@ impl fmt::Display for DistributionConfigError {
 
 impl std::error::Error for DistributionConfigError {}
 
+#[derive(Debug, Clone)]
 pub struct DoubleExponential {
     exp1: Exp<f64>,
     exp2: Exp<f64>,
@@ -174,12 +179,14 @@ impl DoubleExponential {
     }
 }
 
+#[derive(Clone)]
 pub enum Distribution {
     Normal(Normal<f64>),
     Uniform(Uniform<f64>),
     Exp(Exp<f64>),
     DoubleExp(DoubleExponential),
     Poisson(Poisson),
+    Gamma(Gamma<f64>),
 }
 
 impl Distribution {
@@ -341,6 +348,28 @@ impl Distribution {
                     }
                 })
             }
+            "gamma" => {
+                let shape = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_shape", section),
+                )?;
+                let scale = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_scale", section),
+                )?;
+
+                Self::new_gamma(shape, scale).map_err(|source| {
+                    DistributionConfigError::InvalidDistributionParameters {
+                        section: section.to_string(),
+                        distribution: raw_distribution,
+                        source,
+                    }
+                })
+            }
             _ => Err(DistributionConfigError::UnsupportedDistribution {
                 section: section.to_string(),
                 distribution: raw_distribution,
@@ -381,6 +410,12 @@ impl Distribution {
             .map_err(|_| DistributionError::InvalidPoissonParameters)
     }
 
+    pub fn new_gamma(shape: f64, scale: f64) -> Result<Self, DistributionError> {
+        Gamma::new(shape, scale)
+            .map(Distribution::Gamma)
+            .map_err(|_| DistributionError::InvalidGammaParameters)
+    }
+
     pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
         match self {
             Distribution::Normal(d) => d.sample(rng),
@@ -388,6 +423,7 @@ impl Distribution {
             Distribution::Exp(d) => d.sample(rng),
             Distribution::DoubleExp(d) => d.sample(rng),
             Distribution::Poisson(d) => d.sample(rng),
+            Distribution::Gamma(d) => d.sample(rng),
         }
     }
 }
@@ -587,6 +623,21 @@ mod tests {
     }
 
     #[test]
+    fn test_gamma_distribution_creation() {
+        let dist = Distribution::new_gamma(2.0, 3.0);
+        assert!(dist.is_ok());
+    }
+
+    #[test]
+    fn test_gamma_distribution_invalid_params() {
+        let dist = Distribution::new_gamma(-2.0, 3.0);
+        assert!(dist.is_err());
+
+        let dist2 = Distribution::new_gamma(2.0, -3.0);
+        assert!(dist2.is_err());
+    }
+
+    #[test]
     fn test_distribution_sampling() {
         let mut rng = StdRng::seed_from_u64(42);
 
@@ -604,7 +655,11 @@ mod tests {
 
         let poisson = Distribution::new_poisson(1.0).unwrap();
         let sample = poisson.sample(&mut rng);
-        assert!(sample >= 0.0)
+        assert!(sample >= 0.0);
+
+        let gamma = Distribution::new_gamma(2.0, 3.0).unwrap();
+        let sample = gamma.sample(&mut rng);
+        assert!(sample >= 0.0);
     }
 
     #[test]

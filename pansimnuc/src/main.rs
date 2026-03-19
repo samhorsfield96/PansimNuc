@@ -1,4 +1,3 @@
-// TODO allow for any of the selected distributions to be used for any mutation type for any variant
 // TODO allow TEs to have specific multiplative effects governed by a distribution
 // TODO plot GFFs with ggGenome to show how the genome evolves over time
 
@@ -128,6 +127,7 @@ fn main() {
                     let mut site_mutation_dists: Vec<Distribution> = Vec::new();
                     let mut site_mutation_mus: Vec<Distribution> = Vec::new();
                     let mut structural_dists: Vec<StructureMutationMap> = Vec::new();
+					let mut multiplier_dists: Vec<Distribution> = Vec::new();
 
                     for section in feature_sections {
                         let mutation_rate_key = format!("{}.mutation_rate", section);
@@ -169,6 +169,18 @@ fn main() {
                             max_duplications,
                             duplication_insertion_prob: parse_f64(&duplication_insertion_prob_key),
                         });
+
+						// get multiplier just for TE sections
+						if section.starts_with("TE") {
+							let multiplier_rate_key = format!("{}.multiplier_rate", section);
+							let multiplier_scale_key = format!("{}.multiplier_scale", section);
+							let multiplier_rate = parse_f64(&multiplier_rate_key);
+							let multiplier_scale = parse_f64(&multiplier_scale_key);
+							multiplier_dists.push(Distribution::new_gamma(multiplier_rate, multiplier_scale).unwrap());
+						} else {
+							// set multiplier to 1 for non-TE sections
+							multiplier_dists.push(Distribution::new_gamma(1.0, 1.0).unwrap());
+						}
                     }
 
                     // recombination distributions
@@ -199,6 +211,7 @@ fn main() {
                         recombination_threshold,
                         structural_dists,
                         parse_usize("population.max_multiplier_dist"),
+						multiplier_dists,
                         &mut rng,
                     );
                     println!("Finished initialising population...");

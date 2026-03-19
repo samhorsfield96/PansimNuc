@@ -292,6 +292,7 @@ impl Population {
         recombination_threshold: f64,
         structural_dists: Vec<StructureMutationMap>,
         max_multiplier_dist: usize,
+        multiplier_dists: Vec<MutationDistribution>,
         rng: &mut StdRng,
     ) -> Self {
         // initialise population
@@ -337,6 +338,25 @@ impl Population {
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
+                let multiplier_dist: &MutationDistribution = match feature.feature_type.as_str() {
+                    "exon" => &multiplier_dists[0],
+                    "intron" => &multiplier_dists[1],
+                    "intergenic" => &multiplier_dists[2],
+                    "TE-CUT" => &multiplier_dists[3],
+                    "TE-COPY" => &multiplier_dists[4],
+                    _ => panic!("Unknown feature type: {}", feature.feature_type),
+                };
+
+                let multiplier = match feature.feature_type.as_str() {
+                    "exon" => 1.0,
+                    "intron" => 1.0,
+                    "intergenic" => 1.0,
+                    "TE-CUT" => multiplier_dist.sample(rng),
+                    "TE-COPY" => multiplier_dist.sample(rng),
+                    _ => panic!("Unknown feature type: {}", feature.feature_type),
+                };
+
+
                 // Update feature_map, keeping track of how many features there are
                 if feature.feature_id != 0 {
                     feature_map
@@ -360,7 +380,7 @@ impl Population {
                         rng,
                     ),
                     structure_mutation_map: structural_map.clone(),
-                    multiplier: 1.0, // Initialize with a default value, can be updated later
+                    multiplier: multiplier,
                 });
                 element_id += 1;
 
@@ -775,6 +795,10 @@ mod tests {
         let recombination_len_dist = MutationDistribution::new_poisson(1.0)
             .expect("Failed to create uniform distribution for recombination");
 
+        let multiplier_dist = MutationDistribution::new_uniform(0.5, 1.5)
+            .expect("Failed to create uniform distribution for TE multipliers");
+        let multiplier_dists = vec![multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone()];
+
         let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
 
         let mut rng: StdRng = StdRng::seed_from_u64(42);
@@ -787,6 +811,7 @@ mod tests {
             1.0,
             default_structural_dists(),
             10, // max_multiplier_dist
+            multiplier_dists,
             &mut rng,
         );
 
@@ -847,6 +872,11 @@ mod tests {
             .expect("Failed to create uniform distribution for recombination");
         let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
 
+          let multiplier_dist = MutationDistribution::new_uniform(0.5, 1.5)
+            .expect("Failed to create uniform distribution for TE multipliers");
+        let multiplier_dists = vec![multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone()];
+
+
         let mut rng: StdRng = StdRng::seed_from_u64(42);
         let pop = Population::new(
             root,
@@ -857,6 +887,7 @@ mod tests {
             1.0,
             default_structural_dists(),
             10, // max_multiplier_dist
+            multiplier_dists,
             &mut rng,
         );
 
@@ -922,6 +953,11 @@ mod tests {
             .expect("Failed to create recombination length distribution");
         let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
 
+        let multiplier_dist = MutationDistribution::new_uniform(0.5, 1.5)
+            .expect("Failed to create uniform distribution for TE multipliers");
+        let multiplier_dists = vec![multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone()];
+
+
         let mut rng: StdRng = StdRng::seed_from_u64(42);
         let pop = Population::new(
             root,
@@ -932,6 +968,7 @@ mod tests {
             1.0,
             default_structural_dists(),
             10, // max_multiplier_dist
+            multiplier_dists,
             &mut rng,
         );
 
@@ -1006,6 +1043,10 @@ mod tests {
         let recombination_len_dist = MutationDistribution::new_poisson(1.0)
             .expect("Failed to create uniform distribution for recombination");
         let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
+        let multiplier_dist = MutationDistribution::new_uniform(0.5, 1.5)
+            .expect("Failed to create uniform distribution for TE multipliers");
+        let multiplier_dists = vec![multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone()];
+
 
         let mut rng: StdRng = StdRng::seed_from_u64(42);
         let mut pop = Population::new(
@@ -1017,6 +1058,7 @@ mod tests {
             1.0,
             default_structural_dists(),
             10, // max_multiplier_dist
+            multiplier_dists,
             &mut rng,
         );
 
@@ -1084,6 +1126,10 @@ mod tests {
         let recombination_len_dist = MutationDistribution::new_poisson(1.0)
             .expect("Failed to create uniform distribution for recombination");
         let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
+        let multiplier_dist = MutationDistribution::new_uniform(0.5, 1.5)
+            .expect("Failed to create uniform distribution for TE multipliers");
+        let multiplier_dists = vec![multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone()];
+
 
         let mut pop = Population::new(
             root,
@@ -1094,6 +1140,7 @@ mod tests {
             1.0,
             default_structural_dists(),
             10, // max_multiplier_dist
+            multiplier_dists,
             &mut rng,
         );
 
@@ -1212,6 +1259,10 @@ mod tests {
         let recombination_len_dist = MutationDistribution::new_poisson(1.0)
             .expect("failed to create recombination length distribution");
         let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
+        let multiplier_dist = MutationDistribution::new_uniform(0.5, 1.5)
+            .expect("Failed to create uniform distribution for TE multipliers");
+        let multiplier_dists = vec![multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone()];
+
 
         let mut rng: StdRng = StdRng::seed_from_u64(123);
         Population::new(
@@ -1223,6 +1274,8 @@ mod tests {
             1.0,
             default_structural_dists(),
             10, // max_multiplier_dist
+            multiplier_dists,
+
             &mut rng,
         )
     }
