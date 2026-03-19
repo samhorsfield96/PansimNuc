@@ -1,5 +1,6 @@
 // TODO allow for any of the selected distributions to be used for any mutation type for any variant
 // TODO allow TEs to have specific multiplative effects governed by a distribution
+// TODO plot GFFs with ggGenome to show how the genome evolves over time
 
 mod gff;
 mod config;
@@ -22,7 +23,7 @@ use rand::{SeedableRng};
 
 #[derive(Parser, Debug)]
 #[command(name = "pansimnuc")]
-#[command(about = "Forward simulation of base genomes at nucleotide level", long_about = None)]
+#[command(about = "Forward simulation of a base at nucleotide level, including structural variation, TE movement and selection", long_about = None)]
 struct Args {
 	#[arg(long, help = "Optional path to config file")]
 	config: Option<String>,

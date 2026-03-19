@@ -84,7 +84,6 @@ impl Population {
         feature_type == "TE-CUT" || feature_type == "TE-COPY"
     }
 
-    // TODO intergenic regions normally upstream of gene, so need to set some threshold, if one/ two elements upsteam of exon is TE and within distance i.e. intergenic region is less than N bases long, then has an effect
     fn check_feature_order (&self, genome: &Genome, element_idx: usize, element: &NucElement) -> (bool, f64) {
         let mut feature_broken = false;
         let mut feature_multiplier = 1.0;
@@ -107,8 +106,6 @@ impl Population {
 
                 // get expected element
                 let expected_element_id = feature_map_entry[feature_element_idx];
-
-                // TODO - check whether indexing makes sense with reversal
 
                 // expected element and strand matches so continue
                 if actual_element_id == expected_element_id && actual_element.strand == element.strand {
@@ -285,8 +282,6 @@ impl Population {
         for (contig_id, features) in root.iter().enumerate() {
             for feature in features {
                 
-                // TODO change this so that can specify different mutation rates per site
-                // also add separate TE compartment
                 let selection_dist_id:usize = match feature.feature_type.as_str() {
                     "exon" => 0,
                     "intron" => 1,
@@ -385,13 +380,15 @@ impl Population {
     }   
 
     pub fn structural_intra_genome(&mut self) {
+        // TODO remove hard coded distributions, allow for duplications mainly tandem, or translocations randomly throughout genome
+        
         // probabilities for duplications
-        let duplication_mu_dist = MutationDistribution::new_uniform(0.0, 1.0). expect("Failed to create uniform distribution for duplications"); // TODO all setting
+        let duplication_mu_dist = MutationDistribution::new_uniform(0.0, 1.0). expect("Failed to create uniform distribution for duplications");
         let duplication_pos_dist = MutationDistribution::new_poisson(1.0).expect("Failed to create poisson distribution for duplications");
 
         // make probabilities very high to favour only the most transposable of elements
-        let translocation_mu_dist = MutationDistribution::new_uniform(0.9, 1.0).expect("Failed to create uniform distribution for translocations"); // TODO all setting of this to favour translocations
-        let translocation_pos_dist = MutationDistribution::new_poisson(1000.0).expect("Failed to create poisson distribution for translocations"); // TODO all setting of this to favour translocations
+        let translocation_mu_dist = MutationDistribution::new_uniform(0.9, 1.0).expect("Failed to create uniform distribution for translocations"); 
+        let translocation_pos_dist = MutationDistribution::new_poisson(1000.0).expect("Failed to create poisson distribution for translocations");
 
         // duplications
         self.pop
@@ -1275,5 +1272,63 @@ mod tests {
         let (broken, multiplier) = check_feature_one_intron(&pop, &genome);
         assert!(!broken);
         assert!(multiplier == 3.5);
+    }
+
+    #[test]
+    fn test_check_feature_order_identifies_te_2_upstream_and_downstream() {
+        let mut pop = make_check_feature_order_population();
+        let mut seq = pop.pop[0].seq.clone();
+
+        pop.max_multiplier_dist = 10; // ensure the TEs we add are within the max multiplier distance
+
+        let mut upstream_te = seq[0].clone();
+        upstream_te.feature_type = "TE-CUT".to_string();
+        upstream_te.feature_id = 0;
+        upstream_te.multiplier = 2.0;
+        upstream_te.element_id = 20_000;
+        seq.insert(0, upstream_te);
+
+        let mut downstream_te = seq[0].clone();
+        downstream_te.feature_type = "TE-COPY".to_string();
+        downstream_te.feature_id = 0;
+        downstream_te.multiplier = 3.5;
+        downstream_te.element_id = 20_001;
+        seq.push(downstream_te);
+
+        println!("Sequence: {:?}", seq.iter().map(|e| format!("{}-{}", e.feature_type, e.feature_id)).collect::<Vec<String>>());
+
+        let genome = genome_from_seq(seq);
+        let (broken, multiplier) = check_feature_one_intron(&pop, &genome);
+        assert!(!broken);
+        assert!(multiplier == 3.5);
+    }
+
+    #[test]
+    fn test_check_feature_order_non_identifies_te_2_upstream_and_downstream() {
+        let mut pop = make_check_feature_order_population();
+        let mut seq = pop.pop[0].seq.clone();
+
+        pop.max_multiplier_dist = 2; // ensure the TEs we add are not within the max multiplier distance
+
+        let mut upstream_te = seq[0].clone();
+        upstream_te.feature_type = "TE-CUT".to_string();
+        upstream_te.feature_id = 0;
+        upstream_te.multiplier = 2.0;
+        upstream_te.element_id = 20_000;
+        seq.insert(0, upstream_te);
+
+        let mut downstream_te = seq[0].clone();
+        downstream_te.feature_type = "TE-COPY".to_string();
+        downstream_te.feature_id = 0;
+        downstream_te.multiplier = 3.5;
+        downstream_te.element_id = 20_001;
+        seq.push(downstream_te);
+
+        println!("Sequence: {:?}", seq.iter().map(|e| format!("{}-{}", e.feature_type, e.feature_id)).collect::<Vec<String>>());
+
+        let genome = genome_from_seq(seq);
+        let (broken, multiplier) = check_feature_one_intron(&pop, &genome);
+        assert!(!broken);
+        assert!(multiplier == 1.0);
     }
 }
