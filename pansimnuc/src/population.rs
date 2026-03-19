@@ -33,7 +33,13 @@ impl NucElement {
         for (site, allele) in self.seq.iter().enumerate() {
             let allele_shifted = 1 >> allele;
             if let Some(coeff) = self.mutation_map.get(*allele, site) {
-                element_log_sum += coeff;
+                let log_coeff = (1.0 + coeff).ln(); // add log of coefficient to log sum
+                if log_coeff == std::f64::NEG_INFINITY {
+                    // if coefficient is -1, set log sum to -inf and break loop, as any other mutations won't change this
+                    element_log_sum = std::f64::NEG_INFINITY;
+                    break;
+                }
+                element_log_sum += log_coeff;
             } else {
                 panic!(
                     "Failed to generate selection coefficient for genome {} allele {} (shifted {}) at site {}",
@@ -260,11 +266,16 @@ impl Population {
             // if feature not broken, add up sites
             if !feature_broken {
                 element_log_sum += element.element_selection_coefficient(&genome.identifier);
+                
+                // if any value is zero, product is zero so genome selection coefficient is zero
+                if element_log_sum == std::f64::NEG_INFINITY {
+                    log_sum = std::f64::NEG_INFINITY;
+                    break; // if no contribution to selection coefficient, skip multiplier calculation to avoid unnecessary calculations and potential floating point issues
+                }
             }
 
             log_sum += element_log_sum * feature_multiplier;
         }
-
         log_sum
     }
 
@@ -273,7 +284,12 @@ impl Population {
             .pop
             .par_iter()
             .map(|genome| {
-                let log_sum = self.genome_selection_coefficient(genome);
+                let mut log_sum = self.genome_selection_coefficient(genome);
+
+                if log_sum == std::f64::NEG_INFINITY {
+                    // if selection coefficient is zero, set log sum to -inf to prevent underflow issues when exponentiating later, and skip multiplier calculation to avoid unnecessary calculations and potential floating point issues
+                    log_sum = 0.0;
+                }
                 log_sum
             })
             .collect::<Vec<f64>>();

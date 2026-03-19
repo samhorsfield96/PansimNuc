@@ -1079,7 +1079,7 @@ mod tests {
         assert_eq!(
             intergenic_count > 1,
             true,
-            "Should intergenic should be duplicated"
+            "Intergenic should be duplicated"
         );
     }
 }
