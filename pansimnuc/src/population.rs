@@ -1,18 +1,18 @@
 use crate::gff::FeaturePos;
-use crate::mutation::MutationMap;
 use crate::mutation::Distribution as MutationDistribution;
-use crate::structural::mutate_intra_genome;
-use crate::structural::mutate_inter_genome;
+use crate::mutation::MutationMap;
 use crate::structural::StructureMutationMap;
+use crate::structural::mutate_inter_genome;
+use crate::structural::mutate_intra_genome;
+use logsumexp::LogSumExp;
+use rand::SeedableRng;
+use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
+use rand::rngs::StdRng;
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use rayon::prelude::*;
-use logsumexp::LogSumExp;
-use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
-use rand::rngs::StdRng;
-use rand::{SeedableRng};
 
 #[derive(Clone)]
 pub struct NucElement {
@@ -66,7 +66,7 @@ impl Genome {
     }
 }
 
-pub struct Population{
+pub struct Population {
     pub generation: usize,
     pub pop: Vec<Genome>,
     pub core_vec: Vec<Vec<u8>>,
@@ -84,20 +84,31 @@ impl Population {
         feature_type == "TE-CUT" || feature_type == "TE-COPY"
     }
 
-    fn check_feature_order (&self, genome: &Genome, element_idx: usize, element: &NucElement) -> (bool, f64) {
+    fn check_feature_order(
+        &self,
+        genome: &Genome,
+        element_idx: usize,
+        element: &NucElement,
+    ) -> (bool, f64) {
         let mut feature_broken = false;
         let mut feature_multiplier = 1.0;
 
         let max_multiplier_dist = self.max_multiplier_dist;
-        
+
         // identify regions where order matters
         if element.feature_type == "exon" || element.feature_type == "intron" {
-            let feature_map_entry = self.feature_map.get(&element.feature_id).expect("Entry missing from feature_map");
+            let feature_map_entry = self
+                .feature_map
+                .get(&element.feature_id)
+                .expect("Entry missing from feature_map");
             let feature_map_entry_len = feature_map_entry.len();
 
             // get position of element in feature_map_entry
-            let position = feature_map_entry.iter().position(|n| n == &element.element_id).expect("Element not found in feature_map_entry");
-            
+            let position = feature_map_entry
+                .iter()
+                .position(|n| n == &element.element_id)
+                .expect("Element not found in feature_map_entry");
+
             // check upstream elements in feature_map_entry
             for feature_element_idx in 0..position {
                 // get upstream feature in genome
@@ -108,13 +119,18 @@ impl Population {
                 let expected_element_id = feature_map_entry[feature_element_idx];
 
                 // expected element and strand matches so continue
-                if actual_element_id == expected_element_id && actual_element.strand == element.strand {
+                if actual_element_id == expected_element_id
+                    && actual_element.strand == element.strand
+                {
                     continue;
                 } else {
                     // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
                     // check if last feature matches in feature_map_entry
-                    let reversed_feature_id = feature_map_entry[(feature_map_entry_len - 1) - feature_element_idx];
-                    if actual_element_id == reversed_feature_id && actual_element.strand == element.strand {
+                    let reversed_feature_id =
+                        feature_map_entry[(feature_map_entry_len - 1) - feature_element_idx];
+                    if actual_element_id == reversed_feature_id
+                        && actual_element.strand == element.strand
+                    {
                         continue;
                     } else {
                         // if not, set multiplier to 0, as likely to be non-functional
@@ -128,27 +144,33 @@ impl Population {
             if !feature_broken {
                 for feature_element_idx in position + 1..feature_map_entry_len {
                     // get downstream feature in genome
-                    let actual_element = &genome.seq[element_idx + (feature_element_idx - position)];
+                    let actual_element =
+                        &genome.seq[element_idx + (feature_element_idx - position)];
                     let actual_element_id = actual_element.element_id;
 
                     // get expected element
                     let expected_element_id = feature_map_entry[feature_element_idx];
 
                     // expected element and strand matches so continue
-                    if actual_element_id == expected_element_id && actual_element.strand == element.strand {
+                    if actual_element_id == expected_element_id
+                        && actual_element.strand == element.strand
+                    {
                         continue;
                     } else {
                         // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
                         // check if last feature matches in feature_map_entry
-                        let reversed_feature_id = feature_map_entry[(feature_map_entry_len - 1) - feature_element_idx];
-                        if actual_element_id == reversed_feature_id && actual_element.strand == element.strand {
+                        let reversed_feature_id =
+                            feature_map_entry[(feature_map_entry_len - 1) - feature_element_idx];
+                        if actual_element_id == reversed_feature_id
+                            && actual_element.strand == element.strand
+                        {
                             continue;
                         } else {
                             // if not, set multiplier to 0, as likely to be non-functional
                             feature_broken = true;
                             break;
                         }
-                    }  
+                    }
                 }
             }
 
@@ -160,7 +182,7 @@ impl Population {
                     let upstream_size = upstream_element.seq.len();
                     if Self::is_te_feature(&upstream_element.feature_type) {
                         feature_multiplier = upstream_element.multiplier;
-                    } 
+                    }
                     // check two down and see if TE
                     else if element_idx >= position + 2 && upstream_size <= max_multiplier_dist {
                         let upstream_element2 = &genome.seq[element_idx - (position + 2)];
@@ -174,16 +196,21 @@ impl Population {
 
                 // check not at end of genome
                 if element_idx + (feature_map_entry_len - position) < genome.seq.len() {
-                    let downstream_element = &genome.seq[element_idx + (feature_map_entry_len - position)];
+                    let downstream_element =
+                        &genome.seq[element_idx + (feature_map_entry_len - position)];
                     let downstream_size = downstream_element.seq.len();
                     if Self::is_te_feature(&downstream_element.feature_type) {
                         if feature_multiplier.abs() < downstream_element.multiplier.abs() {
                             feature_multiplier = downstream_element.multiplier;
                         }
-                    } 
+                    }
                     // check two down and see if TE
-                    else if element_idx + ((feature_map_entry_len - position) + 1) < genome.seq.len() && downstream_size <= max_multiplier_dist {
-                        let downstream_element2 = &genome.seq[element_idx + ((feature_map_entry_len - position) + 1)];
+                    else if element_idx + ((feature_map_entry_len - position) + 1)
+                        < genome.seq.len()
+                        && downstream_size <= max_multiplier_dist
+                    {
+                        let downstream_element2 =
+                            &genome.seq[element_idx + ((feature_map_entry_len - position) + 1)];
                         if Self::is_te_feature(&downstream_element2.feature_type) {
                             if feature_multiplier.abs() < downstream_element2.multiplier.abs() {
                                 feature_multiplier = downstream_element2.multiplier;
@@ -193,7 +220,7 @@ impl Population {
                 }
             }
         }
-        
+
         (feature_broken, feature_multiplier)
     }
 
@@ -227,8 +254,9 @@ impl Population {
         for (element_idx, element) in genome.seq.iter().enumerate() {
             let mut element_log_sum = 0.0;
 
-            let (feature_broken, feature_multiplier) = self.check_feature_order(genome, element_idx, element);
-            
+            let (feature_broken, feature_multiplier) =
+                self.check_feature_order(genome, element_idx, element);
+
             // if feature not broken, add up sites
             if !feature_broken {
                 element_log_sum += element.element_selection_coefficient(&genome.identifier);
@@ -241,7 +269,8 @@ impl Population {
     }
 
     fn log_sum_exp(&self) -> (Vec<f64>, f64) {
-        let selection_weights = self.pop
+        let selection_weights = self
+            .pop
             .par_iter()
             .map(|genome| {
                 let log_sum = self.genome_selection_coefficient(genome);
@@ -281,17 +310,7 @@ impl Population {
         // generate starting genome
         for (contig_id, features) in root.iter().enumerate() {
             for feature in features {
-                
-                let selection_dist_id:usize = match feature.feature_type.as_str() {
-                    "exon" => 0,
-                    "intron" => 1,
-                    "intergenic" => 2,
-                    "TE-CUT" => 3,
-                    "TE-COPY" => 4,
-                    _ => panic!("Unknown feature type: {}", feature.feature_type),
-                };
-                
-                let mu_dist_id:usize = match feature.feature_type.as_str() {
+                let selection_dist_id: usize = match feature.feature_type.as_str() {
                     "exon" => 0,
                     "intron" => 1,
                     "intergenic" => 2,
@@ -300,7 +319,16 @@ impl Population {
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
-                let structural_map:StructureMutationMap = match feature.feature_type.as_str() {
+                let mu_dist_id: usize = match feature.feature_type.as_str() {
+                    "exon" => 0,
+                    "intron" => 1,
+                    "intergenic" => 2,
+                    "TE-CUT" => 3,
+                    "TE-COPY" => 4,
+                    _ => panic!("Unknown feature type: {}", feature.feature_type),
+                };
+
+                let structural_map: StructureMutationMap = match feature.feature_type.as_str() {
                     "exon" => structural_dists[0].clone(),
                     "intron" => structural_dists[1].clone(),
                     "intergenic" => structural_dists[2].clone(),
@@ -311,7 +339,10 @@ impl Population {
 
                 // Update feature_map, keeping track of how many features there are
                 if feature.feature_id != 0 {
-                    feature_map.entry(feature.feature_id).or_default().push(element_id);
+                    feature_map
+                        .entry(feature.feature_id)
+                        .or_default()
+                        .push(element_id);
                 }
 
                 genome.push(NucElement {
@@ -321,7 +352,13 @@ impl Population {
                     feature_type: feature.feature_type.clone(),
                     seq: feature.seq.clone(),
                     strand: feature.strand,
-                    mutation_map: MutationMap::new(selection_dist_id, mu_dist_id, &feature.seq, &selection_dists[selection_dist_id], rng),
+                    mutation_map: MutationMap::new(
+                        selection_dist_id,
+                        mu_dist_id,
+                        &feature.seq,
+                        &selection_dists[selection_dist_id],
+                        rng,
+                    ),
                     structure_mutation_map: structural_map.clone(),
                     multiplier: 1.0, // Initialize with a default value, can be updated later
                 });
@@ -349,7 +386,7 @@ impl Population {
 
             population.push(genome_entry);
         }
-        
+
         let core_vec: Vec<Vec<u8>> =
             vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
 
@@ -363,52 +400,57 @@ impl Population {
             recombination_threshold,
             homology_map,
             feature_map,
-            max_multiplier_dist
+            max_multiplier_dist,
         }
     }
 
     // mutate individuals in the population according to their mutation maps and the provided distributions
-    pub fn mutate (&mut self) {
+    pub fn mutate(&mut self) {
         for genome in &mut self.pop {
             for element in &mut genome.seq {
-                element.mutation_map.mutate(&self.core_vec, 
-                    &mut element.seq, 
-                    &self.selection_dists[element.mutation_map.selection_dist_id], 
-                    &self.mu_dists[element.mutation_map.mu_dist_id],);
+                element.mutation_map.mutate(
+                    &self.core_vec,
+                    &mut element.seq,
+                    &self.selection_dists[element.mutation_map.selection_dist_id],
+                    &self.mu_dists[element.mutation_map.mu_dist_id],
+                );
             }
         }
-    }   
+    }
 
     pub fn structural_intra_genome(&mut self) {
         // TODO remove hard coded distributions, allow for duplications mainly tandem, or translocations randomly throughout genome
-        
+
         // probabilities for duplications
-        let duplication_mu_dist = MutationDistribution::new_uniform(0.0, 1.0). expect("Failed to create uniform distribution for duplications");
-        let duplication_pos_dist = MutationDistribution::new_poisson(1.0).expect("Failed to create poisson distribution for duplications");
+        let duplication_mu_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create uniform distribution for duplications");
+        let duplication_pos_dist = MutationDistribution::new_poisson(1.0)
+            .expect("Failed to create poisson distribution for duplications");
 
         // make probabilities very high to favour only the most transposable of elements
-        let translocation_mu_dist = MutationDistribution::new_uniform(0.9, 1.0).expect("Failed to create uniform distribution for translocations"); 
-        let translocation_pos_dist = MutationDistribution::new_poisson(1000.0).expect("Failed to create poisson distribution for translocations");
+        let translocation_mu_dist = MutationDistribution::new_uniform(0.9, 1.0)
+            .expect("Failed to create uniform distribution for translocations");
+        let translocation_pos_dist = MutationDistribution::new_poisson(1000.0)
+            .expect("Failed to create poisson distribution for translocations");
 
         // duplications
-        self.pop
-            .par_iter_mut()
-            .for_each(|genome| {
-                
-                // duplications
-                mutate_intra_genome(genome, &duplication_mu_dist, &duplication_pos_dist);
+        self.pop.par_iter_mut().for_each(|genome| {
+            // duplications
+            mutate_intra_genome(genome, &duplication_mu_dist, &duplication_pos_dist);
 
-                // translocations
-                // clear homology map to enable fresh creation of groups
-                mutate_intra_genome(genome, &translocation_mu_dist, &translocation_pos_dist);
-            });
-        
+            // translocations
+            // clear homology map to enable fresh creation of groups
+            mutate_intra_genome(genome, &translocation_mu_dist, &translocation_pos_dist);
+        });
+
         // update homology map for all new elements
         for genome in &self.pop {
-            self.homology_map.iter_mut().for_each(|element_homology_map| {
+            self.homology_map
+                .iter_mut()
+                .for_each(|element_homology_map| {
                     element_homology_map[genome.genome_id].clear();
-            });
-            
+                });
+
             for (element_idx, element) in genome.seq.iter().enumerate() {
                 let element_id = element.element_id;
                 let homology_group = &mut self.homology_map[element_id][genome.genome_id];
@@ -423,24 +465,37 @@ impl Population {
     }
 
     // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights
-    pub fn sample_individuals (&mut self, rng: &mut StdRng) -> Vec<usize> {
-        
+    pub fn sample_individuals(&mut self, rng: &mut StdRng) -> Vec<usize> {
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
 
-        selection_weights = selection_weights.into_iter()
+        selection_weights = selection_weights
+            .into_iter()
             .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
             .collect();
 
         let sum_weights: f64 = selection_weights.iter().sum();
-        selection_weights = selection_weights.iter().map(|&w| if w != std::f64::NEG_INFINITY {w / sum_weights} else {0.0}).collect();
+        selection_weights = selection_weights
+            .iter()
+            .map(|&w| {
+                if w != std::f64::NEG_INFINITY {
+                    w / sum_weights
+                } else {
+                    0.0
+                }
+            })
+            .collect();
 
         // Create a WeightedIndex distribution based on weights
-        let sampling_dist = WeightedIndex::new(&selection_weights).expect("Failed to generate sampling index for population.");
+        let sampling_dist = WeightedIndex::new(&selection_weights)
+            .expect("Failed to generate sampling index for population.");
 
         // Sample rows based on the distribution
-        let sampled_indices: Vec<usize> = (0..self.pop.len()).map(|_| sampling_dist.sample(rng)).collect();
+        let sampled_indices: Vec<usize> = (0..self.pop.len())
+            .map(|_| sampling_dist.sample(rng))
+            .collect();
 
-        #[cfg(debug_assertions)] {
+        #[cfg(debug_assertions)]
+        {
             eprintln!("Selection weights: {:?}", selection_weights);
             eprintln!("Sampled indices: {:?}", sampled_indices);
         }
@@ -448,7 +503,7 @@ impl Population {
         sampled_indices
     }
 
-    pub fn next_generation (&mut self, sampled_indices: Vec<usize>) {
+    pub fn next_generation(&mut self, sampled_indices: Vec<usize>) {
         let mut new_pop: Vec<Genome> = Vec::new();
         let mut new_homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
         let mut genome_id = 0;
@@ -489,7 +544,8 @@ impl Population {
             // Group element indices by seqname
             let mut contig_groups: HashMap<usize, Vec<usize>> = HashMap::new();
             for (idx, element) in genome.seq.iter().enumerate() {
-                contig_groups.entry(element.contig_id)
+                contig_groups
+                    .entry(element.contig_id)
                     .or_insert_with(Vec::new)
                     .push(idx);
             }
@@ -533,12 +589,22 @@ impl Population {
         // calculate selection coefficients for all genomes once to avoid redundant calculations when writing attributes
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
 
-        selection_weights = selection_weights.into_iter()
+        selection_weights = selection_weights
+            .into_iter()
             .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
             .collect();
 
         let sum_weights: f64 = selection_weights.iter().sum();
-        selection_weights = selection_weights.iter().map(|&w| if w != std::f64::NEG_INFINITY {w / sum_weights} else {0.0}).collect();
+        selection_weights = selection_weights
+            .iter()
+            .map(|&w| {
+                if w != std::f64::NEG_INFINITY {
+                    w / sum_weights
+                } else {
+                    0.0
+                }
+            })
+            .collect();
 
         for (genome_index, genome) in self.pop.iter().enumerate() {
             let genome_output_path = Self::genome_output_path(output_path, genome_index)?;
@@ -561,12 +627,14 @@ impl Population {
                 }
 
                 // calculate element selection coefficient
-                let log_element_selection_coefficient = element.element_selection_coefficient(&genome.identifier);
-                let element_selection_coefficient = if log_element_selection_coefficient == std::f64::NEG_INFINITY {
-                    0.0
-                } else {
-                    (log_element_selection_coefficient - logsumexp_value).exp() / sum_weights // exp(log(w) - logsumexp)
-                };
+                let log_element_selection_coefficient =
+                    element.element_selection_coefficient(&genome.identifier);
+                let element_selection_coefficient =
+                    if log_element_selection_coefficient == std::f64::NEG_INFINITY {
+                        0.0
+                    } else {
+                        (log_element_selection_coefficient - logsumexp_value).exp() / sum_weights // exp(log(w) - logsumexp)
+                    };
 
                 let seq_id = format!("contig_{}", element.contig_id + 1);
                 let start_1based = start_0 + 1;
@@ -601,12 +669,7 @@ impl Population {
                 writeln!(
                     writer,
                     "{}\tPansimNuc\t{}\t{}\t{}\t.\t{}\t.\t{}",
-                    seq_id,
-                    element.feature_type,
-                    start_1based,
-                    end_1based,
-                    strand,
-                    attributes
+                    seq_id, element.feature_type, start_1based, end_1based, strand, attributes
                 )?;
             }
 
@@ -691,19 +754,27 @@ mod tests {
         root.push(features);
 
         let n_genomes = 3;
-        let exon_dist = MutationDistribution::new_double_exp(0.5, 2.0, 0.3).expect("Failed to create double exponential distribution for exon features");
-        let intron_dist = MutationDistribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
-        let intergenic_dist = MutationDistribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
+        let exon_dist = MutationDistribution::new_double_exp(0.5, 2.0, 0.3)
+            .expect("Failed to create double exponential distribution for exon features");
+        let intron_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create uniform distribution for intron features");
+        let intergenic_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create uniform distribution for intergenic features");
         let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
 
-        let exon_mu = MutationDistribution::new_uniform(0.0, 1.0).expect("Failed to create double exponential distribution for exon features");
-        let intron_mu = MutationDistribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intron features");
-        let intergenic_mu = MutationDistribution::new_uniform(0.0, 1.0).expect("Failed to create uniform distribution for intergenic features");
+        let exon_mu = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create double exponential distribution for exon features");
+        let intron_mu = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create uniform distribution for intron features");
+        let intergenic_mu = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create uniform distribution for intergenic features");
         let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
 
-        let recombination_prob_dist = MutationDistribution::new_poisson(1.0).expect("Failed to create uniform distribution for recombination");
-        let recombination_len_dist = MutationDistribution::new_poisson(1.0).expect("Failed to create uniform distribution for recombination");
-        
+        let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
+            .expect("Failed to create uniform distribution for recombination");
+        let recombination_len_dist = MutationDistribution::new_poisson(1.0)
+            .expect("Failed to create uniform distribution for recombination");
+
         let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
 
         let mut rng: StdRng = StdRng::seed_from_u64(42);
@@ -930,7 +1001,7 @@ mod tests {
         let intergenic_mu_dist = MutationDistribution::new_uniform(0.0, 1.0)
             .expect("failed to create intergenic mutation distribution");
         let site_mutation_mus = vec![force_mutation_dist, intron_mu_dist, intergenic_mu_dist];
-                let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
+        let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
             .expect("Failed to create uniform distribution for recombination");
         let recombination_len_dist = MutationDistribution::new_poisson(1.0)
             .expect("Failed to create uniform distribution for recombination");
@@ -1031,15 +1102,18 @@ mod tests {
             .iter()
             .map(|genome| genome.identifier.clone())
             .collect();
-        let original_parents: Vec<String> = pop
-            .pop
-            .iter()
-            .map(|genome| genome.parent.clone())
-            .collect();
+        let original_parents: Vec<String> =
+            pop.pop.iter().map(|genome| genome.parent.clone()).collect();
         let original_sequences: Vec<Vec<Vec<u8>>> = pop
             .pop
             .iter()
-            .map(|genome| genome.seq.iter().map(|element| element.seq.clone()).collect())
+            .map(|genome| {
+                genome
+                    .seq
+                    .iter()
+                    .map(|element| element.seq.clone())
+                    .collect()
+            })
             .collect();
 
         pop.next_generation(vec![2, 0, 1]);
@@ -1049,7 +1123,10 @@ mod tests {
 
         for (new_index, genome) in pop.pop.iter().enumerate() {
             let selected_index = [2usize, 0, 1][new_index];
-            assert_eq!(genome.identifier, format!("1-{}", original_identifiers[selected_index]));
+            assert_eq!(
+                genome.identifier,
+                format!("1-{}", original_identifiers[selected_index])
+            );
             assert_eq!(genome.parent, original_identifiers[selected_index]);
             assert_ne!(genome.identifier, original_identifiers[new_index]);
             assert_ne!(genome.parent, original_parents[new_index]);
@@ -1295,7 +1372,12 @@ mod tests {
         downstream_te.element_id = 20_001;
         seq.push(downstream_te);
 
-        println!("Sequence: {:?}", seq.iter().map(|e| format!("{}-{}", e.feature_type, e.feature_id)).collect::<Vec<String>>());
+        println!(
+            "Sequence: {:?}",
+            seq.iter()
+                .map(|e| format!("{}-{}", e.feature_type, e.feature_id))
+                .collect::<Vec<String>>()
+        );
 
         let genome = genome_from_seq(seq);
         let (broken, multiplier) = check_feature_one_intron(&pop, &genome);
@@ -1324,7 +1406,12 @@ mod tests {
         downstream_te.element_id = 20_001;
         seq.push(downstream_te);
 
-        println!("Sequence: {:?}", seq.iter().map(|e| format!("{}-{}", e.feature_type, e.feature_id)).collect::<Vec<String>>());
+        println!(
+            "Sequence: {:?}",
+            seq.iter()
+                .map(|e| format!("{}-{}", e.feature_type, e.feature_id))
+                .collect::<Vec<String>>()
+        );
 
         let genome = genome_from_seq(seq);
         let (broken, multiplier) = check_feature_one_intron(&pop, &genome);

@@ -1,6 +1,6 @@
-use noodles_gff::{self as gff};
-use noodles_gff::feature::record::Strand;
 use noodles_fasta as fasta;
+use noodles_gff::feature::record::Strand;
+use noodles_gff::{self as gff};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Write};
@@ -21,7 +21,7 @@ pub struct FeaturePos {
     pub start: usize,
     pub end: usize,
     pub strand: bool, // true for +, false for -
-    pub seq: Vec<u8>
+    pub seq: Vec<u8>,
 }
 
 fn encode_dna(seq: &str) -> Vec<u8> {
@@ -146,11 +146,12 @@ fn overlay_te_intervals(
         for feature in &*features {
             let overlap_start = feature.start.max(interval.start);
             let overlap_end = feature.end.min(interval.end);
-            let flank_feature_type = if feature.feature_type == "exon" || feature.feature_type == "intron" {
-                "intergenic"
-            } else {
-                feature.feature_type.as_str()
-            };
+            let flank_feature_type =
+                if feature.feature_type == "exon" || feature.feature_type == "intron" {
+                    "intergenic"
+                } else {
+                    feature.feature_type.as_str()
+                };
 
             if overlap_start >= overlap_end {
                 updated.push(FeaturePos {
@@ -233,7 +234,7 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
                     last.seq = encode_dna(&contig_seq[last.start..last.end]);
                 }
                 continue;
-            } 
+            }
             // make introns bordering intergenic regions into intergenic to avoid small introns around TEs
             else if last.feature_type == "intergenic"
                 && current.feature_type == "intron"
@@ -260,7 +261,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
 
     // keep track of current feature ID, dictacted by gene and its upstream region
     let mut current_feature_id: usize = 1;
-    
+
     // hold features
     let mut features: Vec<Vec<FeaturePos>> = Vec::new();
     let mut contig_id: i32 = -1;
@@ -281,7 +282,6 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
 
         // get last record if present
         if let Some(last_feature) = features[contig_id as usize].last_mut() {
-
             // determine if there is overlap
             let last_feature_end = last_feature.end.clone();
             let last_feature_type = last_feature.feature_type.clone();
@@ -293,102 +293,99 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
 
                 // add intergenic region between last exon and current gene, if non-overlapping
                 if feature_start >= last_feature_end {
-                    features[contig_id as usize]
-                        .push(FeaturePos {
-                            contig_id: contig_id as usize,
-                            feature_id: 0,
-                            feature_type: "intergenic".to_string(),
-                            start: last_feature_end,
-                            end: feature_start,
-                            strand: true,
-                            seq: vec![0]
-                        });
+                    features[contig_id as usize].push(FeaturePos {
+                        contig_id: contig_id as usize,
+                        feature_id: 0,
+                        feature_type: "intergenic".to_string(),
+                        start: last_feature_end,
+                        end: feature_start,
+                        strand: true,
+                        seq: vec![0],
+                    });
                 }
-            } 
+            }
             // non-overlapping exon after intergenic region
-            else if feature_type == "exon" && feature_start >= last_feature_end && current_feature_id != last_feature_id {
+            else if feature_type == "exon"
+                && feature_start >= last_feature_end
+                && current_feature_id != last_feature_id
+            {
                 // if no intergenic region, need to add due to gene overlap
                 if last_feature_type != "intergenic" {
-                    features[contig_id as usize]
-                        .push(FeaturePos {
-                            contig_id: contig_id as usize,
-                            feature_id: 0,
-                            feature_type: "intergenic".to_string(),
-                            start: last_feature_end,
-                            end: feature_start,
-                            strand: true,
-                            seq: vec![0]
-                        });
+                    features[contig_id as usize].push(FeaturePos {
+                        contig_id: contig_id as usize,
+                        feature_id: 0,
+                        feature_type: "intergenic".to_string(),
+                        start: last_feature_end,
+                        end: feature_start,
+                        strand: true,
+                        seq: vec![0],
+                    });
                 } else {
                     // if intergenic region, need to update end coordinate to current exon start
                     last_feature.end = feature_start;
                 }
 
-                features[contig_id as usize]
-                    .push(FeaturePos {
-                        contig_id: contig_id as usize,
-                        feature_id: current_feature_id,
-                        feature_type: feature_type.clone(),
-                        start: feature_start,
-                        end: feature_end,
-                        strand: record.strand() == Strand::Forward,
-                        seq: vec![0]
+                features[contig_id as usize].push(FeaturePos {
+                    contig_id: contig_id as usize,
+                    feature_id: current_feature_id,
+                    feature_type: feature_type.clone(),
+                    start: feature_start,
+                    end: feature_end,
+                    strand: record.strand() == Strand::Forward,
+                    seq: vec![0],
                 });
-            } else if feature_type == "exon" && feature_start >= last_feature_end && last_feature_type == "exon" {
-
+            } else if feature_type == "exon"
+                && feature_start >= last_feature_end
+                && last_feature_type == "exon"
+            {
                 // add intron feature between last exon and current exon
-                features[contig_id as usize]
-                    .push(FeaturePos {
-                        contig_id: contig_id as usize,
-                        feature_id: current_feature_id,
-                        feature_type: "intron".to_string(),
-                        start: last_feature_end,
-                        end: feature_start,
-                        strand: record.strand() == Strand::Forward,
-                        seq: vec![0]
-                    });
+                features[contig_id as usize].push(FeaturePos {
+                    contig_id: contig_id as usize,
+                    feature_id: current_feature_id,
+                    feature_type: "intron".to_string(),
+                    start: last_feature_end,
+                    end: feature_start,
+                    strand: record.strand() == Strand::Forward,
+                    seq: vec![0],
+                });
 
                 // only add exons as features
-                features[contig_id as usize]
-                    .push(FeaturePos {
-                        contig_id: contig_id as usize,
-                        feature_id: current_feature_id,
-                        feature_type: feature_type.clone(),
-                        start: feature_start,
-                        end: feature_end,
-                        strand: record.strand() == Strand::Forward,
-                        seq: vec![0]
-                });    
-            } 
-        } else { 
+                features[contig_id as usize].push(FeaturePos {
+                    contig_id: contig_id as usize,
+                    feature_id: current_feature_id,
+                    feature_type: feature_type.clone(),
+                    start: feature_start,
+                    end: feature_end,
+                    strand: record.strand() == Strand::Forward,
+                    seq: vec![0],
+                });
+            }
+        } else {
             // if no last feature, add intergenic region from start of contig to first feature
             if feature_start > 0 {
-                features[contig_id as usize]
-                    .push(FeaturePos {
-                        contig_id: contig_id as usize,
-                        feature_id: 0,
-                        feature_type: "intergenic".to_string(),
-                        start: 0,
-                        end: feature_start,
-                        strand: true,
-                        seq: vec![0]
-                    });
-            } else  {
+                features[contig_id as usize].push(FeaturePos {
+                    contig_id: contig_id as usize,
+                    feature_id: 0,
+                    feature_type: "intergenic".to_string(),
+                    start: 0,
+                    end: feature_start,
+                    strand: true,
+                    seq: vec![0],
+                });
+            } else {
                 // unless if first feature starts at 0 add feature
                 if feature_type == "gene" {
                     current_feature_id += 1;
-                }
-                else if feature_type == "exon" {
-                    features[contig_id as usize]
-                        .push(FeaturePos {
-                            contig_id: contig_id as usize,
-                            feature_id: current_feature_id,
-                            feature_type: feature_type,
-                            start: feature_start,
-                            end: feature_end,
-                            strand: record.strand() == Strand::Forward,
-                            seq: vec![0]
-                        });
+                } else if feature_type == "exon" {
+                    features[contig_id as usize].push(FeaturePos {
+                        contig_id: contig_id as usize,
+                        feature_id: current_feature_id,
+                        feature_type: feature_type,
+                        start: feature_start,
+                        end: feature_end,
+                        strand: record.strand() == Strand::Forward,
+                        seq: vec![0],
+                    });
                 }
             }
         }
@@ -420,9 +417,8 @@ pub fn read_gff_lines(
     for (contig_id, results) in features.iter_mut().enumerate() {
         if let Some(seq) = genome.get(contig_id) {
             let mut last_feature_end: usize = 0;
-            
+
             for result in &mut **results {
-            
                 if result.start >= result.end || result.end > seq.len() {
                     continue;
                 }
@@ -433,9 +429,9 @@ pub fn read_gff_lines(
 
                 last_feature_end = result.end;
             }
-            
+
             // add final intergenic region, if contig empty adds full contig
-            let len_seq: usize  = seq.len();
+            let len_seq: usize = seq.len();
             let feature_start = last_feature_end;
             let feature_end = len_seq;
             let subseq = encode_dna(&seq[feature_start..feature_end]);
@@ -447,7 +443,7 @@ pub fn read_gff_lines(
                 start: feature_start,
                 end: feature_end,
                 strand: true,
-                seq: subseq
+                seq: subseq,
             });
 
             normalize_intergenic_features(results, seq);
@@ -507,12 +503,7 @@ pub fn write_root_genome_gff(features: &[Vec<FeaturePos>], output_path: &str) ->
             writeln!(
                 writer,
                 "{}\tPansimNuc\t{}\t{}\t{}\t.\t{}\t.\t{}",
-                seq_id,
-                feature.feature_type,
-                start_1based,
-                end_1based,
-                strand,
-                attributes
+                seq_id, feature.feature_type, start_1based, end_1based, strand, attributes
             )?;
 
             record_id += 1;
@@ -530,12 +521,18 @@ mod tests {
 
     fn create_temp_file(prefix: &str, suffix: &str, content: &str) -> String {
         let temp_dir = std::env::temp_dir();
-        let temp_path = temp_dir.join(format!("{}_{}{}", prefix, std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(), suffix));
+        let temp_path = temp_dir.join(format!(
+            "{}_{}{}",
+            prefix,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            suffix
+        ));
         let mut file = File::create(&temp_path).expect("Failed to create temp file");
-        file.write_all(content.as_bytes()).expect("Failed to write temp file");
+        file.write_all(content.as_bytes())
+            .expect("Failed to write temp file");
         drop(file);
         temp_path.to_string_lossy().to_string()
     }
@@ -564,14 +561,20 @@ ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
 
         // Check coordinates for contig1 exon
         let contig1_features = &features[0];
-        let exon = contig1_features.iter().find(|f| f.feature_type == "exon").unwrap();
-        assert_eq!(exon.start, 99);  // GFF 100 becomes 0-indexed 99
+        let exon = contig1_features
+            .iter()
+            .find(|f| f.feature_type == "exon")
+            .unwrap();
+        assert_eq!(exon.start, 99); // GFF 100 becomes 0-indexed 99
         assert_eq!(exon.end, 200);
 
         // Check coordinates for contig2 exon
         let contig2_features = &features[1];
-        let exon = contig2_features.iter().find(|f| f.feature_type == "exon").unwrap();
-        assert_eq!(exon.start, 49);  // GFF 50 becomes 0-indexed 49
+        let exon = contig2_features
+            .iter()
+            .find(|f| f.feature_type == "exon")
+            .unwrap();
+        assert_eq!(exon.start, 49); // GFF 50 becomes 0-indexed 49
         assert_eq!(exon.end, 150);
 
         let _ = std::fs::remove_file(&gff_file);
@@ -596,14 +599,20 @@ contig2\t.\texon\t50\t150\t.\t+\t.\tID=exon2";
 
         // Check coordinates for contig1 exon
         let contig1_features = &features[0];
-        let exon = contig1_features.iter().find(|f| f.feature_type == "exon").unwrap();
-        assert_eq!(exon.start, 99);  // GFF 100 becomes 0-indexed 99
+        let exon = contig1_features
+            .iter()
+            .find(|f| f.feature_type == "exon")
+            .unwrap();
+        assert_eq!(exon.start, 99); // GFF 100 becomes 0-indexed 99
         assert_eq!(exon.end, 200);
 
         // Check coordinates for contig2 exon
         let contig2_features = &features[1];
-        let exon = contig2_features.iter().find(|f| f.feature_type == "exon").unwrap();
-        assert_eq!(exon.start, 49);  // GFF 50 becomes 0-indexed 49
+        let exon = contig2_features
+            .iter()
+            .find(|f| f.feature_type == "exon")
+            .unwrap();
+        assert_eq!(exon.start, 49); // GFF 50 becomes 0-indexed 49
         assert_eq!(exon.end, 150);
 
         let _ = std::fs::remove_file(&gff_file);
@@ -693,27 +702,39 @@ contig2\t.\texon\t80\t100\t.\t-\t.\tID=c2g2e2";
 
         // Overlapping exons are currently not merged; overlapping records are not represented.
         let contig1 = &features[0];
-        assert!(contig1
-            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 30));
-        assert!(!contig1
-            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 19 && f.end == 40));
-        assert!(!contig1
-            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 40));
+        assert!(
+            contig1
+                .iter()
+                .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 30)
+        );
+        assert!(
+            !contig1
+                .iter()
+                .any(|f| f.feature_type == "exon" && f.start == 19 && f.end == 40)
+        );
+        assert!(
+            !contig1
+                .iter()
+                .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 40)
+        );
 
         // Same expectation on contig2 gene2.
         let contig2 = &features[1];
-        assert!(contig2
-            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 69 && f.end == 85));
-        assert!(!contig2
-            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 79 && f.end == 100));
-        assert!(!contig2
-            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 69 && f.end == 100));
+        assert!(
+            contig2
+                .iter()
+                .any(|f| f.feature_type == "exon" && f.start == 69 && f.end == 85)
+        );
+        assert!(
+            !contig2
+                .iter()
+                .any(|f| f.feature_type == "exon" && f.start == 79 && f.end == 100)
+        );
+        assert!(
+            !contig2
+                .iter()
+                .any(|f| f.feature_type == "exon" && f.start == 69 && f.end == 100)
+        );
 
         let _ = std::fs::remove_file(&gff_file);
     }
@@ -737,12 +758,16 @@ contig1\t.\texon\t20\t50\t.\t+\t.\tID=gene2_exon1";
         let contig_features = &features[0];
 
         // Exons from different genes must not be merged into one larger overlapping exon.
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 30));
-        assert!(!contig_features
-            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 50));
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 30)
+        );
+        assert!(
+            !contig_features
+                .iter()
+                .any(|f| f.feature_type == "exon" && f.start == 9 && f.end == 50)
+        );
 
         let _ = std::fs::remove_file(&gff_file);
     }
@@ -753,7 +778,6 @@ contig1\t.\texon\t20\t50\t.\t+\t.\tID=gene2_exon1";
 contig1\t.\tgene\t100\t200\t.\t+\t.\tID=gene1
 contig1\t.\texon\t100\t200\t.\t+\t.\tID=exon1
 contig1\t.\texon\t250\t300\t.\t+\t.\tID=exon1";
-
 
         let mut fasta_content = String::from(">contig1\n");
         fasta_content.push_str(&"A".repeat(400));
@@ -776,7 +800,14 @@ contig1\t.\tUnclassified\t140\t145\t.\t+\t.\tID=skip_me";
 
         println!("Contig features after overlay:");
         for feature in contig_features {
-            println!("{}: {}-{} ({}) [{}]", feature.feature_type, feature.start, feature.end, if feature.strand { "+" } else { "-" }, String::from_utf8_lossy(&feature.seq));
+            println!(
+                "{}: {}-{} ({}) [{}]",
+                feature.feature_type,
+                feature.start,
+                feature.end,
+                if feature.strand { "+" } else { "-" },
+                String::from_utf8_lossy(&feature.seq)
+            );
         }
 
         // DNA -> TE-CUT and overlaps exon coordinates.
@@ -794,28 +825,41 @@ contig1\t.\tUnclassified\t140\t145\t.\t+\t.\tID=skip_me";
         assert!(!te_copy.strand);
 
         // Exon flanks should be converted to intergenic around TE-CUT overlap.
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 20 && f.end == 119));
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 130 && f.end == 249));
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 300 && f.end == 400));
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "intergenic" && f.start == 20 && f.end == 119)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "intergenic" && f.start == 130 && f.end == 249)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "intergenic" && f.start == 300 && f.end == 400)
+        );
 
         // Unclassified entries must not be added.
-        assert!(!contig_features
-            .iter()
-            .any(|f| f.feature_type.to_ascii_uppercase().contains("UNCLASSIFIED")));
-        assert!(contig_features
-            .iter()
-            .filter(|f| f.feature_type == "intergenic")
-            .all(|f| f.strand));
+        assert!(
+            !contig_features
+                .iter()
+                .any(|f| f.feature_type.to_ascii_uppercase().contains("UNCLASSIFIED"))
+        );
+        assert!(
+            contig_features
+                .iter()
+                .filter(|f| f.feature_type == "intergenic")
+                .all(|f| f.strand)
+        );
 
         // non-overlapping exon should still be represented correctly
-        assert!(contig_features            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 249 && f.end == 300));
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "exon" && f.start == 249 && f.end == 300)
+        );
 
         let _ = std::fs::remove_file(&gff_file);
         let _ = std::fs::remove_file(&fasta_file);
@@ -855,7 +899,14 @@ contig1\t.\tLINE\t35\t45\t.\t-\t.\tID=te_copy_2";
 
         println!("Contig features after overlay:");
         for feature in contig_features {
-            println!("{}: {}-{} ({}) [{}]", feature.feature_type, feature.start, feature.end, if feature.strand { "+" } else { "-" }, String::from_utf8_lossy(&feature.seq));
+            println!(
+                "{}: {}-{} ({}) [{}]",
+                feature.feature_type,
+                feature.start,
+                feature.end,
+                if feature.strand { "+" } else { "-" },
+                String::from_utf8_lossy(&feature.seq)
+            );
         }
 
         // Coverage should start at 0 and end at full contig length.
@@ -874,45 +925,69 @@ contig1\t.\tLINE\t35\t45\t.\t-\t.\tID=te_copy_2";
         }
 
         // Confirm inserted TE coordinates and inferred classes.
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "TE-COPY" && f.start == 0 && f.end == 5));
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "TE-CUT" && f.start == 14 && f.end == 18));
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "TE-COPY" && f.start == 34 && f.end == 40));
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "TE-COPY" && f.start == 40 && f.end == 45));
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "TE-COPY" && f.start == 0 && f.end == 5)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "TE-CUT" && f.start == 14 && f.end == 18)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "TE-COPY" && f.start == 34 && f.end == 40)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "TE-COPY" && f.start == 40 && f.end == 45)
+        );
 
         // Non-TE segments should still be represented correctly.
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 5 && f.end == 14));
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 18 && f.end == 34));
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 45 && f.end == 49));
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 49 && f.end == 70));
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "intron" && f.start == 70 && f.end == 74));
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "exon" && f.start == 74 && f.end == 100));
-        assert!(contig_features
-            .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 100 && f.end == 110));
-        assert!(contig_features
-            .iter()
-            .filter(|f| f.feature_type == "intergenic")
-            .all(|f| f.strand));
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "intergenic" && f.start == 5 && f.end == 14)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "intergenic" && f.start == 18 && f.end == 34)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "intergenic" && f.start == 45 && f.end == 49)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "exon" && f.start == 49 && f.end == 70)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "intron" && f.start == 70 && f.end == 74)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "exon" && f.start == 74 && f.end == 100)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "intergenic" && f.start == 100 && f.end == 110)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .filter(|f| f.feature_type == "intergenic")
+                .all(|f| f.strand)
+        );
 
         let _ = std::fs::remove_file(&gff_file);
         let _ = std::fs::remove_file(&fasta_file);
@@ -950,40 +1025,58 @@ contig2\t.\tUnclassified\t22\t24\t.\t+\t.\tID=skip_me";
         let contig1_features = &features[0];
         let contig2_features = &features[1];
 
-        assert!(contig1_features
-            .iter()
-            .any(|f| f.feature_type == "TE-CUT" && f.start == 11 && f.end == 14));
-        assert!(contig2_features
-            .iter()
-            .any(|f| f.feature_type == "TE-COPY" && f.start == 29 && f.end == 35));
-        assert!(contig2_features
-            .iter()
-            .any(|f| f.feature_type == "TE-COPY" && f.start == 35 && f.end == 40));
+        assert!(
+            contig1_features
+                .iter()
+                .any(|f| f.feature_type == "TE-CUT" && f.start == 11 && f.end == 14)
+        );
+        assert!(
+            contig2_features
+                .iter()
+                .any(|f| f.feature_type == "TE-COPY" && f.start == 29 && f.end == 35)
+        );
+        assert!(
+            contig2_features
+                .iter()
+                .any(|f| f.feature_type == "TE-COPY" && f.start == 35 && f.end == 40)
+        );
 
         // Non-TE segments should still be represented correctly on both contigs.
-        assert!(contig1_features
-            .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 0 && f.end == 11));
-        assert!(contig1_features
-            .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 14 && f.end == 50));
+        assert!(
+            contig1_features
+                .iter()
+                .any(|f| f.feature_type == "intergenic" && f.start == 0 && f.end == 11)
+        );
+        assert!(
+            contig1_features
+                .iter()
+                .any(|f| f.feature_type == "intergenic" && f.start == 14 && f.end == 50)
+        );
 
-        assert!(contig2_features
-            .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 0 && f.end == 29));
-        assert!(contig2_features
-            .iter()
-            .any(|f| f.feature_type == "intergenic" && f.start == 40 && f.end == 60));
-        assert!(contig1_features
-            .iter()
-            .chain(contig2_features.iter())
-            .filter(|f| f.feature_type == "intergenic")
-            .all(|f| f.strand));
+        assert!(
+            contig2_features
+                .iter()
+                .any(|f| f.feature_type == "intergenic" && f.start == 0 && f.end == 29)
+        );
+        assert!(
+            contig2_features
+                .iter()
+                .any(|f| f.feature_type == "intergenic" && f.start == 40 && f.end == 60)
+        );
+        assert!(
+            contig1_features
+                .iter()
+                .chain(contig2_features.iter())
+                .filter(|f| f.feature_type == "intergenic")
+                .all(|f| f.strand)
+        );
 
-        assert!(!contig1_features
-            .iter()
-            .chain(contig2_features.iter())
-            .any(|f| f.feature_type.to_ascii_uppercase().contains("UNCLASSIFIED")));
+        assert!(
+            !contig1_features
+                .iter()
+                .chain(contig2_features.iter())
+                .any(|f| f.feature_type.to_ascii_uppercase().contains("UNCLASSIFIED"))
+        );
 
         let _ = std::fs::remove_file(&gff_file);
         let _ = std::fs::remove_file(&fasta_file);

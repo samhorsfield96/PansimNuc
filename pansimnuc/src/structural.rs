@@ -1,10 +1,10 @@
 // in this script, genes can move around, be duplicated and deleted
 
+use crate::mutation::Distribution as MutationDistribution;
 use crate::population::NucElement;
 use crate::population::{Genome, Population};
-use rand::seq::SliceRandom;
 use rand::Rng;
-use crate::mutation::Distribution as MutationDistribution;
+use rand::seq::SliceRandom;
 extern crate levenshtein;
 use levenshtein::levenshtein;
 use std::collections::HashMap;
@@ -35,8 +35,12 @@ fn calculate_homology(a: &NucElement, b: &NucElement) -> f64 {
     let m = s.len();
     let n = t.len();
 
-    if m == 0 && n == 0 { return 1.0; }
-    if m == 0 || n == 0 { return 0.0; }
+    if m == 0 && n == 0 {
+        return 1.0;
+    }
+    if m == 0 || n == 0 {
+        return 0.0;
+    }
 
     let edit_distance = levenshtein(&s, &t);
     let max_len = m.max(n);
@@ -44,7 +48,11 @@ fn calculate_homology(a: &NucElement, b: &NucElement) -> f64 {
 }
 
 // write function which runs through each element and determines whether a structural mutation occurs, and if so, which one, and where it moves to.
-pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, pos_dist: &MutationDistribution) {
+pub fn mutate_intra_genome(
+    genome: &mut Genome,
+    mu_dist: &MutationDistribution,
+    pos_dist: &MutationDistribution,
+) {
     let mut thread_rng = rand::thread_rng();
 
     // For all intra genome comparisons, sample from uniform distribution to determine if variant occurs
@@ -57,20 +65,24 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
     // check which contig each block will be inserted into
     let contig_starts = &genome.contig_starts;
 
-    for (current_pos , element) in &mut genome.seq.iter().enumerate() {
+    for (current_pos, element) in &mut genome.seq.iter().enumerate() {
         // determine maximum position
         if current_pos > max_position {
             max_position = current_pos;
         }
 
         //store element structure positions, with current position first
-        let mut new_positions_vec: Vec<(usize, i64)> = vec![(element.contig_id, current_pos as i64)];
-        
+        let mut new_positions_vec: Vec<(usize, i64)> =
+            vec![(element.contig_id, current_pos as i64)];
+
         // duplications, can model multiple duplications repeatedly sampling until rand_val is above duplication rate
         let mut rand_val = mu_dist.sample(&mut thread_rng);
         let mut dup_count: usize = 0;
         while rand_val < element.structure_mutation_map.duplication_rate
-            && element.structure_mutation_map.max_duplications.map_or(true, |max| dup_count < max)
+            && element
+                .structure_mutation_map
+                .max_duplications
+                .map_or(true, |max| dup_count < max)
         {
             dup_count += 1;
             // sample from poisson distribution to determine where duplication goes
@@ -78,7 +90,12 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
 
             // determine if position is before or after gene, adjust if too large
             let pos_rand_val = mu_dist.sample(&mut thread_rng);
-            let pos_order: i64 = if pos_rand_val < element.structure_mutation_map.duplication_insertion_prob { -1 } else { 1 };
+            let pos_order: i64 =
+                if pos_rand_val < element.structure_mutation_map.duplication_insertion_prob {
+                    -1
+                } else {
+                    1
+                };
             let mut new_pos = current_pos as i64 + (duplication_pos * pos_order);
             let mut new_contig_id = 0;
 
@@ -93,7 +110,7 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
                     // new position is in previous contig
                     break;
                 }
-                new_contig_id = contig_id; 
+                new_contig_id = contig_id;
             }
 
             new_positions_vec.push((new_contig_id, new_pos));
@@ -111,10 +128,9 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
         }
 
         // translocations not explicitely modelled, as captured by simulatenous duplication and deletion event
-        
+
         // inversions, apply to all genes in element structure vec
         for (contig_id, pos) in new_positions_vec {
-            
             let mut inversion = 1;
 
             // flip sign
@@ -123,11 +139,14 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
                 inversion = -1;
             }
 
-            // now update new_positions, indexed by new position, 
+            // now update new_positions, indexed by new position,
             // with old entry as value either as positive or negative value depending on whether it is inverted or not and 1 indexed
             let key = pos;
             let value = (current_pos as i64 + 1) * inversion; // store old position as value, which can be used to update mutation map of element after all structural mutations have been processed
-            new_positions.entry(key).or_default().push((contig_id, value));
+            new_positions
+                .entry(key)
+                .or_default()
+                .push((contig_id, value));
         }
     }
 
@@ -138,11 +157,14 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
     for idx in 0..=max_position {
         if let Some(prev_pos) = new_positions.get(&(idx as i64)) {
             // value exists
-            for entry in prev_pos { 
+            for entry in prev_pos {
                 if entry.1 == 0 {
-                    panic!("Entry for structural varient is 0, for position {} in genome {}", idx, genome.identifier);
+                    panic!(
+                        "Entry for structural varient is 0, for position {} in genome {}",
+                        idx, genome.identifier
+                    );
                 }
-                
+
                 // append entry, meaning that genes are not deleted, appended in order
                 new_genome_seq.push(*entry);
             }
@@ -162,7 +184,7 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
 
         // update contig id
         new_element.contig_id = contig_id;
-        
+
         new_genome.push(new_element);
     }
 
@@ -172,9 +194,9 @@ pub fn mutate_intra_genome(genome: &mut Genome, mu_dist: &MutationDistribution, 
     genome.update_contig_starts();
 }
 
-pub fn mutate_inter_genome (population: &mut Population) {
+pub fn mutate_inter_genome(population: &mut Population) {
     let mut thread_rng = rand::thread_rng();
-    
+
     // get number of recombination events across whole population
     let n_recombinations = population.recombination_dists[0].sample(&mut thread_rng) as usize;
 
@@ -187,8 +209,13 @@ pub fn mutate_inter_genome (population: &mut Population) {
 
     let mut recombination_map: HashMap<usize, Vec<usize>> = HashMap::new();
     for _ in 0..n_recombinations {
-        let (donor, recipient) = all_pairs.choose(&mut thread_rng).expect("Failed to select a random pair for recombination");
-        recombination_map.entry(*donor as usize).or_default().push(*recipient as usize);
+        let (donor, recipient) = all_pairs
+            .choose(&mut thread_rng)
+            .expect("Failed to select a random pair for recombination");
+        recombination_map
+            .entry(*donor as usize)
+            .or_default()
+            .push(*recipient as usize);
     }
 
     // iterate through each donor and recipient pair, in future make parallelisable by processing each independent recombination map separately
@@ -204,7 +231,7 @@ pub fn mutate_inter_genome (population: &mut Population) {
             };
 
             // look for donor and recipient site, maximum 25 attempts, if not found, skip recombination event
-            let mut donor_site_chosen : bool = false;
+            let mut donor_site_chosen: bool = false;
             let mut attempts = 0;
             let max_attempts = 25;
 
@@ -218,14 +245,18 @@ pub fn mutate_inter_genome (population: &mut Population) {
                 let recomb_element = &population.homology_map[recombination_pos];
 
                 let donor_has_site = !recomb_element[donor].is_empty();
-                let recipient_has_site = recomb_element.len() > recipient && !recomb_element[recipient].is_empty();
+                let recipient_has_site =
+                    recomb_element.len() > recipient && !recomb_element[recipient].is_empty();
 
                 // if both vectors are not empty, then search through each and test to make sure they have sufficient homology
                 if donor_has_site && recipient_has_site {
                     for donor_site in &recomb_element[donor] {
                         for recipient_site in &recomb_element[recipient] {
                             // check homology between donor and recipient site, if sufficient, break loop and move to recombination, if not, continue searching
-                            let homology = calculate_homology(&donor_genome.seq[*donor_site], &recipient_genome.seq[*recipient_site]);
+                            let homology = calculate_homology(
+                                &donor_genome.seq[*donor_site],
+                                &recipient_genome.seq[*recipient_site],
+                            );
                             if homology >= population.recombination_threshold {
                                 // perform recombination event, break out of loops
 
@@ -240,13 +271,14 @@ pub fn mutate_inter_genome (population: &mut Population) {
                             break;
                         }
                     }
-                }  
+                }
                 attempts += 1;
             }
 
             if donor_site_chosen {
                 // now sample from poisson distribution to determine minumum size of recombination track
-                let min_recombination_len = population.recombination_dists[1].sample(&mut thread_rng) as usize;
+                let min_recombination_len =
+                    population.recombination_dists[1].sample(&mut thread_rng) as usize;
 
                 // determine whether there is a track that can be recombined
                 let mut track_found = false;
@@ -262,16 +294,21 @@ pub fn mutate_inter_genome (population: &mut Population) {
                     // determine length of donor DNA
                     while recombination_len < min_recombination_len {
                         let new_end_donor_site = end_donor_site + 1;
-                        
+
                         // run off end of contig, assume complete recombination
-                        if donor_genome.seq[new_end_donor_site].contig_id != donor_contig_id || new_end_donor_site >= donor_genome.seq.len() {
+                        if donor_genome.seq[new_end_donor_site].contig_id != donor_contig_id
+                            || new_end_donor_site >= donor_genome.seq.len()
+                        {
                             recombination_len += donor_genome.seq[end_donor_site].seq.len();
 
                             // find end of recipient track
                             let mut contig_end = false;
                             while !contig_end {
                                 let new_end_recipient_site = end_recipient_site + 1;
-                                if recipient_genome.seq[new_end_recipient_site].contig_id != recipient_contig_id || new_end_recipient_site >= recipient_genome.seq.len() {
+                                if recipient_genome.seq[new_end_recipient_site].contig_id
+                                    != recipient_contig_id
+                                    || new_end_recipient_site >= recipient_genome.seq.len()
+                                {
                                     contig_end = true;
                                 } else {
                                     end_recipient_site = new_end_recipient_site;
@@ -285,7 +322,6 @@ pub fn mutate_inter_genome (population: &mut Population) {
                         // else continue going through contig
                         end_donor_site = new_end_donor_site;
                         recombination_len += donor_genome.seq[end_donor_site].seq.len();
-
                     }
 
                     // use to determine homology between sites
@@ -295,7 +331,9 @@ pub fn mutate_inter_genome (population: &mut Population) {
                     let mut recipient_end_found = false;
                     while !recipient_end_found {
                         // run off end of contig, assume complete recombination
-                        if recipient_genome.seq[end_recipient_site].contig_id != recipient_contig_id || end_recipient_site >= recipient_genome.seq.len() {
+                        if recipient_genome.seq[end_recipient_site].contig_id != recipient_contig_id
+                            || end_recipient_site >= recipient_genome.seq.len()
+                        {
                             recipient_end_found = true;
                             break;
                         }
@@ -315,7 +353,10 @@ pub fn mutate_inter_genome (population: &mut Population) {
 
                 // perform recombination event, replacing recipient track with donor track
                 // clone the donor track first, before any mutable borrow of population.pop
-                let mut donor_track: Vec<NucElement> = donor_genome.seq[start_donor_site..=end_donor_site].to_vec().clone();
+                let mut donor_track: Vec<NucElement> = donor_genome.seq
+                    [start_donor_site..=end_donor_site]
+                    .to_vec()
+                    .clone();
 
                 // update information from recipient track
                 for element in &mut donor_track {
@@ -329,17 +370,21 @@ pub fn mutate_inter_genome (population: &mut Population) {
                 // remove old positions
                 for element_idx in start_recipient_site..=end_recipient_site {
                     let element_id = recipient_genome.seq[element_idx].element_id;
-                    let homology_group = &mut population.homology_map[element_id][recipient_genome.genome_id];
+                    let homology_group =
+                        &mut population.homology_map[element_id][recipient_genome.genome_id];
                     homology_group.retain(|&pos| pos != element_idx); // remove old position
                 }
-                
+
                 // now safe to mutably borrow recipient
-                recipient_genome.seq.splice(start_recipient_site..=end_recipient_site, donor_track);
+                recipient_genome
+                    .seq
+                    .splice(start_recipient_site..=end_recipient_site, donor_track);
 
                 // add new positions
                 for element_idx in start_recipient_site..start_recipient_site + donor_track_len {
                     let element_id = recipient_genome.seq[element_idx].element_id;
-                    let homology_group = &mut population.homology_map[element_id][recipient_genome.genome_id];
+                    let homology_group =
+                        &mut population.homology_map[element_id][recipient_genome.genome_id];
                     homology_group.push(element_idx); // add new position
                 }
 
@@ -457,7 +502,12 @@ mod tests {
         }
     }
 
-    fn make_recombination_test_genome(genome_id: usize, n_elements: usize, strand_seed: bool, marker_base: u8) -> Genome {
+    fn make_recombination_test_genome(
+        genome_id: usize,
+        n_elements: usize,
+        strand_seed: bool,
+        marker_base: u8,
+    ) -> Genome {
         let base_map = StructureMutationMap {
             duplication_rate: 0.0,
             deletion_rate: 0.0,
@@ -479,7 +529,11 @@ mod tests {
                 multiplier: 1.0,
                 seq: marker_seq.clone(),
                 mutation_map: MutationMap::new(0, 0, &marker_seq, &sel_dist, &mut rng),
-                strand: if idx % 2 == 0 { strand_seed } else { !strand_seed },
+                strand: if idx % 2 == 0 {
+                    strand_seed
+                } else {
+                    !strand_seed
+                },
                 structure_mutation_map: base_map.clone(),
             });
         }
@@ -498,7 +552,9 @@ mod tests {
         let g0 = make_recombination_test_genome(0, n_elements, true, 1);
         let g1 = make_recombination_test_genome(1, n_elements, false, 2);
 
-        let recombination_count = MutationDistribution::new_uniform(forced_events as f64, forced_events as f64 + 0.1).unwrap();
+        let recombination_count =
+            MutationDistribution::new_uniform(forced_events as f64, forced_events as f64 + 0.1)
+                .unwrap();
         let recombination_len = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
 
         let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
@@ -546,7 +602,7 @@ mod tests {
 
         let mu = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
-        
+
         let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
         for _ in genome.seq.iter() {
             homology_map.push(vec![vec![0]]);
@@ -555,8 +611,15 @@ mod tests {
         mutate_intra_genome(&mut genome, &mu, &pos);
 
         let after_strands: Vec<bool> = genome.seq.iter().map(|e| e.strand).collect();
-        assert_ne!(before_strands, after_strands, "strands should flip after forced inversion");
-        assert_eq!(genome.seq.len(), before_strands.len(), "inversion should preserve genome length");
+        assert_ne!(
+            before_strands, after_strands,
+            "strands should flip after forced inversion"
+        );
+        assert_eq!(
+            genome.seq.len(),
+            before_strands.len(),
+            "inversion should preserve genome length"
+        );
     }
 
     #[test]
@@ -577,7 +640,10 @@ mod tests {
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
         mutate_intra_genome(&mut genome, &mu, &pos);
 
-        assert!(genome.seq.len() < before_len, "genome should shrink after forced deletion");
+        assert!(
+            genome.seq.len() < before_len,
+            "genome should shrink after forced deletion"
+        );
     }
 
     #[test]
@@ -597,7 +663,7 @@ mod tests {
             e.structure_mutation_map.deletion_rate = 1.0;
             e.structure_mutation_map.inversion_rate = 0.0;
         }
-                
+
         let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
         for _ in genome.seq.iter() {
             homology_map.push(vec![vec![0]]);
@@ -618,7 +684,10 @@ mod tests {
         let mut expected = before_ids.clone();
         after_ids.sort();
         expected.sort();
-        assert_eq!(after_ids, expected, "translocation should not add or remove genes");
+        assert_eq!(
+            after_ids, expected,
+            "translocation should not add or remove genes"
+        );
     }
 
     #[test]
@@ -639,14 +708,27 @@ mod tests {
 
         let contig_ids: Vec<usize> = genome.seq.iter().map(|e| e.contig_id).collect();
         assert!(!contig_ids.is_empty(), "mutated genome should not be empty");
-        assert_eq!(contig_ids.first().copied(), Some(0), "first contig should be 0");
-        assert!(contig_ids.windows(2).all(|w| w[0] <= w[1]), "contig ids should be non-decreasing");
+        assert_eq!(
+            contig_ids.first().copied(),
+            Some(0),
+            "first contig should be 0"
+        );
+        assert!(
+            contig_ids.windows(2).all(|w| w[0] <= w[1]),
+            "contig ids should be non-decreasing"
+        );
 
         let mut unique_contigs = contig_ids.clone();
         unique_contigs.dedup();
-        assert!(unique_contigs.len() > 1, "test should contain multiple contigs");
+        assert!(
+            unique_contigs.len() > 1,
+            "test should contain multiple contigs"
+        );
         let expected_contigs: Vec<usize> = (0..unique_contigs.len()).collect();
-        assert_eq!(unique_contigs, expected_contigs, "contigs should progress upward from 0");
+        assert_eq!(
+            unique_contigs, expected_contigs,
+            "contigs should progress upward from 0"
+        );
     }
 
     #[test]
@@ -660,11 +742,17 @@ mod tests {
             .collect();
 
         for (genome_idx, ids) in element_ids_before.iter().enumerate() {
-            println!("Before recombination - genome {} element_ids: {:?}", genome_idx, ids);
+            println!(
+                "Before recombination - genome {} element_ids: {:?}",
+                genome_idx, ids
+            );
         }
 
         let mixed_before = count_mixed_marker_genomes(&population);
-        assert_eq!(mixed_before, 0, "before recombination, genomes should not be mixed");
+        assert_eq!(
+            mixed_before, 0,
+            "before recombination, genomes should not be mixed"
+        );
 
         let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         mutate_inter_genome(&mut population);
@@ -678,12 +766,25 @@ mod tests {
             .collect();
 
         for (genome_idx, ids) in element_ids_after.iter().enumerate() {
-            println!("After recombination - genome {} element_ids: {:?}", genome_idx, ids);
+            println!(
+                "After recombination - genome {} element_ids: {:?}",
+                genome_idx, ids
+            );
         }
 
-        assert_eq!(population.pop.len(), 2, "population size should be unchanged");
-        assert_eq!(total_after, total_before, "no forced recombination should not change total length in this deterministic setup");
-        assert_eq!(mixed_after, mixed_before, "no forced recombination should not change mixed marker genomes");
+        assert_eq!(
+            population.pop.len(),
+            2,
+            "population size should be unchanged"
+        );
+        assert_eq!(
+            total_after, total_before,
+            "no forced recombination should not change total length in this deterministic setup"
+        );
+        assert_eq!(
+            mixed_after, mixed_before,
+            "no forced recombination should not change mixed marker genomes"
+        );
     }
 
     #[test]
@@ -697,11 +798,17 @@ mod tests {
             .collect();
 
         for (genome_idx, ids) in element_ids_before.iter().enumerate() {
-            println!("Before recombination - genome {} element_ids: {:?}", genome_idx, ids);
+            println!(
+                "Before recombination - genome {} element_ids: {:?}",
+                genome_idx, ids
+            );
         }
 
         let mixed_before = count_mixed_marker_genomes(&population);
-        assert_eq!(mixed_before, 0, "before recombination, genomes should not be mixed");
+        assert_eq!(
+            mixed_before, 0,
+            "before recombination, genomes should not be mixed"
+        );
 
         let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         mutate_inter_genome(&mut population);
@@ -715,12 +822,25 @@ mod tests {
             .collect();
 
         for (genome_idx, ids) in element_ids_after.iter().enumerate() {
-            println!("After recombination - genome {} element_ids: {:?}", genome_idx, ids);
+            println!(
+                "After recombination - genome {} element_ids: {:?}",
+                genome_idx, ids
+            );
         }
 
-        assert_eq!(population.pop.len(), 2, "population size should be unchanged");
-        assert_eq!(total_after, total_before, "single forced recombination should preserve total genome length");
-        assert!(mixed_after > mixed_before, "after one forced recombination, at least one genome should contain marker sequence from the other genome");
+        assert_eq!(
+            population.pop.len(),
+            2,
+            "population size should be unchanged"
+        );
+        assert_eq!(
+            total_after, total_before,
+            "single forced recombination should preserve total genome length"
+        );
+        assert!(
+            mixed_after > mixed_before,
+            "after one forced recombination, at least one genome should contain marker sequence from the other genome"
+        );
     }
 
     #[test]
@@ -735,11 +855,17 @@ mod tests {
             .collect();
 
         for (genome_idx, ids) in element_ids_before.iter().enumerate() {
-            println!("Before recombination - genome {} element_ids: {:?}", genome_idx, ids);
+            println!(
+                "Before recombination - genome {} element_ids: {:?}",
+                genome_idx, ids
+            );
         }
 
         let mixed_before = count_mixed_marker_genomes(&population);
-        assert_eq!(mixed_before, 0, "before recombination, genomes should not be mixed");
+        assert_eq!(
+            mixed_before, 0,
+            "before recombination, genomes should not be mixed"
+        );
 
         let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         mutate_inter_genome(&mut population);
@@ -753,13 +879,19 @@ mod tests {
             .collect();
 
         for (genome_idx, ids) in element_ids_after.iter().enumerate() {
-            println!("After recombination - genome {} element_ids: {:?}", genome_idx, ids);
+            println!(
+                "After recombination - genome {} element_ids: {:?}",
+                genome_idx, ids
+            );
         }
 
-        assert_eq!(population.pop.len(), 2, "population size should be unchanged");
         assert_eq!(
-            total_after,
-            total_before,
+            population.pop.len(),
+            2,
+            "population size should be unchanged"
+        );
+        assert_eq!(
+            total_after, total_before,
             "forced multiple recombinations should preserve total genome length"
         );
         assert!(

@@ -27,7 +27,9 @@ impl Config {
             // Check for section header
             if trimmed.starts_with('[') && trimmed.ends_with(']') {
                 current_section = trimmed[1..trimmed.len() - 1].to_string();
-                sections.entry(current_section.clone()).or_insert_with(HashMap::new);
+                sections
+                    .entry(current_section.clone())
+                    .or_insert_with(HashMap::new);
                 continue;
             }
 
@@ -116,7 +118,10 @@ format=json";
         assert!(config.has_section("database"));
         assert!(config.has_section("output"));
 
-        assert_eq!(config.get("database", "host"), Some("localhost".to_string()));
+        assert_eq!(
+            config.get("database", "host"),
+            Some("localhost".to_string())
+        );
         assert_eq!(config.get("database", "port"), Some("5432".to_string()));
         assert_eq!(config.get("output", "format"), Some("json".to_string()));
 
@@ -136,8 +141,14 @@ option2=value2";
         assert!(config.is_ok());
 
         let config = config.unwrap();
-        assert_eq!(config.get("settings", "option1"), Some("value1".to_string()));
-        assert_eq!(config.get("settings", "option2"), Some("value2".to_string()));
+        assert_eq!(
+            config.get("settings", "option1"),
+            Some("value1".to_string())
+        );
+        assert_eq!(
+            config.get("settings", "option2"),
+            Some("value2".to_string())
+        );
 
         let _ = std::fs::remove_file(&path);
     }
@@ -154,9 +165,18 @@ earlgrey_gff_file=/tmp/te.gff";
         assert!(config.is_ok());
 
         let config = config.unwrap();
-        assert_eq!(config.get("input", "gff_file"), Some("/tmp/main.gff3".to_string()));
-        assert_eq!(config.get("input", "fasta_file"), Some("/tmp/ref.fa".to_string()));
-        assert_eq!(config.get("input", "earlgrey_gff_file"), Some("/tmp/te.gff".to_string()));
+        assert_eq!(
+            config.get("input", "gff_file"),
+            Some("/tmp/main.gff3".to_string())
+        );
+        assert_eq!(
+            config.get("input", "fasta_file"),
+            Some("/tmp/ref.fa".to_string())
+        );
+        assert_eq!(
+            config.get("input", "earlgrey_gff_file"),
+            Some("/tmp/te.gff".to_string())
+        );
 
         let _ = std::fs::remove_file(&path);
     }
@@ -205,11 +225,23 @@ selection_coefficient=0.02";
 
         // Check that all flattened keys exist
         assert_eq!(flat.get("exons.mutation_rate"), Some(&"1e-8".to_string()));
-        assert_eq!(flat.get("exons.selection_coefficient"), Some(&"0.1".to_string()));
+        assert_eq!(
+            flat.get("exons.selection_coefficient"),
+            Some(&"0.1".to_string())
+        );
         assert_eq!(flat.get("introns.mutation_rate"), Some(&"1e-9".to_string()));
-        assert_eq!(flat.get("introns.selection_coefficient"), Some(&"0.05".to_string()));
-        assert_eq!(flat.get("intergenic.mutation_rate"), Some(&"5e-9".to_string()));
-        assert_eq!(flat.get("intergenic.selection_coefficient"), Some(&"0.02".to_string()));
+        assert_eq!(
+            flat.get("introns.selection_coefficient"),
+            Some(&"0.05".to_string())
+        );
+        assert_eq!(
+            flat.get("intergenic.mutation_rate"),
+            Some(&"5e-9".to_string())
+        );
+        assert_eq!(
+            flat.get("intergenic.selection_coefficient"),
+            Some(&"0.02".to_string())
+        );
 
         // Total of 6 values
         assert_eq!(flat.len(), 6);
