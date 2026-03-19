@@ -1,9 +1,11 @@
 // in this script, genes can move around, be duplicated and deleted
 
 use crate::mutation::Distribution as MutationDistribution;
+use crate::mutation::MutationMap;
 use crate::population::NucElement;
 use crate::population::{Genome, Population};
 use rand::Rng;
+use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 extern crate levenshtein;
 use levenshtein::levenshtein;
@@ -918,6 +920,154 @@ mod tests {
         assert!(
             mixed_after >= 1,
             "after forced recombinations, at least one genome should contain marker sequence from the other genome"
+        );
+    }
+
+    fn create_test_genomes(element_type: &str) -> Genome {
+          // TE-CUT should: duplication -> break loop -> force delete original
+        // Result: one copy at new position, original removed (cut-and-paste)
+        let base_map_TE = StructureMutationMap {
+            duplication_rate: 0.9,
+            deletion_rate: 0.0,
+            inversion_rate: 0.0,
+            max_duplications: Some(5),
+        };
+        let base_map = StructureMutationMap {
+            duplication_rate: 0.0,
+            deletion_rate: 0.0,
+            inversion_rate: 0.0,
+            max_duplications: Some(5),
+        };
+
+        let mut rng = StdRng::seed_from_u64(42);
+        let sel_dist = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
+
+        let genome = Genome {
+            identifier: format!("test_{}", element_type.to_lowercase()),
+            genome_id: 0,
+            parent: "root".to_string(),
+            contig_starts: vec![0],
+            seq: vec![NucElement {
+                contig_id: 0,
+                element_id: 0,
+                feature_id: 0,
+                feature_type: element_type.to_string(),
+                multiplier: 1.0,
+                seq: vec![1, 2, 4, 8],
+                mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
+                strand: true,
+                structure_mutation_map: base_map_TE,
+            },
+            NucElement {
+                contig_id: 0,
+                element_id: 0,
+                feature_id: 0,
+                feature_type: "exon".to_string(),
+                multiplier: 1.0,
+                seq: vec![1, 2, 4, 8],
+                mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
+                strand: true,
+                structure_mutation_map: base_map,
+            }],
+        };
+        genome
+    }
+
+    #[test]
+    fn te_copy_allows_multiple_duplications() {
+        // TE-COPY should allow multiple duplications without early break
+        let mut genome = create_test_genomes("TE-COPY");
+
+        let before_len = genome.seq.len();
+        
+        // High probability of duplication, zero deletion
+        let mu = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
+        let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
+        
+        mutate_intra_genome(&mut genome, &mu, &pos);
+        
+        // TE-COPY should result in multiple copies (original + duplicates)
+        assert!(
+            genome.seq.len() > before_len,
+            "TE-COPY should allow multiple duplications; before: {}, after: {}",
+            before_len,
+            genome.seq.len()
+        );
+        
+        // All copies should be TE-COPY
+        let te_copy_count = genome.seq.iter().filter(|e| e.feature_type == "TE-COPY").count();
+        assert_eq!(
+            te_copy_count > 1,
+            true,
+            "TE-COPY should result in multiple copies; found {} TE-COPY elements",
+            te_copy_count
+        );
+    }
+
+    #[test]
+    fn te_cut_implements_cut_and_paste() {
+        // TE-CUT should: duplication -> break loop -> force delete original
+        // Result: one copy at new position, original removed (cut-and-paste)
+        let mut genome = create_test_genomes("TE-CUT");
+
+        let before_len = genome.seq.len();
+        
+        let mu = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
+        let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
+        
+        mutate_intra_genome(&mut genome, &mu, &pos);
+        
+        // After cut-and-paste, genome should have same or fewer elements
+        // (original deleted, one copy inserted)
+        assert!(
+            genome.seq.len() == before_len,
+            "TE-CUT cut-and-paste should result in at most one additional element; before: {}, after: {}",
+            before_len,
+            genome.seq.len()
+        );
+
+        // ensure TE has moved and original position is deleted
+        let te_position = genome.seq.iter().position(|e| e.feature_type == "TE-CUT");
+        assert!(
+            te_position.expect("TE-CUT should still be present after cut-and-paste") != 0,
+            "TE-CUT should have moved from original position"
+        );
+
+        let te_cut_count = genome.seq.iter().filter(|e| e.feature_type == "TE-CUT").count();
+        assert_eq!(
+            te_cut_count, 1,
+            "TE-CUT should result in exactly one copy after cut-and-paste"
+        );
+
+    }
+
+    #[test]
+    fn intergenic_allows_multiple_duplications_with_poisson_position() {
+        // Non-TE features should allow multiple duplications and use Poisson for position
+        let mut genome: Genome = create_test_genomes("intergenic");
+
+        let before_len = genome.seq.len();
+        
+        // Use Poisson position distribution for non-TEs
+        let mu = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
+        let pos = MutationDistribution::new_poisson(1.5).unwrap();
+        
+        mutate_intra_genome(&mut genome, &mu, &pos);
+        
+        // Should have duplications
+        assert!(
+            genome.seq.len() > before_len,
+            "intergenic should allow multiple duplications; before: {}, after: {}",
+            before_len,
+            genome.seq.len()
+        );
+        
+        // All should be intergenic
+        let intergenic_count = genome.seq.iter().filter(|e| e.feature_type == "intergenic").count();
+        assert_eq!(
+            intergenic_count > 1,
+            true,
+            "Should intergenic should be duplicated"
         );
     }
 }
