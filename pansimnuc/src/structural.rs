@@ -119,6 +119,15 @@ pub fn mutate_intra_genome(
                 new_pos = 0;
             }
 
+            // avoid adding to same position
+            if new_pos == current_pos as i64 {
+                if new_pos == 0 {
+                    new_pos = genome.seq.len() as i64; // if at start, move to end
+                } else {
+                    new_pos += 1;
+                }
+            }
+
             // determine contig position
             for (contig_id, contig_start) in contig_starts.iter().enumerate() {
                 if new_pos < *contig_start as i64 {
@@ -923,13 +932,13 @@ mod tests {
         );
     }
 
-    fn create_test_genomes(element_type: &str) -> Genome {
+    fn create_test_genomes(element_type: &str, duplication_rate: f64, deletion_rate: f64, inversion_rate: f64) -> Genome {
           // TE-CUT should: duplication -> break loop -> force delete original
         // Result: one copy at new position, original removed (cut-and-paste)
         let base_map_TE = StructureMutationMap {
-            duplication_rate: 0.9,
-            deletion_rate: 0.0,
-            inversion_rate: 0.0,
+            duplication_rate: duplication_rate,
+            deletion_rate: deletion_rate,
+            inversion_rate: inversion_rate,
             max_duplications: Some(5),
         };
         let base_map = StructureMutationMap {
@@ -976,7 +985,7 @@ mod tests {
     #[test]
     fn te_copy_allows_multiple_duplications() {
         // TE-COPY should allow multiple duplications without early break
-        let mut genome = create_test_genomes("TE-COPY");
+        let mut genome = create_test_genomes("TE-COPY", 1.0, 0.0, 0.0);
 
         let before_len = genome.seq.len();
         
@@ -1008,7 +1017,7 @@ mod tests {
     fn te_cut_implements_cut_and_paste() {
         // TE-CUT should: duplication -> break loop -> force delete original
         // Result: one copy at new position, original removed (cut-and-paste)
-        let mut genome = create_test_genomes("TE-CUT");
+        let mut genome = create_test_genomes("TE-CUT", 1.0, 0.9, 0.0);
 
         let before_len = genome.seq.len();
         
@@ -1026,10 +1035,13 @@ mod tests {
             genome.seq.len()
         );
 
+        println!("Genome after TE-CUT mutation: {:?}", genome.seq.iter().map(|e| e.feature_type.clone()).collect::<Vec<String>>());
+
         // ensure TE has moved and original position is deleted
         let te_position = genome.seq.iter().position(|e| e.feature_type == "TE-CUT");
-        assert!(
-            te_position.expect("TE-CUT should still be present after cut-and-paste") != 0,
+        assert_ne!(
+            te_position.expect("TE-CUT should still be present after cut-and-paste"),
+            0,
             "TE-CUT should have moved from original position"
         );
 
@@ -1044,7 +1056,7 @@ mod tests {
     #[test]
     fn intergenic_allows_multiple_duplications_with_poisson_position() {
         // Non-TE features should allow multiple duplications and use Poisson for position
-        let mut genome: Genome = create_test_genomes("intergenic");
+        let mut genome: Genome = create_test_genomes("intergenic", 1.0, 0.0, 0.0);
 
         let before_len = genome.seq.len();
         
