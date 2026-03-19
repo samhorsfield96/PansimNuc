@@ -139,7 +139,7 @@ pub struct DoubleExponential {
     exp1: Exp<f64>,
     exp2: Exp<f64>,
     cutoff: f64,
-    weight: f64,
+    weight_rng: Uniform<f64>,
 }
 
 impl DoubleExponential {
@@ -147,11 +147,12 @@ impl DoubleExponential {
         lambda1: f64,
         lambda2: f64,
         cutoff: f64,
-        weight: f64,
     ) -> Result<Self, DistributionError> {
         if lambda1 <= 0.0 || lambda2 <= 0.0 || cutoff < 0.0 || cutoff > 1.0 {
             return Err(DistributionError::InvalidDoubleExpParameters);
         }
+
+        let weight_rng = Uniform::new(0.0, 1.0);
 
         let exp1 = Exp::new(lambda1).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
         let exp2 = Exp::new(lambda2).map_err(|_| DistributionError::InvalidDoubleExpParameters)?;
@@ -160,22 +161,26 @@ impl DoubleExponential {
             exp1,
             exp2,
             cutoff,
-            weight,
+            weight_rng,
         })
     }
 
-    pub fn weight<R: Rng>(&mut self, uniform: &Uniform<f64>, rng: &mut R) {
-        self.weight = uniform.sample(rng);
-    }
-
     pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
-        if self.weight <= self.cutoff {
+        let weight = self.weight_rng.sample(rng);
+        let mut selection_coefficient = 0.0;
+
+        if weight <= self.cutoff {
             // Higher selected gene
-            self.exp2.sample(rng)
+            selection_coefficient = self.exp2.sample(rng);
         } else {
             // lower selected gene
-            self.exp1.sample(rng)
+            // keep sampling until below 1, mimicking selection coefficient sampling
+            while selection_coefficient >= 1.0 {
+                selection_coefficient = self.exp1.sample(rng);
+            }
         }
+
+        selection_coefficient
     }
 }
 
@@ -401,7 +406,7 @@ impl Distribution {
         lambda2: f64,
         cutoff: f64,
     ) -> Result<Self, DistributionError> {
-        DoubleExponential::new(lambda1, lambda2, cutoff, 0.0).map(Distribution::DoubleExp)
+        DoubleExponential::new(lambda1, lambda2, cutoff).map(Distribution::DoubleExp)
     }
 
     pub fn new_poisson(lambda: f64) -> Result<Self, DistributionError> {
@@ -818,21 +823,5 @@ mod tests {
 
         let post_n_sites: Vec<u8> = seq.iter().copied().filter(|&x| x == 16).collect();
         assert_eq!(original_n_sites, post_n_sites);
-    }
-
-    #[test]
-    fn test_double_exponential_weight_update() {
-        let mut double_exp = DoubleExponential::new(1.0, 2.0, 0.5, 0.0).unwrap();
-        let uniform = Uniform::new(0.0, 1.0);
-        let mut rng = StdRng::seed_from_u64(123);
-
-        let old_weight = double_exp.weight;
-        double_exp.weight(&uniform, &mut rng);
-        let new_weight = double_exp.weight;
-
-        // Weight should be in valid range
-        assert!(new_weight >= 0.0 && new_weight <= 1.0);
-        // With seeded RNG, weight should have changed (unless by coincidence)
-        assert_ne!(old_weight, new_weight);
     }
 }
