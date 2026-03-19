@@ -135,8 +135,6 @@ fn main() {
                         let deletion_rate_key = format!("{}.deletion_rate", section);
                         let inversion_rate_key = format!("{}.inversion_rate", section);
                         let max_duplications_key = format!("{}.max_duplications", section);
-                        let duplication_insertion_prob_key =
-                            format!("{}.duplication_insertion_prob", section);
 
                         let mutation_rate = parse_f64(&mutation_rate_key);
 
@@ -167,7 +165,6 @@ fn main() {
                             deletion_rate: parse_f64(&deletion_rate_key),
                             inversion_rate: parse_f64(&inversion_rate_key),
                             max_duplications,
-                            duplication_insertion_prob: parse_f64(&duplication_insertion_prob_key),
                         });
 
 						// get multiplier just for TE sections

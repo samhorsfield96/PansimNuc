@@ -23,7 +23,6 @@ pub struct StructureMutationMap {
     /// Cap on the number of duplications per element per generation.
     /// `None` means no cap (behaviour unchanged from before this field was added).
     pub max_duplications: Option<usize>,
-    pub duplication_insertion_prob: f64, // probability of duplication inserting upstream of the original position, as opposed to downstream
 }
 
 /// Returns a similarity score in [0.0, 1.0] based on normalized edit distance.
@@ -71,6 +70,9 @@ pub fn mutate_intra_genome(
             max_position = current_pos;
         }
 
+        // get feature type
+        let feature_type = &element.feature_type;
+
         //store element structure positions, with current position first
         let mut new_positions_vec: Vec<(usize, i64)> =
             vec![(element.contig_id, current_pos as i64)];
@@ -78,6 +80,7 @@ pub fn mutate_intra_genome(
         // duplications, can model multiple duplications repeatedly sampling until rand_val is above duplication rate
         let mut rand_val = mu_dist.sample(&mut thread_rng);
         let mut dup_count: usize = 0;
+
         while rand_val < element.structure_mutation_map.duplication_rate
             && element
                 .structure_mutation_map
@@ -85,13 +88,23 @@ pub fn mutate_intra_genome(
                 .map_or(true, |max| dup_count < max)
         {
             dup_count += 1;
-            // sample from poisson distribution to determine where duplication goes
-            let duplication_pos = pos_dist.sample(&mut thread_rng) as i64;
+
+            // for non-TEs sample from poisson distribution to determine where duplication goes
+            let duplication_pos = if feature_type.contains("TE") {
+                // determine what is max dist to end from current position
+                let max_dist = (genome.seq.len() - current_pos).max(current_pos);
+
+                // for TEs, sample from uniform distribution to determine where duplication goes, with equal probability of anywhere in genome
+                thread_rng.gen_range(0..=max_dist) as f64
+            } else {
+                pos_dist.sample(&mut thread_rng)
+            };
+            let duplication_pos = duplication_pos as i64;
 
             // determine if position is before or after gene, adjust if too large
             let pos_rand_val = mu_dist.sample(&mut thread_rng);
             let pos_order: i64 =
-                if pos_rand_val < element.structure_mutation_map.duplication_insertion_prob {
+                if pos_rand_val < 0.5 {
                     -1
                 } else {
                     1
@@ -119,12 +132,23 @@ pub fn mutate_intra_genome(
             if new_pos as usize > max_position {
                 max_position = new_pos as usize;
             }
+
+            if dup_count > 0 && feature_type == "TE-CUT" {
+                // if element is a TE-COPY and has already been duplicated, break loop to prevent further duplications, to avoid runaway genome growth
+                break;
+            }
         }
 
         // deletions, only first gene deleted which is original position
-        rand_val = mu_dist.sample(&mut thread_rng);
-        if rand_val < element.structure_mutation_map.deletion_rate {
+        if feature_type == "TE-CUT" && dup_count > 0 {
+            // if element is a TE-COPY and has already been duplicated, force deletion of original copy, to capture cut and paste mechanism of TE-COPYs
             let _ = new_positions_vec.remove(0);
+        } else {
+            // All other gene features
+            rand_val = mu_dist.sample(&mut thread_rng);
+            if rand_val < element.structure_mutation_map.deletion_rate {
+                let _ = new_positions_vec.remove(0);
+            }
         }
 
         // translocations not explicitely modelled, as captured by simulatenous duplication and deletion event
@@ -409,7 +433,6 @@ mod tests {
             deletion_rate: 0.0,
             inversion_rate: 0.0,
             max_duplications: None,
-            duplication_insertion_prob: 0.5,
         };
         let mut rng = StdRng::seed_from_u64(42);
         let sel_dist = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
@@ -463,7 +486,6 @@ mod tests {
             deletion_rate: 0.0,
             inversion_rate: 0.0,
             max_duplications: None,
-            duplication_insertion_prob: 0.5,
         };
         let mut rng = StdRng::seed_from_u64(42);
         let sel_dist = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
@@ -513,7 +535,6 @@ mod tests {
             deletion_rate: 0.0,
             inversion_rate: 0.0,
             max_duplications: None,
-            duplication_insertion_prob: 0.5,
         };
         let mut rng = StdRng::seed_from_u64(100 + genome_id as u64);
         let sel_dist = MutationDistribution::new_uniform(0.0, 1.0).unwrap();

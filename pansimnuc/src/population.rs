@@ -440,27 +440,17 @@ impl Population {
 
     pub fn structural_intra_genome(&mut self) {
         // TODO remove hard coded distributions, allow for duplications mainly tandem, or translocations randomly throughout genome
+        // TODO rethink this, need to think about non-TEs mainly duplicating tandemly, then TE-CUT transposing randomly, TE-COPY duplicating randomly.
 
-        // probabilities for duplications
-        let duplication_mu_dist = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("Failed to create uniform distribution for duplications");
-        let duplication_pos_dist = MutationDistribution::new_poisson(1.0)
-            .expect("Failed to create poisson distribution for duplications");
+        // probabilities for structural variations
+        let mu_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create uniform distribution for structural variations");
+        let pos_dist = MutationDistribution::new_poisson(1.0)
+            .expect("Failed to create poisson distribution for structural variations");
 
-        // make probabilities very high to favour only the most transposable of elements
-        let translocation_mu_dist = MutationDistribution::new_uniform(0.9, 1.0)
-            .expect("Failed to create uniform distribution for translocations");
-        let translocation_pos_dist = MutationDistribution::new_poisson(1000.0)
-            .expect("Failed to create poisson distribution for translocations");
-
-        // duplications
+        // iterate over genomes
         self.pop.par_iter_mut().for_each(|genome| {
-            // duplications
-            mutate_intra_genome(genome, &duplication_mu_dist, &duplication_pos_dist);
-
-            // translocations
-            // clear homology map to enable fresh creation of groups
-            mutate_intra_genome(genome, &translocation_mu_dist, &translocation_pos_dist);
+            mutate_intra_genome(genome, &mu_dist, &pos_dist);
         });
 
         // update homology map for all new elements
@@ -667,7 +657,7 @@ impl Population {
                     .unwrap_or_else(|| "none".to_string());
 
                 let attributes = format!(
-                    "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};genome_identifier={};parent={};multiplier={:.6};sequence_length={};genome_selection_coefficient={:.6};element_selection_coefficient={:.6};sv_duplication_rate={:.6};sv_deletion_rate={:.6};sv_inversion_rate={:.6};sv_max_duplications={};sv_duplication_insertion_prob={:.6}",
+                    "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};genome_identifier={};parent={};multiplier={:.6};sequence_length={};genome_selection_coefficient={:.6};element_selection_coefficient={:.6};sv_duplication_rate={:.6};sv_deletion_rate={:.6};sv_inversion_rate={:.6};sv_max_duplications={}",
                     genome.genome_id,
                     element.element_id,
                     element.feature_type,
@@ -683,7 +673,6 @@ impl Population {
                     element.structure_mutation_map.deletion_rate,
                     element.structure_mutation_map.inversion_rate,
                     max_duplications,
-                    element.structure_mutation_map.duplication_insertion_prob,
                 );
 
                 writeln!(
@@ -714,35 +703,30 @@ mod tests {
                 deletion_rate: 0.0,
                 inversion_rate: 0.0,
                 max_duplications: None,
-                duplication_insertion_prob: 0.5,
             },
             StructureMutationMap {
                 duplication_rate: 0.0,
                 deletion_rate: 0.0,
                 inversion_rate: 0.0,
                 max_duplications: None,
-                duplication_insertion_prob: 0.5,
             },
             StructureMutationMap {
                 duplication_rate: 0.0,
                 deletion_rate: 0.0,
                 inversion_rate: 0.0,
                 max_duplications: None,
-                duplication_insertion_prob: 0.5,
             },
             StructureMutationMap {
                 duplication_rate: 0.0,
                 deletion_rate: 0.0,
                 inversion_rate: 0.0,
                 max_duplications: None,
-                duplication_insertion_prob: 0.5,
             },
             StructureMutationMap {
                 duplication_rate: 0.0,
                 deletion_rate: 0.0,
                 inversion_rate: 0.0,
                 max_duplications: None,
-                duplication_insertion_prob: 0.5,
             },
         ]
     }
@@ -1001,7 +985,6 @@ mod tests {
         assert!(content.contains("sv_duplication_rate="));
         assert!(content.contains("sv_deletion_rate="));
         assert!(content.contains("sv_inversion_rate="));
-        assert!(content.contains("sv_duplication_insertion_prob="));
 
         let _ = fs::remove_file(genome_output_path);
     }
