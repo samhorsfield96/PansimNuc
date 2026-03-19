@@ -9,6 +9,7 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 extern crate levenshtein;
 use levenshtein::levenshtein;
+use rand_distr::num_traits::float::TotalOrder;
 use std::collections::HashMap;
 
 // for a given NucElement, store its position in the genome
@@ -229,7 +230,7 @@ pub fn mutate_intra_genome(
     genome.update_contig_starts();
 }
 
-pub fn mutate_inter_genome(population: &mut Population) {
+pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize) {
     let mut thread_rng = rand::thread_rng();
 
     // get number of recombination events across whole population
@@ -252,6 +253,9 @@ pub fn mutate_inter_genome(population: &mut Population) {
             .or_default()
             .push(*recipient as usize);
     }
+
+    let mut total_donor_length = 0;
+    let mut total_recipient_length = 0;
 
     // iterate through each donor and recipient pair, in future make parallelisable by processing each independent recombination map separately
     for (donor, recipients) in recombination_map {
@@ -401,6 +405,9 @@ pub fn mutate_inter_genome(population: &mut Population) {
                 // store donor_track length before it is moved
                 let donor_track_len = donor_track.len();
 
+                total_donor_length += donor_track_len;
+                total_recipient_length += end_recipient_site - start_recipient_site + 1;
+
                 // update homology map for recipient genome, need to add new positions for each element in donor track, and remove old positions for each element in recipient track
                 // remove old positions
                 for element_idx in start_recipient_site..=end_recipient_site {
@@ -427,7 +434,8 @@ pub fn mutate_inter_genome(population: &mut Population) {
                 recipient_genome.update_contig_starts();
             }
         }
-    }
+    } 
+    (n_recombinations, total_donor_length, total_recipient_length)
 }
 
 #[cfg(test)]

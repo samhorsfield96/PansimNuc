@@ -487,7 +487,10 @@ impl Population {
 
     pub fn structural_inter_genome(&mut self) {
         // recombination
-        mutate_inter_genome(self);
+        let (n_recombinations, total_donor_length, total_recipient_length) = mutate_inter_genome(self);
+        println!("Total recombinations: {}", n_recombinations);
+        println!("Total donor length: {}", total_donor_length);
+        println!("Total recipient length: {}", total_recipient_length);
     }
 
     // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights
