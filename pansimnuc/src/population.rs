@@ -110,8 +110,6 @@ impl Population {
                 .expect("Entry missing from feature_map");
             let feature_map_entry_len = feature_map_entry.len();
 
-            println!("{}, {}, {}, {:?}", element_idx, element.element_id, &element.feature_type, &feature_map_entry);
-
             // get position of element in feature_map_entry
             let position = feature_map_entry
                 .iter()
