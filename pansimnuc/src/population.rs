@@ -529,10 +529,20 @@ impl Population {
     pub fn sample_individuals(&mut self, rng: &mut StdRng) -> Vec<usize> {
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
 
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("Selection pre-norm weights: {:?}", selection_weights);
+        }
+
         selection_weights = selection_weights
             .into_iter()
             .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
             .collect();
+
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("Selection post-norm weights: {:?}", selection_weights);
+        }
 
         let sum_weights: f64 = selection_weights.iter().sum();
         selection_weights = selection_weights
