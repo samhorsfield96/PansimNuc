@@ -399,11 +399,16 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                     let mut recipient_end_found = false;
                     while !recipient_end_found {
                         // run off end of contig, assume complete recombination
-                        if recipient_genome.seq[end_recipient_site].contig_id != recipient_contig_id
-                            || end_recipient_site >= recipient_genome.seq.len()
+                        if end_recipient_site >= recipient_genome.seq.len()
                         {
                             recipient_end_found = true;
                             break;
+                        } else {
+                            if recipient_genome.seq[end_recipient_site].contig_id != recipient_contig_id
+                            {
+                                recipient_end_found = true;
+                                break;
+                            }
                         }
 
                         let recipient_site = &recipient_genome.seq[end_recipient_site];
@@ -433,9 +438,16 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
 
                 // store donor_track length before it is moved
                 let donor_track_len = donor_track.len();
+                let donor_track_seq_len: usize = donor_track.iter().map(|e| e.seq.len()).sum();
 
-                total_donor_length += donor_track_len;
-                total_recipient_length += end_recipient_site - start_recipient_site + 1;
+                let recipient_track_seq_len: usize = recipient_genome.seq
+                    [start_recipient_site..=end_recipient_site]
+                    .iter()
+                    .map(|e| e.seq.len())
+                    .sum();
+
+                total_donor_length += donor_track_seq_len;
+                total_recipient_length += recipient_track_seq_len;
 
                 // update homology map for recipient genome, need to add new positions for each element in donor track, and remove old positions for each element in recipient track
                 // remove old positions
