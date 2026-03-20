@@ -673,7 +673,7 @@ impl Population {
 
             writeln!(writer, "##gff-version 3")?;
 
-            let genome_selection_coefficient = selection_weights[genome_index];
+            let genome_selection_coefficient = selection_weights[genome_index].ln();
             let mut contig_offsets: HashMap<usize, usize> = HashMap::new();
 
             for element in &genome.seq {
@@ -693,7 +693,7 @@ impl Population {
                     if log_element_selection_coefficient == std::f64::NEG_INFINITY {
                         0.0
                     } else {
-                        (log_element_selection_coefficient - logsumexp_value).exp() / sum_weights // exp(log(w) - logsumexp)
+                        ((log_element_selection_coefficient - logsumexp_value).exp() / sum_weights).ln() // exp(log(w) - logsumexp)
                     };
 
                 let seq_id = format!("contig_{}", element.contig_id + 1);
@@ -707,7 +707,7 @@ impl Population {
                     .unwrap_or_else(|| "none".to_string());
 
                 let attributes = format!(
-                    "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};genome_identifier={};parent={};multiplier={:.6};sequence_length={};genome_selection_coefficient={:.6};element_selection_coefficient={:.6};sv_duplication_rate={:.6};sv_deletion_rate={:.6};sv_inversion_rate={:.6};sv_max_duplications={}",
+                    "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};genome_identifier={};parent={};multiplier={:.6};sequence_length={};log_genome_selection_coefficient={:.6};log_element_selection_coefficient={:.6};sv_duplication_rate={:.6};sv_deletion_rate={:.6};sv_inversion_rate={:.6};sv_max_duplications={}",
                     genome.genome_id,
                     element.element_id,
                     element.feature_type,
@@ -1503,5 +1503,67 @@ mod tests {
         let (broken, multiplier) = check_feature_one_intron(&pop, &genome);
         assert!(!broken);
         assert!(multiplier == 1.0);
+    }
+
+    fn make_test_element_with_coefficients(
+        seq: Vec<u8>,
+        coefficients: &[(usize, u8, f64)],
+    ) -> NucElement {
+        let mut rng: StdRng = StdRng::seed_from_u64(99);
+        let seed_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create uniform distribution for seeded mutation map");
+        let mut mutation_map = MutationMap::new(0, 0, &seq, &seed_dist, &mut rng);
+
+        for (site, allele, coeff) in coefficients {
+            mutation_map.set_for_test(*allele, *site, *coeff);
+        }
+
+        NucElement {
+            contig_id: 0,
+            element_id: 0,
+            feature_id: 0,
+            feature_type: "exon".to_string(),
+            multiplier: 1.0,
+            seq,
+            mutation_map,
+            strand: true,
+            structure_mutation_map: StructureMutationMap {
+                duplication_rate: 0.0,
+                deletion_rate: 0.0,
+                inversion_rate: 0.0,
+                max_duplications: None,
+            },
+        }
+    }
+
+    #[test]
+    fn test_element_selection_coefficient_returns_negative_infinity_when_any_site_is_minus_one() {
+        let coefficients = vec![(0, 1, 0.2), (1, 2, -1.0), (2, 4, 0.5)];
+        let element = make_test_element_with_coefficients(
+            vec![1, 2, 4],
+            &coefficients,
+        );
+
+        let log_sum = element.element_selection_coefficient("test-genome");
+        assert_eq!(log_sum, std::f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn test_element_selection_coefficient_is_deterministic_for_predefined_coefficients() {
+        let coefficients = vec![(0, 1, 0.2), (1, 2, 0.5), (2, 4, 0.1)];
+        let element = make_test_element_with_coefficients(
+            vec![1, 2, 4],
+            &coefficients,
+        );
+
+        let val1 = 1.0 + coefficients[0].2; // 1.0 + 0.2
+        let val2 = 1.0 + coefficients[1].2; // 1.0 + 0.5
+        let val3 = 1.0 + coefficients[2].2; // 1.0 + 0.1 
+
+        let expected = val1.ln() + val2.ln() + val3.ln();
+
+        let log_sum = element.element_selection_coefficient("test-genome");
+
+        assert!(log_sum == expected);
     }
 }

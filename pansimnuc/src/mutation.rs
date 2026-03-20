@@ -501,6 +501,11 @@ impl MutationMap {
         self.data[allele_index].get(&key)
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_for_test(&mut self, level: u8, key: usize, value: f64) {
+        self.insert(level, key, value);
+    }
+
     pub fn mutate(
         &mut self,
         core_vec: &Vec<Vec<u8>>,
