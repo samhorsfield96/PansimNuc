@@ -16,3 +16,6 @@ statrs = "0.16"
 levenshtein = "1.0.5"
 petgraph = "0.8.3"
 itertools = "0.14.0"
+
+[profile.release]
+debug = true
