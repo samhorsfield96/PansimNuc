@@ -51,6 +51,7 @@ impl NucElement {
     }
 }
 
+#[derive(Clone)]
 pub struct Genome {
     pub identifier: String,
     pub genome_id: usize,
@@ -108,6 +109,8 @@ impl Population {
                 .get(&element.feature_id)
                 .expect("Entry missing from feature_map");
             let feature_map_entry_len = feature_map_entry.len();
+
+            println!("{}, {}, {}, {:?}", element_idx, element.element_id, &element.feature_type, &feature_map_entry);
 
             // get position of element in feature_map_entry
             let position = feature_map_entry
@@ -741,6 +744,8 @@ impl Population {
 
 #[cfg(test)]
 mod tests {
+    use noodles_gff::feature;
+
     use super::*;
     use crate::gff::FeaturePos;
     use std::fs;
@@ -1308,7 +1313,6 @@ mod tests {
             default_structural_dists(),
             10, // max_multiplier_dist
             multiplier_dists,
-
             &mut rng,
         )
     }
@@ -1506,6 +1510,7 @@ mod tests {
     }
 
     fn make_test_element_with_coefficients(
+        feature_id: usize,
         seq: Vec<u8>,
         coefficients: &[(usize, u8, f64)],
     ) -> NucElement {
@@ -1521,7 +1526,7 @@ mod tests {
         NucElement {
             contig_id: 0,
             element_id: 0,
-            feature_id: 0,
+            feature_id: feature_id,
             feature_type: "exon".to_string(),
             multiplier: 1.0,
             seq,
@@ -1540,6 +1545,7 @@ mod tests {
     fn test_element_selection_coefficient_returns_negative_infinity_when_any_site_is_minus_one() {
         let coefficients = vec![(0, 1, 0.2), (1, 2, -1.0), (2, 4, 0.5)];
         let element = make_test_element_with_coefficients(
+            0,
             vec![1, 2, 4],
             &coefficients,
         );
@@ -1552,6 +1558,7 @@ mod tests {
     fn test_element_selection_coefficient_is_deterministic_for_predefined_coefficients() {
         let coefficients = vec![(0, 1, 0.2), (1, 2, 0.5), (2, 4, 0.1)];
         let element = make_test_element_with_coefficients(
+            1,
             vec![1, 2, 4],
             &coefficients,
         );
@@ -1565,5 +1572,125 @@ mod tests {
         let log_sum = element.element_selection_coefficient("test-genome");
 
         assert!(log_sum == expected);
+    }
+
+    #[test]
+    fn test_genome_selection_coefficient_neg_infinity_on_lethal_mutation() {
+        let pop = make_check_feature_order_population();
+
+        let neutral = {
+            let mut e = make_test_element_with_coefficients(1,vec![1u8], &[(0, 1u8, 0.0)]);
+            e.feature_type = "intergenic".to_string();
+            e
+        };
+        let lethal = {
+            let mut e = make_test_element_with_coefficients(2,vec![2u8], &[(0, 2u8, -1.0)]);
+            e.feature_type = "intergenic".to_string();
+            e
+        };
+
+        let genome = genome_from_seq(vec![neutral, lethal]);
+        assert_eq!(
+            pop.genome_selection_coefficient(&genome),
+            std::f64::NEG_INFINITY
+        );
+    }
+
+    #[test]
+    fn test_genome_selection_coefficient_correct_sum() {
+        let mut pop = make_check_feature_order_population();
+        // Override feature_map so feature_id=1 maps to a single exon (element_id=1)
+        pop.feature_map.insert(1, vec![1]);
+
+        let e1 = {
+            let mut e = make_test_element_with_coefficients(
+                0,
+                vec![1u8, 2u8],
+                &[(0, 1u8, 0.5), (1, 2u8, 0.3)],
+            );
+            e.feature_type = "intergenic".to_string();
+            e.element_id = 0;
+            e
+        };
+        let e2 = {
+            let mut e = make_test_element_with_coefficients(1,vec![4u8], &[(0, 4u8, 0.2)]);
+            e.feature_type = "exon".to_string();
+            e.element_id = 1;
+            e
+        };
+
+        let e1_val1: f64 = 1.0 + 0.5;
+        let e1_val2: f64 = 1.0 + 0.3;
+        let e1_val = e1_val1.ln() + e1_val2.ln(); // ln((1.0 + 0.5) * (1.0 + 0.3))
+        let e2_val1: f64 = 1.0 + 0.2;
+        let e2_val = e2_val1.ln(); // ln(1.2)
+
+        let genome = genome_from_seq(vec![e1, e2]);
+        let expected = e1_val + e2_val;
+        let actual = pop.genome_selection_coefficient(&genome);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_genome_selection_coefficient_applies_te_multiplier() {
+        let mut pop = make_check_feature_order_population();
+
+        let e1 = {
+            let mut e = make_test_element_with_coefficients(
+                0,
+                vec![1u8, 2u8],
+                &[(0, 1u8, 0.5), (1, 2u8, 0.3)],
+            );
+            e.feature_type = "intergenic".to_string();
+            e.element_id = 0;
+            e
+        };
+        let e2 = {
+            let mut e = make_test_element_with_coefficients(1, vec![4u8], &[(0, 4u8, 0.2)]);
+            e.feature_type = "exon".to_string();
+            e.element_id = 1;
+            e
+        };
+
+        // Override feature_map: feature_id=1 is a single-exon gene with element_id=1
+        pop.feature_map.insert(1, vec![1]);
+
+        let e1_val1: f64 = 1.0 + 0.5;
+        let e1_val2: f64 = 1.0 + 0.3;
+        let e1_val = e1_val1.ln() + e1_val2.ln(); // ln((1.0 + 0.5) * (1.0 + 0.3))
+        let e2_val1: f64 = 1.0 + 0.2;
+        let e2_val = e2_val1.ln(); // ln(1.2)
+
+        // initial check of equivalence
+        let genome = genome_from_seq(vec![e1.clone(), e2.clone()]);
+        let expected_pre = e1_val + e2_val;
+        let actual_pre = pop.genome_selection_coefficient(&genome);
+        assert!(actual_pre == expected_pre);
+
+        // Insert a neutral TE-CUT (coeff=0, so te_coeff=0) directly between e1 and e2.
+        // Being 1 position upstream of the exon, its multiplier=2.0 scales e2's contribution.
+        let te = {
+            let mut e = make_test_element_with_coefficients(0, vec![1u8], &[(0, 1u8, 1.0)]);
+            e.feature_type = "TE-CUT".to_string();
+            e.element_id = 99_999;
+            e.multiplier = 2.0;
+            e
+        };
+        let seq_with_te = vec![e1.clone(), te, e2.clone()];
+        // feature_map is unchanged: feature_id=1 still maps to [element_id=1]
+        let genome_with_te = genome_from_seq(seq_with_te);
+
+        let te_val1: f64 = 1.0 + 1.0; // TE-CUT with coeff=1.0
+        let te_val = te_val1.ln(); // ln(2.0)
+
+        let coeff_with_te = pop.genome_selection_coefficient(&genome_with_te);
+
+        // te_coeff = ln(1.0) = 0.0; e2 is scaled by 2.0
+        let expected_with_te = e1_val + 0.0 + e2_val * 2.0 + te_val;
+        assert_eq!(
+            coeff_with_te as f32,
+            expected_with_te as f32,
+            "Expected e2 contribution to be scaled by TE multiplier"
+        );
     }
 }
