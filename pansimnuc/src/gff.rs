@@ -78,6 +78,7 @@ fn parse_earlgrey_intervals(
         let record: noodles_gff::feature::RecordBuf = result?;
         let seqname = record.reference_sequence_name().to_string();
         let Some(&contig_id) = contig_map.get(&seqname) else {
+            eprintln!("Warning: Contig {} in EarlGrey GFF not found in main GFF, skipping TE intervals on this contig", seqname);
             continue;
         };
 
@@ -447,6 +448,8 @@ pub fn read_gff_lines(
             });
 
             normalize_intergenic_features(results, seq);
+        } else {
+            panic!("Contig_ID {} in GFF has no corresponding sequence in FASTA", contig_id);
         }
     }
 
