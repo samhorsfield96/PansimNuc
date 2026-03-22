@@ -401,14 +401,17 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                         // run off end of contig, assume complete recombination
                         if end_recipient_site >= recipient_genome.seq.len()
                         {
+                            // reduce index by 1
+                            end_recipient_site -= 1;
+                            track_found = true;
                             recipient_end_found = true;
                             break;
-                        } else {
-                            if recipient_genome.seq[end_recipient_site].contig_id != recipient_contig_id
-                            {
-                                recipient_end_found = true;
-                                break;
-                            }
+                        } else if recipient_genome.seq[end_recipient_site].contig_id != recipient_contig_id {
+                            // reduce index by 1
+                            end_recipient_site -= 1;
+                            track_found = true;
+                            recipient_end_found = true;
+                            break;
                         }
 
                         let recipient_site = &recipient_genome.seq[end_recipient_site];
