@@ -513,19 +513,28 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
 
 #[cfg(test)]
 mod tests {
+    use std::default;
+
     use super::*;
     use crate::mutation::{Distribution as MutationDistribution, MutationMap};
     use crate::population::{Genome, NucElement};
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
+    fn default_structural_dists() -> Vec<Vec<MutationDistribution>> {
+        let mut structural_dists = Vec::new();
+        for _ in 0..5 {
+            structural_dists.push(vec![
+                MutationDistribution::new_poisson(1e-9).expect("Failed to create poisson distribution for duplication"),
+                MutationDistribution::new_poisson(1e-9).expect("Failed to create poisson distribution for deletions"),
+                MutationDistribution::new_poisson(1e-9).expect("Failed to create poisson distribution for inversions"),
+            ]);
+        }
+
+        structural_dists
+    }
+
     fn make_test_genome() -> Genome {
-        let base_map = StructureMutationMap {
-            duplication_rate: 0.0,
-            deletion_rate: 0.0,
-            inversion_rate: 0.0,
-            max_duplications: None,
-        };
         let mut rng = StdRng::seed_from_u64(42);
         let sel_dist = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
 
@@ -584,7 +593,6 @@ mod tests {
                             element_id: usize,
                             feature_id: usize,
                             strand: bool,
-                            base_map: &StructureMutationMap,
                             sel_dist: &MutationDistribution,
                             rng: &mut StdRng| NucElement {
             contig_id,
@@ -603,12 +611,12 @@ mod tests {
             parent: "root".to_string(),
             contig_starts: vec![0, 2, 4],
             seq: vec![
-                make_element(0, 0, 0, true, &base_map, &sel_dist, &mut rng),
-                make_element(0, 1, 1, false, &base_map, &sel_dist, &mut rng),
-                make_element(1, 2, 2, true, &base_map, &sel_dist, &mut rng),
-                make_element(1, 3, 3, false, &base_map, &sel_dist, &mut rng),
-                make_element(2, 4, 4, true, &base_map, &sel_dist, &mut rng),
-                make_element(2, 5, 5, false, &base_map, &sel_dist, &mut rng),
+                make_element(0, 0, 0, true, &sel_dist, &mut rng),
+                make_element(0, 1, 1, false, &sel_dist, &mut rng),
+                make_element(1, 2, 2, true, &sel_dist, &mut rng),
+                make_element(1, 3, 3, false, &sel_dist, &mut rng),
+                make_element(2, 4, 4, true, &sel_dist, &mut rng),
+                make_element(2, 5, 5, false, &sel_dist, &mut rng),
             ],
             seq_length: 0,
         }
@@ -620,12 +628,7 @@ mod tests {
         strand_seed: bool,
         marker_base: u8,
     ) -> Genome {
-        let base_map = StructureMutationMap {
-            duplication_rate: 0.0,
-            deletion_rate: 0.0,
-            inversion_rate: 0.0,
-            max_duplications: None,
-        };
+
         let mut rng = StdRng::seed_from_u64(100 + genome_id as u64);
         let sel_dist = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
 
@@ -679,6 +682,7 @@ mod tests {
             core_vec: vec![],
             selection_dists: vec![],
             mu_dists: vec![],
+            structural_mu_dists: vec![vec![]],
             recombination_dists: vec![recombination_count, recombination_len],
             recombination_threshold: 0.0,
             homology_map,
@@ -708,11 +712,10 @@ mod tests {
         let mut genome = make_test_genome();
         let before_strands: Vec<bool> = genome.seq.iter().map(|e| e.strand).collect();
 
-        for e in &mut genome.seq {
-            e.structure_mutation_map.inversion_rate = 1.0;
-        }
+        let mut default_structural_dists = default_structural_dists();
 
-        let mu = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
+        // update inversion rate to 1 for all elements, so that all elements are inverted
+        default_structural_dists[0][2] = MutationDistribution::new_uniform(1.0, 10.0).unwrap();
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
 
         let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
@@ -720,7 +723,7 @@ mod tests {
             homology_map.push(vec![vec![0]]);
         }
 
-        mutate_intra_genome(&mut genome, &mu, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
 
         let after_strands: Vec<bool> = genome.seq.iter().map(|e| e.strand).collect();
         assert_ne!(
@@ -739,18 +742,16 @@ mod tests {
         let mut genome = make_test_genome();
         let before_len = genome.seq.len();
 
-        for e in &mut genome.seq {
-            e.structure_mutation_map.deletion_rate = 1.0;
-        }
+        let mut default_structural_dists = default_structural_dists();
+        default_structural_dists[0][1] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
 
         let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
         for _ in genome.seq.iter() {
             homology_map.push(vec![vec![0]]);
         }
 
-        let mu = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
-        mutate_intra_genome(&mut genome, &mu, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
 
         assert!(
             genome.seq.len() < before_len,
@@ -768,13 +769,11 @@ mod tests {
         let before_len = genome.seq.len();
         let before_ids: Vec<usize> = genome.seq.iter().map(|e| e.feature_id).collect();
 
-        for e in &mut genome.seq {
-            // Exactly one duplication per element, then delete the original.
-            e.structure_mutation_map.duplication_rate = 1.0;
-            e.structure_mutation_map.max_duplications = Some(1);
-            e.structure_mutation_map.deletion_rate = 1.0;
-            e.structure_mutation_map.inversion_rate = 0.0;
-        }
+        let mut default_structural_dists = default_structural_dists();
+
+        // Exactly one duplication per element, then delete the original.
+        default_structural_dists[0][0] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
+        default_structural_dists[0][1] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
 
         let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
         for _ in genome.seq.iter() {
@@ -782,9 +781,8 @@ mod tests {
         }
 
         // Use a non-zero offset so duplicates land somewhere other than position 0.
-        let mu = MutationDistribution::new_uniform(0.0, 0.9).unwrap();
         let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
-        mutate_intra_genome(&mut genome, &mu, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
 
         assert_eq!(
             genome.seq.len(),
@@ -806,17 +804,13 @@ mod tests {
     fn multi_contig_ids_remain_in_ascending_order() {
         let mut genome = make_multi_contig_test_genome();
 
-        for e in &mut genome.seq {
-            e.structure_mutation_map.duplication_rate = 1.0;
-            e.structure_mutation_map.max_duplications = Some(1);
-            e.structure_mutation_map.deletion_rate = 0.0;
-            e.structure_mutation_map.inversion_rate = 0.0;
-        }
+        let mut default_structural_dists = default_structural_dists();
 
-        let mu = MutationDistribution::new_uniform(0.0, 0.9).unwrap();
+        default_structural_dists[0][0] = MutationDistribution::new_poisson(10.0).unwrap();
+
         let pos = MutationDistribution::new_uniform(0.0, 0.9).unwrap();
 
-        mutate_intra_genome(&mut genome, &mu, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
 
         let contig_ids: Vec<usize> = genome.seq.iter().map(|e| e.contig_id).collect();
         assert!(!contig_ids.is_empty(), "mutated genome should not be empty");
@@ -1012,22 +1006,9 @@ mod tests {
         );
     }
 
-    fn create_test_genomes(element_type: &str, duplication_rate: f64, deletion_rate: f64, inversion_rate: f64) -> Genome {
+    fn create_test_genomes(element_type: &str) -> Genome {
           // TE-CUT should: duplication -> break loop -> force delete original
         // Result: one copy at new position, original removed (cut-and-paste)
-        let base_map_TE = StructureMutationMap {
-            duplication_rate: duplication_rate,
-            deletion_rate: deletion_rate,
-            inversion_rate: inversion_rate,
-            max_duplications: Some(5),
-        };
-        let base_map = StructureMutationMap {
-            duplication_rate: 0.0,
-            deletion_rate: 0.0,
-            inversion_rate: 0.0,
-            max_duplications: Some(5),
-        };
-
         let mut rng = StdRng::seed_from_u64(42);
         let sel_dist = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
 
@@ -1045,7 +1026,6 @@ mod tests {
                 seq: vec![1, 2, 4, 8],
                 mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
                 strand: true,
-                structure_mutation_map: base_map_TE,
             },
             NucElement {
                 contig_id: 0,
@@ -1056,7 +1036,6 @@ mod tests {
                 seq: vec![1, 2, 4, 8],
                 mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
                 strand: true,
-                structure_mutation_map: base_map,
             }],
             seq_length: 0,
         };
@@ -1066,15 +1045,17 @@ mod tests {
     #[test]
     fn te_copy_allows_multiple_duplications() {
         // TE-COPY should allow multiple duplications without early break
-        let mut genome = create_test_genomes("TE-COPY", 1.0, 0.0, 0.0);
+        let mut genome = create_test_genomes("TE-COPY");
 
         let before_len = genome.seq.len();
+
+        let mut default_structural_dists = default_structural_dists();
         
         // High probability of duplication, zero deletion
-        let mu = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
+        default_structural_dists[4][0] = MutationDistribution::new_uniform(2.0, 2.1).unwrap();
         let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
         
-        mutate_intra_genome(&mut genome, &mu, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
         
         // TE-COPY should result in multiple copies (original + duplicates)
         assert!(
@@ -1098,14 +1079,17 @@ mod tests {
     fn te_cut_implements_cut_and_paste() {
         // TE-CUT should: duplication -> break loop -> force delete original
         // Result: one copy at new position, original removed (cut-and-paste)
-        let mut genome = create_test_genomes("TE-CUT", 1.0, 0.9, 0.0);
+        let mut genome = create_test_genomes("TE-CUT");
 
         let before_len = genome.seq.len();
+        let mut default_structural_dists = default_structural_dists();
         
-        let mu = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
+        // High probability of duplication, zero deletion
+        default_structural_dists[3][0] = MutationDistribution::new_uniform(2.0, 2.1).unwrap();
+        default_structural_dists[3][1] = MutationDistribution::new_uniform(2.0, 2.1).unwrap();
         let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
         
-        mutate_intra_genome(&mut genome, &mu, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
         
         // After cut-and-paste, genome should have same or fewer elements
         // (original deleted, one copy inserted)
@@ -1137,15 +1121,18 @@ mod tests {
     #[test]
     fn intergenic_allows_multiple_duplications_with_poisson_position() {
         // Non-TE features should allow multiple duplications and use Poisson for position
-        let mut genome: Genome = create_test_genomes("intergenic", 1.0, 0.0, 0.0);
+        let mut genome: Genome = create_test_genomes("intergenic");
 
         let before_len = genome.seq.len();
+
+        let mut default_structural_dists = default_structural_dists();
+        default_structural_dists[2][0] = MutationDistribution::new_uniform(2.0, 2.1).unwrap();
         
         // Use Poisson position distribution for non-TEs
         let mu = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
         let pos = MutationDistribution::new_poisson(1.5).unwrap();
         
-        mutate_intra_genome(&mut genome, &mu, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
         
         // Should have duplications
         assert!(
