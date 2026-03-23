@@ -212,13 +212,13 @@ fn main() {
                     // mutate population
                     for generation in 1..=n_generations {
                         // mutate at nucleotide level
-                        population.mutate();
+                        let total_sites = population.mutate();
 
                         // perform intragenome structural mutations
                         population.structural_intra_genome();
 
                         // perform intergenome structural mutations
-                        population.structural_inter_genome();
+                        population.structural_inter_genome(recombination_rate, total_sites, recombination_size_mean);
 
                         // sample next generation
                         let sampled_indices = population.sample_individuals(&mut rng);

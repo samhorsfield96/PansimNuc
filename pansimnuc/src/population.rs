@@ -455,7 +455,7 @@ impl Population {
     }
 
     // mutate individuals in the population according to their mutation maps and the provided distributions
-    pub fn mutate(&mut self) {
+    pub fn mutate(&mut self) -> usize {
         let core_vec = &self.core_vec;
         let selection_dists = &self.selection_dists;
         let mu_dists = &self.mu_dists;
@@ -480,6 +480,7 @@ impl Population {
             .sum();
 
         println!("Total mutated sites: {}", total_sites);
+        total_sites
     }
 
     pub fn update_mu_dists(&mut self, mu_dist_vals: &Vec<f64>) {
@@ -554,8 +555,11 @@ impl Population {
         }
     }
 
-    pub fn structural_inter_genome(&mut self) {
-        // recombination
+    pub fn structural_inter_genome(&mut self, recombination_rate: f64, total_sites: usize, recombination_size_mean: f64) {
+        // generate recombination distributions
+        self.recombination_dists[0] = MutationDistribution::new_poisson((recombination_rate * total_sites as f64) / recombination_size_mean)
+            .expect("Failed to create poisson distribution for recombination rates");
+
         let (n_recombinations, total_donor_length, total_recipient_length) = mutate_inter_genome(self);
         println!("Total recombinations: {}", n_recombinations);
         println!("Total donor length: {}", total_donor_length);
@@ -782,8 +786,6 @@ impl Population {
 
 #[cfg(test)]
 mod tests {
-    use noodles_gff::feature;
-
     use super::*;
     use crate::gff::FeaturePos;
     use std::fs;
