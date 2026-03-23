@@ -12,17 +12,16 @@ This is described by `mutation_rate`, and is measured in events per site per gen
 Each genome feature in the config can define its selection distribution with `selection_distribution`.
 Supported values are `normal`, `uniform`, `exp`, `double_exp`, and `poisson`.
 
+Each selection coefficient has a multiplicative effect of 1 + X on fitness, where X >= -1. 
 
 Required parameters by distribution:
 
 - `normal`: `selection_mean`, `selection_std_dev`
 - `uniform`: `selection_low`, `selection_high`
 - `exp`: `selection_lambda`
-- `double_exp`: `selection_lambda1`, `selection_lambda2`, `selection_cutoff`
+- `double_exp`: `selection_lambda1` (strenght of negative selection), `selection_lambda2` (strength of positive selection), `selection_cutoff` (proportion of positively selected genes)
 - `poisson`: `selection_lambda`
 - `gamma`: `selection_lamba`, `selection_shape`
-
-Legacy configs remain supported: `selection_coefficient=<lambda>` is treated as exponential shorthand.
 
 ## Intra-genomic variation
 
