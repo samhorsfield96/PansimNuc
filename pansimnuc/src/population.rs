@@ -586,31 +586,32 @@ impl Population {
     }
 
     pub fn next_generation(&mut self, sampled_indices: Vec<usize>) {
-        let mut new_pop: Vec<Genome> = Vec::new();
-        let mut new_homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
-        let mut genome_id = 0;
+        let new_pop: Vec<Genome> = sampled_indices
+            .par_iter()
+            .enumerate()
+            .map(|(genome_id, &selected_index)| {
+                let selected_genome = &self.pop[selected_index];
+                Genome {
+                    identifier: format!("{}-{}", self.generation + 1, selected_genome.identifier),
+                    genome_id,
+                    contig_starts: selected_genome.contig_starts.clone(),
+                    parent: selected_genome.identifier.clone(),
+                    seq: selected_genome.seq.clone(),
+                }
+            })
+            .collect();
 
-        // update genomes and homology map
-        for &selected_index in &sampled_indices {
-            let selected_genome = &self.pop[selected_index];
-            new_pop.push(Genome {
-                identifier: format!("{}-{}", self.generation + 1, selected_genome.identifier),
-                genome_id: genome_id,
-                contig_starts: selected_genome.contig_starts.clone(),
-                parent: selected_genome.identifier.clone(),
-                seq: selected_genome.seq.clone(),
-            });
-            genome_id += 1;
-        }
-
-        // update homology map
-        for element_homology_map in &self.homology_map {
-            let mut new_element_homology_map: Vec<Vec<usize>> = Vec::new();
-            for &selected_index in &sampled_indices {
-                new_element_homology_map.push(element_homology_map[selected_index].clone());
-            }
-            new_homology_map.push(new_element_homology_map);
-        }
+        let new_homology_map: Vec<Vec<Vec<usize>>> = self
+            .homology_map
+            .par_iter()
+            .map(|element_homology_map| {
+                let mut new_element_homology_map = Vec::with_capacity(sampled_indices.len());
+                for &selected_index in &sampled_indices {
+                    new_element_homology_map.push(element_homology_map[selected_index].clone());
+                }
+                new_element_homology_map
+            })
+            .collect();
 
         self.pop = new_pop;
         self.homology_map = new_homology_map;
