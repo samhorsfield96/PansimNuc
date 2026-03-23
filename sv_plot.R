@@ -1,28 +1,30 @@
 #!/usr/bin/env Rscript
-# sv_plot.R — Visualise PansimNuc structural variation with gggenomes
+# sv_plot.R — Progressive Mauve-style SV plot for PansimNuc
+#
+# Each genome is drawn as a single horizontal track. Contigs within each
+# genome are concatenated in numeric order with a small gap between them,
+# mirroring the Progressive Mauve display style. Homologous elements
+# (shared element_id) are connected by synteny ribbons across genomes.
 #
 # Usage:
-#   Rscript sv_plot.R <root.gff> <sim0.gff> [sim1.gff ...] \
-#                     [--out plot.pdf] [--width 16] [--height auto] \
-#                     [--types exon,intron,intergenic,TE-CUT,TE-COPY] \
-#                     [--link-types exon,intron] \
-#                     [--no-links]
+#   Rscript sv_plot.R <root.gff> <sim0.gff> [sim1.gff ...] [options]
 #
-# Arguments:
-#   root.gff      Root / reference GFF (first positional argument)
-#   sim*.gff      One or more simulation GFF files
-#   --out         Output file path (default: sv_plot.pdf)
-#   --width       Plot width in inches (default: 16)
-#   --height      Plot height in inches (default: auto based on genome count)
-#   --types       Comma-separated feature types to display (default: all)
-#   --link-types  Comma-separated feature types to draw links for (default: all)
-#   --no-links    Suppress synteny links entirely
+# Options:
+#   --out FILE       output file (default: sv_plot.pdf)
+#   --width N        plot width in inches (default: 16)
+#   --height N       plot height in inches (default: n_genomes x 2.5)
+#   --types T,...    comma-separated feature types to display (default: all)
+#   --link-types T,. comma-separated feature types to draw links for (default: all)
+#   --no-links       suppress synteny ribbons
+#   --gap N          bp gap inserted between contigs (default: 500)
 
 suppressPackageStartupMessages({
   library(gggenomes)
+  library(ggnewscale)
   library(dplyr)
   library(stringr)
   library(ggplot2)
+  library(scales)
 })
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -41,16 +43,13 @@ read_pansimnuc_gff <- function(path, bin_label) {
     warning("No records found in: ", path)
     return(NULL)
   }
-
-  line <- lines[1]
-  
   rows <- lapply(lines, function(line) {
     f <- strsplit(line, "\t", fixed = TRUE)[[1L]]
     if (length(f) < 9L) return(NULL)
     a <- parse_attrs(f[9L])
     data.frame(
       bin_id        = bin_label,
-      contig_id     = f[1L],
+      contig_name   = f[1L],
       start         = as.integer(f[4L]),
       end           = as.integer(f[5L]),
       strand        = f[7L],
@@ -63,62 +62,66 @@ read_pansimnuc_gff <- function(path, bin_label) {
       stringsAsFactors = FALSE
     )
   })
-  
-
   bind_rows(Filter(Negate(is.null), rows))
 }
 
 # ── CLI argument parsing ──────────────────────────────────────────────────────
 
-# args <- commandArgs(trailingOnly = TRUE)
-# 
-# if (length(args) < 2L) {
-#   cat(
-#     "Usage: Rscript sv_plot.R <root.gff> <sim0.gff> [sim1.gff ...]\n",
-#     "  [--out plot.pdf] [--width 16] [--height auto]\n",
-#     "  [--types exon,intron,intergenic,TE-CUT,TE-COPY]\n",
-#     "  [--link-types exon,intron] [--no-links]\n"
-#   )
-#   quit(status = 1L)
-# }
+args <- commandArgs(trailingOnly = TRUE)
 
-# # helper to consume a named flag and its value from args vector
-# take_flag <- function(flag, args, default = NULL) {
-#   i <- match(flag, args)
-#   if (is.na(i)) return(list(val = default, args = args))
-#   val  <- args[i + 1L]
-#   args <- args[-c(i, i + 1L)]
-#   list(val = val, args = args)
-# }
-# take_switch <- function(flag, args) {
-#   i <- match(flag, args)
-#   if (is.na(i)) return(list(val = FALSE, args = args))
-#   list(val = TRUE, args = args[-i])
-# }
-# 
-# r <- take_flag("--out",        args, "sv_plot.pdf"); out_file   <- r$val; args <- r$args
-# r <- take_flag("--width",      args, "16");          p_width    <- as.numeric(r$val); args <- r$args
-# r <- take_flag("--height",     args, NULL);          p_height   <- if (is.null(r$val)) NULL else as.numeric(r$val); args <- r$args
-# r <- take_flag("--types",      args, NULL);          keep_types <- if (is.null(r$val)) NULL else strsplit(r$val, ",")[[1L]]; args <- r$args
-# r <- take_flag("--link-types", args, NULL);          link_types <- if (is.null(r$val)) NULL else strsplit(r$val, ",")[[1L]]; args <- r$args
-# r <- take_switch("--no-links", args);                no_links   <- r$val; args <- r$args
+if (length(args) < 2L) {
+  cat(
+    "Usage: Rscript sv_plot.R <root.gff> <sim0.gff> [sim1.gff ...]\n",
+    "  [--out sv_plot.pdf] [--width 16] [--height auto]\n",
+    "  [--types exon,intron,intergenic,TE-CUT,TE-COPY]\n",
+    "  [--link-types exon,intron] [--no-links] [--gap 500]\n"
+  )
+  quit(status = 1L)
+}
 
-# root_path <- args[1L]
-# sim_paths <- args[-1L]
+take_flag <- function(flag, args, default = NULL) {
+  i <- match(flag, args)
+  if (is.na(i)) return(list(val = default, args = args))
+  val  <- args[i + 1L]
+  args <- args[-c(i, i + 1L)]
+  list(val = val, args = args)
+}
+take_switch <- function(flag, args) {
+  i <- match(flag, args)
+  if (is.na(i)) return(list(val = FALSE, args = args))
+  list(val = TRUE, args = args[-i])
+}
+
+r <- take_flag("--out",        args, "sv_plot.pdf"); out_file   <- r$val; args <- r$args
+r <- take_flag("--width",      args, "16");          p_width    <- as.numeric(r$val); args <- r$args
+r <- take_flag("--height",     args, NULL);          p_height   <- if (is.null(r$val)) NULL else as.numeric(r$val); args <- r$args
+r <- take_flag("--types",      args, NULL);          keep_types <- if (is.null(r$val)) NULL else strsplit(r$val, ",")[[1L]]; args <- r$args
+r <- take_flag("--link-types", args, NULL);          link_types <- if (is.null(r$val)) NULL else strsplit(r$val, ",")[[1L]]; args <- r$args
+r <- take_flag("--gap",        args, "500");         contig_gap <- as.integer(r$val); args <- r$args
+r <- take_switch("--no-links", args);                no_links   <- r$val; args <- r$args
+
+root_path <- args[1L]
+sim_paths <- args[-1L]
 
 # ── read data ─────────────────────────────────────────────────────────────────
 
 root_path <- "/Users/samhorsfield/Software/PansimNuc/output/root_test_output.gff"
+contig_gap <- 500
+no_links <- FALSE
+link_types <- "all"
+keep_types <- "all"
+p_width <- 16
+p_height <- 16
+out_file <- "/Users/samhorsfield/Software/PansimNuc/output/sv_plot.pdf"
 
 message("Reading root GFF: ", root_path)
 all_feats <- read_pansimnuc_gff(root_path, "root")
 
 sim_directory <- "/Users/samhorsfield/Software/PansimNuc/output"
-sim_paths <- list.files(sim.directory, pattern = "*.gff", full.names = TRUE)
-sim_paths <- sim.files[sim.files != root_path]
+sim_paths <- list.files(sim_directory, pattern = "*.gff", full.names = TRUE)
+sim_paths <- sim_paths[sim_paths != root_path]
 
-i <- 1
-for (i in seq_along(sim.paths)) {
+for (i in seq_along(sim_paths)) {
   filename <- basename(sim_paths[i])
   label <- as.character(as.numeric(gsub("([0-9]+).*$", "\\1", filename)))
   message("Reading ", label, ": ", sim_paths[i])
@@ -130,45 +133,99 @@ if (is.null(all_feats) || nrow(all_feats) == 0L) {
   stop("No features loaded. Check that the GFF files are valid PansimNuc output.")
 }
 
-# Filter to requested feature types
 # if (!is.null(keep_types)) {
 #   all_feats <- filter(all_feats, feature_type %in% keep_types)
 # }
 
+# ── linearize contigs (Progressive Mauve style) ──────────────────────────────
+# Within each genome, sort contigs by their numeric suffix (contig_1 < contig_2
+# < ...), concatenate them end-to-end with `contig_gap` bp between each pair,
+# and shift all feature coordinates into that linearized space. Each genome
+# becomes a single seq_id so gggenomes draws it as one track.
+
+# Per-contig length and numeric sort key
+contig_info <- all_feats |>
+  mutate(contig_num = as.integer(str_extract(contig_name, "[0-9]+"))) |>
+  group_by(bin_id, contig_name, contig_num) |>
+  summarise(contig_len = max(end), .groups = "drop") |>
+  arrange(bin_id, contig_num)
+
+# Cumulative left-edge offset within each genome
+contig_info <- contig_info |>
+  group_by(bin_id) |>
+  mutate(
+    offset      = cumsum(lag(contig_len + contig_gap, default = 0L)),
+    contig_rank = row_number()          # alternating shade index
+  ) |>
+  ungroup()
+
+# Contig block rectangles for background shading
+contig_blocks <- contig_info |>
+  transmute(
+    bin_id,
+    seq_id       = bin_id,
+    start        = offset + 1L,
+    end          = offset + contig_len,
+    contig_name,
+    contig_shade = factor((contig_rank - 1L) %% 2L)  # "0" / "1" alternating
+  )
+
+# Shift all feature coordinates into linearized space
+all_feats <- all_feats |>
+  mutate(contig_num = as.integer(str_extract(contig_name, "[0-9]+"))) |>
+  left_join(select(contig_info, bin_id, contig_name, offset),
+            by = c("bin_id", "contig_name")) |>
+  mutate(
+    seq_id = bin_id,
+    start  = start + offset,
+    end    = end   + offset
+  )
+
 # ── seqs table ────────────────────────────────────────────────────────────────
-# One row per contig per genome: seq_id, bin_id, length
+# One row per genome, ordered root first then numerically by genome index.
 
 seqs <- all_feats |>
-  group_by(bin_id, seq_id) |>
-  summarise(length = max(end), .groups = "drop")
+  group_by(bin_id) |>
+  summarise(seq_id = first(bin_id), length = max(end), .groups = "drop") |>
+  mutate(
+    sort_key = if_else(
+      bin_id == "root", -1L,
+      suppressWarnings(as.integer(str_extract(bin_id, "[0-9]+")))
+    )
+  ) |>
+  arrange(sort_key) |>
+  select(-sort_key)
 
 # ── links table ───────────────────────────────────────────────────────────────
-# For each element_id, connect every root occurrence to every simulated
-# occurrence. This exposes duplications (multiple copies in a derived genome)
-# as well as translocations (changed position) and inversions (changed strand).
+# Connect every root element to matching elements in simulated genomes via
+# element_id. Crossed links = translocations; fan-out = duplications;
+# absent link = deletion.
 
 if (!no_links) {
   root_anchors <- all_feats |>
     filter(bin_id == "root") |>
-    select(seq_id1 = seq_id, start1 = start, end1 = end, element_id, feature_type)
+    select(seq_id1 = seq_id, start1 = start, end1 = end,
+           strand1 = strand, element_id, feature_type)
 
-  sim_anchors <- all_feats |>
-    filter(bin_id != "root") |>
-    select(seq_id2 = seq_id, start2 = start, end2 = end, element_id)
-
-  # Restrict links to requested feature types (useful to reduce clutter)
   if (!is.null(link_types)) {
     root_anchors <- filter(root_anchors, feature_type %in% link_types)
   }
 
+  sim_anchors <- all_feats |>
+    filter(bin_id != "root") |>
+    select(seq_id2 = seq_id, start2 = start, end2 = end,
+           strand2 = strand, element_id)
+
   links <- inner_join(root_anchors, sim_anchors,
                       by = "element_id",
-                      relationship = "many-to-many")
+                      relationship = "many-to-many") |>
+    select(seq_id1, start1, end1, strand1,
+           seq_id2, start2, end2, strand2, feature_type)
 } else {
   links <- NULL
 }
 
-# ── feature colour palette ────────────────────────────────────────────────────
+# ── colour palette ────────────────────────────────────────────────────────────
 
 feature_colors <- c(
   exon       = "#4DAF4A",
@@ -177,53 +234,88 @@ feature_colors <- c(
   "TE-CUT"   = "#E41A1C",
   "TE-COPY"  = "#FF7F00"
 )
-
-# Expand palette for any feature types not listed above
 extra_types <- setdiff(unique(all_feats$feature_type), names(feature_colors))
 if (length(extra_types) > 0L) {
-  extra_cols <- setNames(
-    scales::hue_pal()(length(extra_types)),
-    extra_types
+  feature_colors <- c(
+    feature_colors,
+    setNames(hue_pal()(length(extra_types)), extra_types)
   )
-  feature_colors <- c(feature_colors, extra_cols)
 }
 
 # ── plot dimensions ───────────────────────────────────────────────────────────
 
-n_bins <- length(unique(all_feats$bin_id))
-if (is.null(p_height)) p_height <- max(4, n_bins * 2.5)
+n_bins <- nrow(seqs)
+if (is.null(p_height)) p_height <- max(4.0, n_bins * 2.5)
 
 # ── build gggenomes plot ──────────────────────────────────────────────────────
 
 if (!no_links && !is.null(links) && nrow(links) > 0L) {
-  p <- gggenomes(seqs = seqs, genes = all_feats, links = links)
+  p <- gggenomes(
+    seqs  = seqs,
+    genes = all_feats,
+    links = links,
+    feats = list(contigs = contig_blocks)
+  )
 } else {
-  p <- gggenomes(seqs = seqs, genes = all_feats)
+  p <- gggenomes(
+    seqs  = seqs,
+    genes = all_feats,
+    feats = list(contigs = contig_blocks)
+  )
 }
 
+# Layer 1 — alternating contig background shading
+p <- p +
+  geom_feat(
+    data        = feats("contigs"),
+    aes(fill    = contig_shade),
+    alpha       = 0.12,
+    linewidth   = NA,
+    show.legend = FALSE
+  ) +
+  scale_fill_manual(
+    values = c("0" = "#AAAAAA", "1" = "#555555"),
+    guide  = "none"
+  ) +
+  new_scale_fill()
+
+# Layer 2 — sequence backbone and genome labels
 p <- p +
   geom_seq() +
   geom_seq_label()
 
+# Layer 3 — synteny ribbons coloured by feature type
 if (!no_links && !is.null(links) && nrow(links) > 0L) {
-  p <- p + geom_link(aes(fill = feature_type), alpha = 0.35)
+  p <- p +
+    geom_link(
+      aes(fill = feature_type),
+      alpha  = 0.28
+    ) +
+    scale_fill_manual(
+      values = feature_colors, na.value = "grey60",
+      name   = "Feature type"
+    ) +
+    new_scale_fill()
 }
 
+# Layer 4 — gene features
 p <- p +
-  geom_gene(aes(fill = feature_type), size = 3) +
-  scale_fill_manual(values = feature_colors, na.value = "grey60") +
+  geom_gene(aes(fill = feature_type)) +
+  scale_fill_manual(
+    values = feature_colors, na.value = "grey60",
+    name   = "Feature type"
+  ) +
   labs(
     title    = "PansimNuc structural variation",
     subtitle = sprintf(
-      "%d simulated genome(s) vs root | linked by element_id",
-      length(sim_paths)
-    ),
-    fill = "Feature type"
+      "%d genome(s) | contigs linearized in numeric order | elements linked by element_id",
+      n_bins
+    )
   ) +
   theme_gggenomes_clean()
 
 # ── save ──────────────────────────────────────────────────────────────────────
 
-message(sprintf("Writing %s (%.0f x %.0f in)", out_file, p_width, p_height))
+message(sprintf("Writing %s  (%.0f x %.0f in)", out_file, p_width, p_height))
 ggsave(out_file, p, width = p_width, height = p_height)
 message("Done.")
