@@ -313,7 +313,7 @@ impl Population {
         root: Vec<Vec<FeaturePos>>,
         n_genomes: usize,
         selection_dists: Vec<MutationDistribution>,
-        mu_dist_vals: Vec<f64>,
+        mu_dist_vals: &Vec<f64>,
         recombination_dists: Vec<MutationDistribution>,
         recombination_threshold: f64,
         structural_dists: Vec<StructureMutationMap>,
@@ -489,6 +489,21 @@ impl Population {
             .sum();
 
         println!("Total mutated sites: {}", total_sites);
+    }
+
+    pub fn update_mu_dists(&mut self, mu_dist_vals: &Vec<f64>) {
+        let total_length = self.total_seq_length() as f64;
+        let n_genomes = self.pop.len() as f64;
+        let n_generations = self.n_generations as f64;
+
+        let new_mu_dists: Vec<MutationDistribution> = mu_dist_vals
+            .into_iter()
+            .map(|mu| {
+                MutationDistribution::new_poisson(mu * total_length * n_genomes * n_generations)
+                    .expect("Failed to create poisson distribution for mutation rates")
+            })
+            .collect();
+        self.mu_dists = new_mu_dists;
     }
 
     pub fn structural_intra_genome(&mut self) {
@@ -885,7 +900,7 @@ mod tests {
             root,
             n_genomes,
             site_mutation_dists,
-            site_mutation_mus,
+            &site_mutation_mus,
             recombination_dists,
             1.0,
             default_structural_dists(),
@@ -959,7 +974,7 @@ mod tests {
             root,
             1,
             site_mutation_dists,
-            site_mutation_mus,
+            &site_mutation_mus,
             recombination_dists,
             1.0,
             default_structural_dists(),
@@ -1038,7 +1053,7 @@ mod tests {
             root,
             1,
             site_mutation_dists,
-            site_mutation_mus,
+            &site_mutation_mus,
             recombination_dists,
             1.0,
             default_structural_dists(),
@@ -1125,7 +1140,7 @@ mod tests {
             root,
             1,
             site_mutation_dists,
-            site_mutation_mus,
+            &site_mutation_mus,
             recombination_dists,
             1.0,
             default_structural_dists(),
@@ -1205,7 +1220,7 @@ mod tests {
             root,
             3,
             site_mutation_dists,
-            site_mutation_mus,
+            &site_mutation_mus,
             recombination_dists,
             1.0,
             default_structural_dists(),
@@ -1337,7 +1352,7 @@ mod tests {
             root,
             1,
             site_mutation_dists,
-            site_mutation_mus,
+            &site_mutation_mus,
             recombination_dists,
             1.0,
             default_structural_dists(),

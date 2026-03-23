@@ -199,7 +199,7 @@ fn main() {
                         features,
                         n_individuals,
                         site_mutation_dists,
-                        site_mutation_mus_vals,
+                        &site_mutation_mus_vals,
                         recombination_dists,
                         recombination_threshold,
                         structural_dists,
@@ -225,6 +225,10 @@ fn main() {
                         let sampled_indices = population.sample_individuals(&mut rng);
                         population.next_generation(sampled_indices);
                         eprintln!("Finished generation {generation}");
+
+                        if generation < n_generations {
+                            population.update_mu_dists(&site_mutation_mus_vals);
+                        }
                     }
 
                     println!("Writing output...");
