@@ -443,18 +443,29 @@ impl Population {
 
     // mutate individuals in the population according to their mutation maps and the provided distributions
     pub fn mutate(&mut self) {
-        let mut total_sites = 0;
-        for genome in &mut self.pop {
-            for element in &mut genome.seq {
-                let n_sites = element.mutation_map.mutate(
-                    &self.core_vec,
-                    &mut element.seq,
-                    &self.selection_dists[element.mutation_map.selection_dist_id],
-                    &self.mu_dists[element.mutation_map.mu_dist_id],
-                );
-                total_sites += n_sites;
-            }
-        }
+        let core_vec = &self.core_vec;
+        let selection_dists = &self.selection_dists;
+        let mu_dists = &self.mu_dists;
+
+        let total_sites: usize = self
+            .pop
+            .par_iter_mut()
+            .map(|genome| {
+                genome
+                    .seq
+                    .iter_mut()
+                    .map(|element| {
+                        element.mutation_map.mutate(
+                            core_vec,
+                            &mut element.seq,
+                            &selection_dists[element.mutation_map.selection_dist_id],
+                            &mu_dists[element.mutation_map.mu_dist_id],
+                        )
+                    })
+                    .sum::<usize>()
+            })
+            .sum();
+
         println!("Total mutated sites: {}", total_sites);
     }
 
