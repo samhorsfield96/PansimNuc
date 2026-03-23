@@ -28,3 +28,4 @@ pixi.lock
 # Added by cargo
 
 /target
+.Rproj.user

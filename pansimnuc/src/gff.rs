@@ -480,7 +480,6 @@ pub fn read_gff_lines(
     Ok(features)
 }
 
-#[cfg(debug_assertions)]
 pub fn write_root_genome_gff(features: &[Vec<FeaturePos>], output_path: &str) -> io::Result<()> {
     let file = File::create(output_path)?;
     let mut writer = BufWriter::new(file);

@@ -11,7 +11,6 @@ use crate::mutation::Distribution;
 use clap::Parser;
 use config::Config;
 use gff::read_gff_lines;
-#[cfg(debug_assertions)]
 use gff::write_root_genome_gff;
 use itertools::Itertools;
 use population::Population;
@@ -99,19 +98,17 @@ fn main() {
             Ok(features) => {
                 println!("Loaded {} contigs with features", features.len());
 
-                #[cfg(debug_assertions)]
-                {
-                    let root_gff_path = configuration
-                        .get("output.root_gff_file")
-                        .cloned()
-                        .unwrap_or_else(|| "root_genome.debug.gff3".to_string());
+                let root_gff_path = configuration
+                    .get("output.root_gff_file")
+                    .cloned()
+                    .unwrap_or_else(|| "root_genome.debug.gff3".to_string());
 
-                    if let Err(err) = write_root_genome_gff(&features, &root_gff_path) {
-                        eprintln!("Failed to write debug root genome GFF: {err}");
-                    } else {
-                        println!("Wrote debug root genome GFF: {}", root_gff_path);
-                    }
+                if let Err(err) = write_root_genome_gff(&features, &root_gff_path) {
+                    eprintln!("Failed to write debug root genome GFF: {err}");
+                } else if verbose {
+                    println!("Wrote debug root genome GFF: {}", root_gff_path);
                 }
+
 
                 if let (Some(n_individuals_str), Some(n_generation_str)) = (
                     configuration.get("population.n_individuals"),
