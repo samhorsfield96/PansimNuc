@@ -58,18 +58,22 @@ pub struct Genome {
     pub contig_starts: Vec<usize>,
     pub parent: String,
     pub seq: Vec<NucElement>,
+    pub seq_length: usize,
 }
 
 impl Genome {
     pub fn update_contig_starts(&mut self) {
         self.contig_starts.clear();
         let mut current_start = 0;
+        let mut total_length = 0;
         for (idx, element) in self.seq.iter().enumerate() {
             if idx == 0 || element.contig_id != self.seq[idx - 1].contig_id {
                 self.contig_starts.push(current_start);
                 current_start = idx;
             }
+            total_length += element.seq.len();
         }
+        self.seq_length = total_length;
     }
 }
 
@@ -87,6 +91,10 @@ pub struct Population {
 }
 
 impl Population {
+    fn total_seq_length(&self) -> usize {
+        self.pop.iter().map(|genome| genome.seq_length).sum()
+    }
+
     fn is_te_feature(feature_type: &str) -> bool {
         feature_type == "TE-CUT" || feature_type == "TE-COPY"
     }
@@ -418,6 +426,7 @@ impl Population {
                 contig_starts: Vec::new(), // will be updated after mutations
                 parent: "root".to_string(),
                 seq: genome.clone(),
+                seq_length: 0, // will be updated after mutations
             };
             genome_entry.update_contig_starts();
 
@@ -597,6 +606,7 @@ impl Population {
                     contig_starts: selected_genome.contig_starts.clone(),
                     parent: selected_genome.identifier.clone(),
                     seq: selected_genome.seq.clone(),
+                    seq_length: selected_genome.seq_length,
                 }
             })
             .collect();
@@ -1344,6 +1354,7 @@ mod tests {
             contig_starts: vec![0],
             parent: "test-parent".to_string(),
             seq,
+            seq_length: 0,
         }
     }
 

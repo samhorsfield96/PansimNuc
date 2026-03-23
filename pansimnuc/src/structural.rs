@@ -562,6 +562,7 @@ mod tests {
                     structure_mutation_map: base_map,
                 },
             ],
+            seq_length: 0,
         }
     }
 
@@ -606,6 +607,7 @@ mod tests {
                 make_element(2, 4, 4, true, &base_map, &sel_dist, &mut rng),
                 make_element(2, 5, 5, false, &base_map, &sel_dist, &mut rng),
             ],
+            seq_length: 0,
         }
     }
 
@@ -650,6 +652,7 @@ mod tests {
             parent: "root".to_string(),
             contig_starts: vec![0],
             seq,
+            seq_length: 0,
         }
     }
 
@@ -1052,6 +1055,7 @@ mod tests {
                 strand: true,
                 structure_mutation_map: base_map,
             }],
+            seq_length: 0,
         };
         genome
     }
