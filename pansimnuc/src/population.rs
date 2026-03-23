@@ -750,14 +750,9 @@ impl Population {
                 let start_1based = start_0 + 1;
                 let end_1based = end_0;
                 let strand = if element.strand { "+" } else { "-" };
-                let max_duplications = element
-                    .structure_mutation_map
-                    .max_duplications
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "none".to_string());
 
                 let attributes = format!(
-                    "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};genome_identifier={};parent={};multiplier={:.6};sequence_length={};log_genome_selection_coefficient={:.6};log_element_selection_coefficient={:.6};sv_duplication_rate={:.6};sv_deletion_rate={:.6};sv_inversion_rate={:.6};sv_max_duplications={}",
+                    "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};genome_identifier={};parent={};multiplier={:.6};sequence_length={};log_genome_selection_coefficient={:.6};log_element_selection_coefficient={:.6}",
                     genome.genome_id,
                     element.element_id,
                     element.feature_type,
@@ -769,10 +764,6 @@ impl Population {
                     element.seq.len(),
                     genome_selection_coefficient,
                     element_selection_coefficient,
-                    element.structure_mutation_map.duplication_rate,
-                    element.structure_mutation_map.deletion_rate,
-                    element.structure_mutation_map.inversion_rate,
-                    max_duplications,
                 );
 
                 writeln!(
@@ -798,39 +789,17 @@ mod tests {
     use std::fs;
     use std::io::Read;
 
-    fn default_structural_dists() -> Vec<StructureMutationMap> {
-        vec![
-            StructureMutationMap {
-                duplication_rate: 0.0,
-                deletion_rate: 0.0,
-                inversion_rate: 0.0,
-                max_duplications: None,
-            },
-            StructureMutationMap {
-                duplication_rate: 0.0,
-                deletion_rate: 0.0,
-                inversion_rate: 0.0,
-                max_duplications: None,
-            },
-            StructureMutationMap {
-                duplication_rate: 0.0,
-                deletion_rate: 0.0,
-                inversion_rate: 0.0,
-                max_duplications: None,
-            },
-            StructureMutationMap {
-                duplication_rate: 0.0,
-                deletion_rate: 0.0,
-                inversion_rate: 0.0,
-                max_duplications: None,
-            },
-            StructureMutationMap {
-                duplication_rate: 0.0,
-                deletion_rate: 0.0,
-                inversion_rate: 0.0,
-                max_duplications: None,
-            },
-        ]
+    fn default_structural_dists() -> Vec<Vec<MutationDistribution>> {
+        let mut structural_dists = Vec::new();
+        for _ in 0..5 {
+            structural_dists.push(vec![
+                MutationDistribution::new_poisson(0.1).expect("Failed to create poisson distribution for duplication"),
+                MutationDistribution::new_poisson(0.1).expect("Failed to create poisson distribution for deletions"),
+                MutationDistribution::new_poisson(0.1).expect("Failed to create poisson distribution for inversions"),
+            ]);
+        }
+
+        structural_dists
     }
 
     #[test]
@@ -1078,9 +1047,6 @@ mod tests {
         assert!(content.contains("sequence_length=4"));
         assert!(content.contains("genome_selection_coefficient="));
         assert!(content.contains("element_selection_coefficient="));
-        assert!(content.contains("sv_duplication_rate="));
-        assert!(content.contains("sv_deletion_rate="));
-        assert!(content.contains("sv_inversion_rate="));
 
         let _ = fs::remove_file(genome_output_path);
     }
@@ -1568,12 +1534,6 @@ mod tests {
             seq,
             mutation_map,
             strand: true,
-            structure_mutation_map: StructureMutationMap {
-                duplication_rate: 0.0,
-                deletion_rate: 0.0,
-                inversion_rate: 0.0,
-                max_duplications: None,
-            },
         }
     }
 
