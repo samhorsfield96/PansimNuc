@@ -289,6 +289,8 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
     let mut total_recipient_length = 0;
 
     // iterate through each donor and recipient pair, in future make parallelisable by processing each independent recombination map separately
+    let mut successful_recombinations = 0;
+
     for (donor, recipients) in recombination_map {
         for recipient in recipients {
             println!(
@@ -305,21 +307,21 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                 (&right[0], &mut left[recipient])
             };
 
-            // look for donor and recipient site, maximum 25 attempts, if not found, skip recombination event
+            // look for donor and recipient site, maximum total donor length attempts, if not found, skip recombination event
             let mut donor_site_chosen: bool = false;
             let mut attempts = 0;
-            let max_attempts = 25;
+
+            // set up sampling with replacement
+            let mut indices: Vec<usize> = (0..donor_genome.seq.len()).collect();
+            indices.shuffle(&mut thread_rng);
 
             let mut start_donor_site: usize = 0;
             let mut start_recipient_site: usize = 0;
 
-            println!(
-                "Finding donor and recipient sites: Donor genome: {}, Recipient genome: {}",
-                donor_genome.genome_id, recipient_genome.genome_id
-            );
-
-            while !donor_site_chosen && attempts < max_attempts {
-                let recombination_pos = thread_rng.gen_range(0..donor_genome.seq.len());
+            for recombination_pos in indices {
+                if donor_site_chosen {
+                    break;
+                }
                 let recombination_pos_idx = donor_genome.seq[recombination_pos].element_id;
 
                 // determine if position in both donor and recipient genome, if not, resample
@@ -357,11 +359,6 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                 attempts += 1;
             }
 
-            println!(
-                "Donor genome: {}, Recipient genome: {}, Donor site chosen: {}, Attempts: {}",
-                donor_genome.genome_id, recipient_genome.genome_id, donor_site_chosen, attempts
-            );
-
             if donor_site_chosen {
                 // now sample from poisson distribution to determine minumum size of recombination track
                 let min_recombination_len =
@@ -378,11 +375,6 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                 let recipient_contig_id = recipient_genome.seq[start_recipient_site].contig_id;
 
                 while !track_found {
-                    println!(
-                        "Donor genome: {}, Recipient genome: {}, Start donor site: {}, Start recipient site: {}, Recombination length: {}, Minimum recombination length: {} ",
-                        donor_genome.genome_id, recipient_genome.genome_id, start_donor_site, start_recipient_site, recombination_len, min_recombination_len
-                    );
-
                     // determine length of donor DNA
                     while recombination_len < min_recombination_len {
                         let new_end_donor_site = end_donor_site + 1;
@@ -451,11 +443,6 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                     }
                 }
 
-                println!(
-                    "Final donor site: {}, Final recipient site: {}, Recombination length: {}",
-                    end_donor_site, end_recipient_site, recombination_len
-                );
-
                 // perform recombination event, replacing recipient track with donor track
                 // clone the donor track first, before any mutable borrow of population.pop
                 let mut donor_track: Vec<NucElement> = donor_genome.seq
@@ -480,8 +467,7 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
 
                 total_donor_length += donor_track_seq_len;
                 total_recipient_length += recipient_track_seq_len;
-
-                println!{"Updating homology map..."};
+                successful_recombinations += 1;
 
                 // update homology map for recipient genome, need to add new positions for each element in donor track, and remove old positions for each element in recipient track
                 // remove old positions
@@ -497,7 +483,6 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                     .seq
                     .splice(start_recipient_site..=end_recipient_site, donor_track);
 
-                println!{"Adding new positions..."};
                 // add new positions
                 for element_idx in start_recipient_site..start_recipient_site + donor_track_len {
                     let element_id = recipient_genome.seq[element_idx].element_id;
@@ -505,20 +490,12 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                         &mut population.homology_map[element_id][recipient_genome.genome_id];
                     homology_group.push(element_idx); // add new position
                 }
-
-                println!{"Finished for donor genome: {}, recipient genome: {}", donor_genome.genome_id, recipient_genome.genome_id};
-
                 // update contig_ids
                 recipient_genome.update_contig_starts();
             }
-
-            println!(
-                "Donor genome: {}, Recipient genome: {} finished",
-                donor_genome.genome_id, recipient_genome.genome_id
-            );
         }
     } 
-    (n_recombinations, total_donor_length, total_recipient_length)
+    (successful_recombinations, total_donor_length, total_recipient_length)
 }
 
 #[cfg(test)]
