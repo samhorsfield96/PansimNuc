@@ -246,7 +246,7 @@ impl Population {
         (feature_broken, feature_multiplier)
     }
 
-    fn genome_output_path(output_path: &str, genome_index: usize) -> io::Result<PathBuf> {
+    fn genome_output_path(output_path: &str, prefix: &str) -> io::Result<PathBuf> {
         let path = Path::new(output_path);
         let file_name = path.file_name().ok_or_else(|| {
             io::Error::new(
@@ -255,7 +255,7 @@ impl Population {
             )
         })?;
 
-        let prefixed_name = format!("{genome_index}_{}", file_name.to_string_lossy());
+        let prefixed_name = format!("{}_{}", prefix, file_name.to_string_lossy());
         Ok(path.with_file_name(prefixed_name))
     }
 
@@ -669,7 +669,7 @@ impl Population {
 
     pub fn write_fasta(&self, output_path: &str) -> io::Result<()> {
         for (genome_index, genome) in self.pop.iter().enumerate() {
-            let genome_output_path = Self::genome_output_path(output_path, genome_index)?;
+            let genome_output_path = Self::genome_output_path(output_path, &genome_index.to_string())?;
             let file = File::create(&genome_output_path)?;
             let mut writer = BufWriter::new(file);
 
@@ -717,7 +717,7 @@ impl Population {
         Ok(())
     }
 
-    pub fn write_gff(&self, output_path: &str) -> io::Result<()> {
+    pub fn write_gff(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
         // calculate selection coefficients for all genomes once to avoid redundant calculations when writing attributes
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
 
@@ -739,7 +739,8 @@ impl Population {
             .collect();
 
         for (genome_index, genome) in self.pop.iter().enumerate() {
-            let genome_output_path = Self::genome_output_path(output_path, genome_index)?;
+            let prefix = if root_genome { "root" } else { &genome_index.to_string() };
+            let genome_output_path = Self::genome_output_path(output_path, prefix)?;
             let file = File::create(&genome_output_path)?;
             let mut writer = BufWriter::new(file);
 
@@ -796,6 +797,10 @@ impl Population {
             }
 
             writer.flush()?;
+
+            if root_genome {
+                break; // only write root genome if specified
+            }
         }
 
         Ok(())
@@ -972,7 +977,7 @@ mod tests {
                 .as_nanos()
         ));
         let output_path = temp_path.to_string_lossy().into_owned();
-        let genome_output_path = Population::genome_output_path(&output_path, 0)
+        let genome_output_path = Population::genome_output_path(&output_path, "0")
             .expect("failed to construct per-genome output path");
 
         pop.write_fasta(&output_path)
@@ -1052,10 +1057,10 @@ mod tests {
                 .as_nanos()
         ));
         let output_path = temp_path.to_string_lossy().into_owned();
-        let genome_output_path = Population::genome_output_path(&output_path, 0)
+        let genome_output_path = Population::genome_output_path(&output_path, "0")
             .expect("failed to construct per-genome output path");
 
-        pop.write_gff(&output_path)
+        pop.write_gff(&output_path, false)
             .expect("failed to write test GFF file");
 
         let mut content = String::new();
