@@ -156,7 +156,7 @@ impl Population {
             }
 
             // check downstream elements in feature_map_entry
-            if !feature_broken {
+            if !feature_broken && element_idx + 1 < genome.seq.len() {
                 for feature_element_idx in position + 1..feature_map_entry_len {
                     // get downstream feature in genome
                     let actual_element =
@@ -556,7 +556,9 @@ impl Population {
 
     pub fn structural_inter_genome(&mut self, recombination_rate: f64, total_sites: usize, recombination_size_mean: f64) {
         // generate recombination distributions
-        self.recombination_dists[0] = MutationDistribution::new_poisson((recombination_rate * total_sites as f64) / recombination_size_mean)
+        let average_recombinations_per_generation = (recombination_rate * total_sites as f64) / recombination_size_mean;
+        println!("Average recombinations per generation: {}", average_recombinations_per_generation);
+        self.recombination_dists[0] = MutationDistribution::new_poisson(average_recombinations_per_generation)
             .expect("Failed to create poisson distribution for recombination rates");
 
         let (n_recombinations, total_donor_length, total_recipient_length) = mutate_inter_genome(self);
