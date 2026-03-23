@@ -32,23 +32,24 @@ fn main() {
 
     let mut configuration: HashMap<String, String> = HashMap::new();
 
-    let mut verbose = false;
-    if let Some(verbose_str) = configuration.get("misc.verbose") {
-        verbose = verbose_str
-            .parse::<bool>()
-            .expect("verbose must be a boolean (true/false).");
-    }
-    if verbose {
-        println!("Verbose mode enabled.");
-    }
-
     // Load config if provided
+    let mut verbose = false;
     if let Some(config_path) = &args.config {
         match Config::from_file(config_path) {
             Ok(config) => {
                 println!("Loaded config from: {}", config_path);
                 // Flatten config into a single HashMap for easy access
                 configuration = config.flatten();
+
+                if let Some(verbose_str) = configuration.get("misc.verbose") {
+                    verbose = verbose_str
+                        .parse::<bool>()
+                        .expect("verbose must be a boolean (true/false).");
+                }
+                if verbose {
+                    println!("Verbose mode enabled.");
+                }
+
                 if verbose {
                     println!("Configuration values:");
                     for (key, value) in configuration.iter().sorted_by_key(|x| x.0) {
