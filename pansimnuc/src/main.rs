@@ -32,6 +32,16 @@ fn main() {
 
     let mut configuration: HashMap<String, String> = HashMap::new();
 
+    let mut verbose = false;
+    if let Some(verbose_str) = configuration.get("misc.verbose") {
+        verbose = verbose_str
+            .parse::<bool>()
+            .expect("verbose must be a boolean (true/false).");
+    }
+    if verbose {
+        println!("Verbose mode enabled.");
+    }
+
     // Load config if provided
     if let Some(config_path) = &args.config {
         match Config::from_file(config_path) {
@@ -39,9 +49,11 @@ fn main() {
                 println!("Loaded config from: {}", config_path);
                 // Flatten config into a single HashMap for easy access
                 configuration = config.flatten();
-                println!("Configuration values:");
-                for (key, value) in configuration.iter().sorted_by_key(|x| x.0) {
-                    println!("  {} = {}", key, value);
+                if verbose {
+                    println!("Configuration values:");
+                    for (key, value) in configuration.iter().sorted_by_key(|x| x.0) {
+                        println!("  {} = {}", key, value);
+                    }
                 }
             }
             Err(err) => {
@@ -64,6 +76,8 @@ fn main() {
             .build_global()
             .expect("Failed to initialise rayon pool");
     }
+
+
 
     // initialise RNG with seed for reproducibility
     let seed_str = configuration
@@ -200,6 +214,7 @@ fn main() {
 						multiplier_dists,
                         n_generations,
                         &mut rng,
+                        verbose,
                     );
                     println!("Finished initialising population...");
 

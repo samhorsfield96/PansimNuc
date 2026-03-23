@@ -88,6 +88,7 @@ pub struct Population {
     pub feature_map: HashMap<usize, Vec<usize>>, // Map from feature ID to genes that share same ID
     pub max_multiplier_dist: usize,
     pub n_generations: usize,
+    pub verbose: bool,
 }
 
 impl Population {
@@ -156,8 +157,14 @@ impl Population {
             }
 
             // check downstream elements in feature_map_entry
-            if !feature_broken && element_idx + 1 < genome.seq.len() {
-                for feature_element_idx in position + 1..feature_map_entry_len {
+            if !feature_broken {
+                for feature_element_idx in (position + 1)..feature_map_entry_len {
+                    // check if at end of genome, if so then feature is broken, as missing downstream elements
+                    if element_idx + (feature_element_idx - position) >= genome.seq.len() {
+                        feature_broken = true;
+                        break;
+                    }
+
                     // get downstream feature in genome
                     let actual_element =
                         &genome.seq[element_idx + (feature_element_idx - position)];
@@ -320,6 +327,7 @@ impl Population {
         multiplier_dists: Vec<MutationDistribution>,
         n_generations: usize,
         rng: &mut StdRng,
+        verbose: bool,
     ) -> Self {
         // initialise population
         let mut population: Vec<Genome> = Vec::new();
@@ -449,7 +457,8 @@ impl Population {
             homology_map,
             feature_map,
             max_multiplier_dist,
-            n_generations
+            n_generations,
+            verbose,
         }
     }
 
@@ -478,7 +487,9 @@ impl Population {
             })
             .sum();
 
-        println!("Total mutated sites: {}", total_sites);
+        if self.verbose {
+            println!("Total mutated sites: {}", total_sites);
+        }
         total_sites
     }
 
@@ -529,14 +540,16 @@ impl Population {
             te_copy_deletions,
             total_inversions,
         ) = totals;
-
-        println!("Total non-TE duplications: {}", total_non_te_duplications);
-        println!("Total non-TE deletions: {}", total_non_te_deletions);
-        println!("Total TE-CUT duplications: {}", te_cut_duplications);
-        println!("Total TE-COPY duplications: {}", te_copy_duplications);
-        println!("Total TE-CUT deletions: {}", te_cut_deletions);
-        println!("Total TE-COPY deletions: {}", te_copy_deletions);
-        println!("Total inversions: {}", total_inversions);
+        
+        if self.verbose { 
+            println!("Total non-TE duplications: {}", total_non_te_duplications);
+            println!("Total non-TE deletions: {}", total_non_te_deletions);
+            println!("Total TE-CUT duplications: {}", te_cut_duplications);
+            println!("Total TE-COPY duplications: {}", te_copy_duplications);
+            println!("Total TE-CUT deletions: {}", te_cut_deletions);
+            println!("Total TE-COPY deletions: {}", te_copy_deletions);
+            println!("Total inversions: {}", total_inversions);
+        }
 
         // update homology map for all new elements
         for genome in &self.pop {
@@ -557,14 +570,18 @@ impl Population {
     pub fn structural_inter_genome(&mut self, recombination_rate: f64, total_sites: usize, recombination_size_mean: f64) {
         // generate recombination distributions
         let average_recombinations_per_generation = (recombination_rate * total_sites as f64) / recombination_size_mean;
-        println!("Average recombinations per generation: {}", average_recombinations_per_generation);
+        if self.verbose {
+            println!("Average recombinations per generation: {}", average_recombinations_per_generation);
+        }
         self.recombination_dists[0] = MutationDistribution::new_poisson(average_recombinations_per_generation)
             .expect("Failed to create poisson distribution for recombination rates");
 
         let (n_recombinations, total_donor_length, total_recipient_length) = mutate_inter_genome(self);
-        println!("Total recombinations: {}", n_recombinations);
-        println!("Total donor length: {}", total_donor_length);
-        println!("Total recipient length: {}", total_recipient_length);
+        if self.verbose {
+            println!("Total recombinations: {}", n_recombinations);
+            println!("Total donor length: {}", total_donor_length);
+            println!("Total recipient length: {}", total_recipient_length);
+        }
     }
 
     // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights
@@ -609,8 +626,8 @@ impl Population {
 
         #[cfg(debug_assertions)]
         {
-            eprintln!("Selection weights: {:?}", selection_weights);
-            eprintln!("Sampled indices: {:?}", sampled_indices);
+            println!("Selection weights: {:?}", selection_weights);
+            println!("Sampled indices: {:?}", sampled_indices);
         }
 
         sampled_indices
@@ -869,6 +886,7 @@ mod tests {
             multiplier_dists,
             10,
             &mut rng,
+            true, // verbose
         );
 
         // Check population was created correctly
@@ -943,6 +961,7 @@ mod tests {
             multiplier_dists,
             10,
             &mut rng,
+            true, // verbose
         );
 
         let temp_path = std::env::temp_dir().join(format!(
@@ -1022,6 +1041,7 @@ mod tests {
             multiplier_dists,
             10,
             &mut rng,
+            true, // verbose
         );
 
         let temp_path = std::env::temp_dir().join(format!(
@@ -1106,6 +1126,7 @@ mod tests {
             multiplier_dists,
             10,
             &mut rng,
+            true, // verbose
         );
 
         let original_seq = pop.pop[0].seq[0].seq.clone();
@@ -1186,6 +1207,7 @@ mod tests {
             multiplier_dists,
             10,
             &mut rng,
+            true, // verbose
         );
 
         let original_identifiers: Vec<String> = pop
@@ -1318,6 +1340,7 @@ mod tests {
             multiplier_dists,
             10,
             &mut rng,
+            true, // verbose
         )
     }
 
