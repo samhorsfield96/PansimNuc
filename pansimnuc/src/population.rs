@@ -1,7 +1,6 @@
 use crate::gff::FeaturePos;
 use crate::mutation::Distribution as MutationDistribution;
 use crate::mutation::MutationMap;
-use crate::structural::StructureMutationMap;
 use crate::structural::mutate_inter_genome;
 use crate::structural::mutate_intra_genome;
 use logsumexp::LogSumExp;

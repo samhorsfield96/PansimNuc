@@ -8,7 +8,6 @@ mod population;
 mod structural;
 
 use crate::mutation::Distribution;
-use crate::structural::StructureMutationMap;
 use clap::Parser;
 use config::Config;
 use gff::read_gff_lines;
@@ -134,7 +133,6 @@ fn main() {
                         let duplication_rate_key = format!("{}.duplication_rate", section);
                         let deletion_rate_key = format!("{}.deletion_rate", section);
                         let inversion_rate_key = format!("{}.inversion_rate", section);
-                        let max_duplications_key = format!("{}.max_duplications", section);
 
                         site_mutation_dists.push(
 							Distribution::from_selection_config(&configuration, section).unwrap_or_else(|err| {
@@ -146,10 +144,6 @@ fn main() {
 						);
 
                         site_mutation_mus_vals.push(parse_f64(&mutation_rate_key));
-
-                        let max_duplications = configuration
-                            .get(&max_duplications_key)
-                            .map(|_| parse_usize(&max_duplications_key));
 
                         structural_dists.push(vec![
                             Distribution::new_poisson(parse_f64(&duplication_rate_key)).expect("Failed to create duplication distribution"),

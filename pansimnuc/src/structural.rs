@@ -1,32 +1,15 @@
 // in this script, genes can move around, be duplicated and deleted
 
 use crate::mutation::Distribution as MutationDistribution;
-use crate::mutation::MutationMap;
 use crate::population::NucElement;
 use crate::population::{Genome, Population};
-use rand::Rng;
-use rand::rngs::StdRng;
+use rand::Rng; 
 use rand::seq::SliceRandom;
 use triple_accel::levenshtein::*;
-use rand_distr::num_traits::ToBytes;
-use rand_distr::num_traits::float::TotalOrder;
 use std::collections::HashMap;
 
 // for a given NucElement, store its position in the genome
 // which can then be shuffled around by structural mutations, or copied
-
-// hold probability of structural mutation for a given element.
-// can then sample from uniform distribution to determine whether a structural mutation occurs, and if so, which one, and where it moves to.
-
-#[derive(Clone)]
-pub struct StructureMutationMap {
-    pub duplication_rate: f64,
-    pub deletion_rate: f64,
-    pub inversion_rate: f64,
-    /// Cap on the number of duplications per element per generation.
-    /// `None` means no cap (behaviour unchanged from before this field was added).
-    pub max_duplications: Option<usize>,
-}
 
 /// Returns a similarity score in [0.0, 1.0] based on normalized edit distance.
 /// 1.0 = identical, 0.0 = completely different.
@@ -102,7 +85,7 @@ pub fn mutate_intra_genome(
             vec![(element.contig_id, current_pos as i64)];
 
         // duplications, can model multiple duplications repeatedly sampling until rand_val is above duplication rate
-        let mut num_dups = mutation_dist[0].sample(&mut thread_rng) as usize;
+        let num_dups = mutation_dist[0].sample(&mut thread_rng) as usize;
         let mut dup_count: usize = 0;
 
         for _ in 0..num_dups {
@@ -312,7 +295,6 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
 
             // look for donor and recipient site, maximum total donor length attempts, if not found, skip recombination event
             let mut donor_site_chosen: bool = false;
-            let mut attempts = 0;
 
             // set up sampling with replacement
             let mut indices: Vec<usize> = (0..donor_genome.seq.len()).collect();
@@ -359,7 +341,6 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                         }
                     }
                 }
-                attempts += 1;
             }
 
             if donor_site_chosen {
@@ -580,12 +561,6 @@ mod tests {
     }
 
     fn make_multi_contig_test_genome() -> Genome {
-        let base_map = StructureMutationMap {
-            duplication_rate: 0.0,
-            deletion_rate: 0.0,
-            inversion_rate: 0.0,
-            max_duplications: None,
-        };
         let mut rng = StdRng::seed_from_u64(42);
         let sel_dist = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
 
@@ -1036,6 +1011,16 @@ mod tests {
                 seq: vec![1, 2, 4, 8],
                 mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
                 strand: true,
+            },
+            NucElement {
+                contig_id: 0,
+                element_id: 0,
+                feature_id: 0,
+                feature_type: "intergenic".to_string(),
+                multiplier: 1.0,
+                seq: vec![1, 2, 4, 8],
+                mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
+                strand: true,
             }],
             seq_length: 0,
         };
@@ -1087,7 +1072,7 @@ mod tests {
         // High probability of duplication, zero deletion
         default_structural_dists[3][0] = MutationDistribution::new_uniform(2.0, 2.1).unwrap();
         default_structural_dists[3][1] = MutationDistribution::new_uniform(2.0, 2.1).unwrap();
-        let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
+        let pos = MutationDistribution::new_uniform(2.0, 3.0).unwrap();
         
         mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
         
