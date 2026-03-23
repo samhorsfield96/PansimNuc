@@ -293,10 +293,6 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
 
     for (donor, recipients) in recombination_map {
         for recipient in recipients {
-            println!(
-                "Processing recombination event: Donor genome: {}, Recipient genome: {}",
-                donor, recipient
-            );
 
             // donor != recipient by construction (from all_pairs)
             let (donor_genome, recipient_genome): (&Genome, &mut Genome) = if donor < recipient {
@@ -374,34 +370,44 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                 let donor_contig_id = donor_genome.seq[start_donor_site].contig_id;
                 let recipient_contig_id = recipient_genome.seq[start_recipient_site].contig_id;
 
+                // track contig end of donor
+                let mut donor_contig_end = false;
+
                 while !track_found {
                     // determine length of donor DNA
                     while recombination_len < min_recombination_len {
                         let new_end_donor_site = end_donor_site + 1;
 
                         // run off end of contig, assume complete recombination
-                        if donor_genome.seq[new_end_donor_site].contig_id != donor_contig_id
-                            || new_end_donor_site >= donor_genome.seq.len()
+                        if new_end_donor_site >= donor_genome.seq.len() {
+                            donor_contig_end = true;
+                        } else if donor_genome.seq[new_end_donor_site].contig_id != donor_contig_id {
+                            donor_contig_end = true
+                        }
+                        if donor_contig_end 
                         {
                             recombination_len += donor_genome.seq[end_donor_site].seq.len();
 
                             // find end of recipient track
-                            let mut contig_end = false;
-                            while !contig_end {
+                            let mut recipient_contig_end = false;
+                            while !recipient_contig_end {
                                 let new_end_recipient_site = end_recipient_site + 1;
-                                if recipient_genome.seq[new_end_recipient_site].contig_id
-                                    != recipient_contig_id
-                                    || new_end_recipient_site >= recipient_genome.seq.len()
-                                {
-                                    contig_end = true;
+                                
+                                // check if at end of contig
+                                if new_end_recipient_site >= recipient_genome.seq.len() {
+                                    recipient_contig_end = true;
+                                } else if recipient_genome.seq[new_end_recipient_site].contig_id
+                                    != recipient_contig_id {
+                                        recipient_contig_end = true;
                                 } else {
                                     end_recipient_site = new_end_recipient_site;
                                 }
                             }
-
+                            
                             track_found = true;
                             break;
                         }
+                        
 
                         // else continue going through contig
                         end_donor_site = new_end_donor_site;
