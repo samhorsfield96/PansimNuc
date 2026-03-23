@@ -319,7 +319,15 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                 // if both vectors are not empty, then search through each and test to make sure they have sufficient homology
                 if donor_has_site && recipient_has_site {
                     for donor_site in &recomb_element[donor] {
+                        // check that site present in donor
+                        if donor_site >= &donor_genome.seq.len() {
+                            continue;
+                        }
                         for recipient_site in &recomb_element[recipient] {
+                            // check that site present in recipient
+                            if recipient_site >= &recipient_genome.seq.len() {
+                                continue;
+                            }
                             // check homology between donor and recipient site, if sufficient, break loop and move to recombination, if not, continue searching
                             let homology = calculate_homology(
                                 &donor_genome.seq[*donor_site],
@@ -478,7 +486,7 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                     .splice(start_recipient_site..=end_recipient_site, donor_track);
 
                 // add new positions
-                for element_idx in start_recipient_site..start_recipient_site + donor_track_len {
+                for element_idx in start_recipient_site..(start_recipient_site + donor_track_len) {
                     let element_id = recipient_genome.seq[element_idx].element_id;
                     let homology_group =
                         &mut population.homology_map[element_id][recipient_genome.genome_id];
