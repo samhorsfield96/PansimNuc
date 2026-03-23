@@ -682,6 +682,7 @@ mod tests {
             homology_map,
             feature_map: HashMap::new(),
             max_multiplier_dist: 10,
+            n_generations: 10,
         }
     }
 

@@ -88,6 +88,7 @@ pub struct Population {
     pub homology_map: Vec<Vec<Vec<usize>>>, // Map from original element ID to positions of homologous regions in other genomes, outermost loop is the homology group, middle loop is genomes, inner loop is positions
     pub feature_map: HashMap<usize, Vec<usize>>, // Map from feature ID to genes that share same ID
     pub max_multiplier_dist: usize,
+    pub n_generations: usize,
 }
 
 impl Population {
@@ -312,12 +313,13 @@ impl Population {
         root: Vec<Vec<FeaturePos>>,
         n_genomes: usize,
         selection_dists: Vec<MutationDistribution>,
-        mu_dists: Vec<MutationDistribution>,
+        mu_dist_vals: Vec<f64>,
         recombination_dists: Vec<MutationDistribution>,
         recombination_threshold: f64,
         structural_dists: Vec<StructureMutationMap>,
         max_multiplier_dist: usize,
         multiplier_dists: Vec<MutationDistribution>,
+        n_generations: usize,
         rng: &mut StdRng,
     ) -> Self {
         // initialise population
@@ -419,6 +421,7 @@ impl Population {
         }
 
         // copy whole genome to start
+        let mut total_length = 0;
         for i in 0..n_genomes {
             let mut genome_entry = Genome {
                 identifier: format!("{}", i),
@@ -429,9 +432,18 @@ impl Population {
                 seq_length: 0, // will be updated after mutations
             };
             genome_entry.update_contig_starts();
-
+            total_length += genome_entry.seq_length;
             population.push(genome_entry);
         }
+
+        // generate mu_dists based on total population size and total sequence length, so that mutation rates are per base per genome generation
+        let mu_dists = mu_dist_vals
+            .into_iter()
+            .map(|mu| {
+                MutationDistribution::new_poisson(mu * (total_length as f64) * (n_genomes as f64) * n_generations as f64)
+                    .expect("Failed to create poisson distribution for mutation rates")
+            })
+            .collect();
 
         let core_vec: Vec<Vec<u8>> =
             vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
@@ -447,6 +459,7 @@ impl Population {
             homology_map,
             feature_map,
             max_multiplier_dist,
+            n_generations
         }
     }
 
@@ -851,12 +864,9 @@ mod tests {
             .expect("Failed to create uniform distribution for intergenic features");
         let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
 
-        let exon_mu = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("Failed to create double exponential distribution for exon features");
-        let intron_mu = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("Failed to create uniform distribution for intron features");
-        let intergenic_mu = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("Failed to create uniform distribution for intergenic features");
+        let exon_mu = 1.0;
+        let intron_mu = 1.0;
+        let intergenic_mu = 1.0;
         let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
 
         let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
@@ -881,6 +891,7 @@ mod tests {
             default_structural_dists(),
             10, // max_multiplier_dist
             multiplier_dists,
+            10,
             &mut rng,
         );
 
@@ -928,12 +939,9 @@ mod tests {
             .expect("Failed to create uniform distribution for intergenic features");
         let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
 
-        let exon_mu = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("Failed to create double exponential distribution for exon features");
-        let intron_mu = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("Failed to create uniform distribution for intron features");
-        let intergenic_mu = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("Failed to create uniform distribution for intergenic features");
+        let exon_mu = 1.0;
+        let intron_mu = 1.0;
+        let intergenic_mu = 1.0;
         let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
         let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
             .expect("Failed to create uniform distribution for recombination");
@@ -957,6 +965,7 @@ mod tests {
             default_structural_dists(),
             10, // max_multiplier_dist
             multiplier_dists,
+            10,
             &mut rng,
         );
 
@@ -1008,12 +1017,9 @@ mod tests {
             .expect("Failed to create distribution for intergenic features");
         let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
 
-        let exon_mu = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("Failed to create mutation distribution for exon features");
-        let intron_mu = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("Failed to create mutation distribution for intron features");
-        let intergenic_mu = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("Failed to create mutation distribution for intergenic features");
+        let exon_mu = 1.0;
+        let intron_mu = 1.0;
+        let intergenic_mu = 1.0;
         let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
 
         let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
@@ -1038,6 +1044,7 @@ mod tests {
             default_structural_dists(),
             10, // max_multiplier_dist
             multiplier_dists,
+            10,
             &mut rng,
         );
 
@@ -1099,12 +1106,9 @@ mod tests {
             intron_selection_dist,
             intergenic_selection_dist,
         ];
-        let force_mutation_dist = MutationDistribution::new_poisson(100.0)
-            .expect("failed to create mutation distribution");
-        let intron_mu_dist = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("failed to create intron mutation distribution");
-        let intergenic_mu_dist = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("failed to create intergenic mutation distribution");
+        let force_mutation_dist = 1000.0;
+        let intron_mu_dist = 1.0;
+        let intergenic_mu_dist = 1.0;
         let site_mutation_mus = vec![force_mutation_dist, intron_mu_dist, intergenic_mu_dist];
         let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
             .expect("Failed to create uniform distribution for recombination");
@@ -1127,6 +1131,7 @@ mod tests {
             default_structural_dists(),
             10, // max_multiplier_dist
             multiplier_dists,
+            10,
             &mut rng,
         );
 
@@ -1180,12 +1185,9 @@ mod tests {
             .expect("failed to create intergenic selection distribution");
         let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
 
-        let exon_mu = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("failed to create exon mutation distribution");
-        let intron_mu = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("failed to create intron mutation distribution");
-        let intergenic_mu = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("failed to create intergenic mutation distribution");
+        let exon_mu = 1.0;
+        let intron_mu = 1.0;
+        let intergenic_mu = 1.0;
         let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
 
         let mut rng: StdRng = StdRng::seed_from_u64(42);
@@ -1209,6 +1211,7 @@ mod tests {
             default_structural_dists(),
             10, // max_multiplier_dist
             multiplier_dists,
+            10,
             &mut rng,
         );
 
@@ -1314,12 +1317,9 @@ mod tests {
             .expect("failed to create intergenic selection distribution");
         let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
 
-        let exon_mu = MutationDistribution::new_uniform(0.0, 0.1)
-            .expect("failed to create exon mutation distribution");
-        let intron_mu = MutationDistribution::new_uniform(0.0, 0.1)
-            .expect("failed to create intron mutation distribution");
-        let intergenic_mu = MutationDistribution::new_uniform(0.0, 0.1)
-            .expect("failed to create intergenic mutation distribution");
+        let exon_mu = 1.0;
+        let intron_mu = 1.0;
+        let intergenic_mu = 1.0;
         let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
 
         let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
@@ -1343,6 +1343,7 @@ mod tests {
             default_structural_dists(),
             10, // max_multiplier_dist
             multiplier_dists,
+            10,
             &mut rng,
         )
     }

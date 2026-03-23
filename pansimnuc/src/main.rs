@@ -125,7 +125,7 @@ fn main() {
 
                     // generate distributions to draw mutations from
                     let mut site_mutation_dists: Vec<Distribution> = Vec::new();
-                    let mut site_mutation_mus: Vec<Distribution> = Vec::new();
+                    let mut site_mutation_mus_vals: Vec<f64> = Vec::new();
                     let mut structural_dists: Vec<StructureMutationMap> = Vec::new();
 					let mut multiplier_dists: Vec<Distribution> = Vec::new();
 
@@ -136,8 +136,6 @@ fn main() {
                         let inversion_rate_key = format!("{}.inversion_rate", section);
                         let max_duplications_key = format!("{}.max_duplications", section);
 
-                        let mutation_rate = parse_f64(&mutation_rate_key);
-
                         site_mutation_dists.push(
 							Distribution::from_selection_config(&configuration, section).unwrap_or_else(|err| {
 								panic!(
@@ -147,14 +145,7 @@ fn main() {
 							}),
 						);
 
-                        site_mutation_mus.push(
-							Distribution::new_poisson(mutation_rate).unwrap_or_else(|_| {
-								panic!(
-									"Failed to create mutation-rate distribution for section '{}' from key '{}'",
-									section, mutation_rate_key
-								)
-							}),
-						);
+                        site_mutation_mus_vals.push(parse_f64(&mutation_rate_key));
 
                         let max_duplications = configuration
                             .get(&max_duplications_key)
@@ -198,27 +189,29 @@ fn main() {
                     let n_individuals: usize = n_individuals_str
                         .parse::<usize>()
                         .expect("n_individuals must be an integer.");
+
+                    let n_generations: usize = n_generation_str
+                        .parse::<usize>()
+                        .expect("n_generation must be an integer.");
+                    
                     println!("Initialising population...");
                     let mut population = Population::new(
                         features,
                         n_individuals,
                         site_mutation_dists,
-                        site_mutation_mus,
+                        site_mutation_mus_vals,
                         recombination_dists,
                         recombination_threshold,
                         structural_dists,
                         parse_usize("population.max_multiplier_dist"),
 						multiplier_dists,
+                        n_generations,
                         &mut rng,
                     );
                     println!("Finished initialising population...");
 
                     // mutate population
-                    let n_generation: usize = n_generation_str
-                        .parse::<usize>()
-                        .expect("n_generation must be an integer.");
-
-                    for generation in 1..=n_generation {
+                    for generation in 1..=n_generations {
                         // mutate at nucleotide level
                         population.mutate();
 
