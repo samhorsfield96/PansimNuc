@@ -56,7 +56,7 @@ fn calculate_homology(a: &NucElement, b: &NucElement, threshold: f64) -> f64 {
 // write function which runs through each element and determines whether a structural mutation occurs, and if so, which one, and where it moves to.
 pub fn mutate_intra_genome(
     genome: &mut Genome,
-    mu_dist: &MutationDistribution,
+    structural_mu_dists: &Vec<Vec<MutationDistribution>>,
     pos_dist: &MutationDistribution,
 ) -> (usize, usize, usize, usize, usize, usize, usize) {
     let mut thread_rng = rand::thread_rng();
@@ -85,6 +85,15 @@ pub fn mutate_intra_genome(
             max_position = current_pos;
         }
 
+        let mutation_dist: &Vec<MutationDistribution> = match element.feature_type.as_str() {
+            "exon" => &structural_mu_dists[0],
+            "intron" => &structural_mu_dists[1],
+            "intergenic" => &structural_mu_dists[2],
+            "TE-CUT" => &structural_mu_dists[3],
+            "TE-COPY" => &structural_mu_dists[4],
+            _ => panic!("Unknown feature type: {}", element.feature_type),
+        };
+
         // get feature type
         let feature_type = &element.feature_type;
 
@@ -93,15 +102,10 @@ pub fn mutate_intra_genome(
             vec![(element.contig_id, current_pos as i64)];
 
         // duplications, can model multiple duplications repeatedly sampling until rand_val is above duplication rate
-        let mut rand_val = mu_dist.sample(&mut thread_rng);
+        let mut num_dups = mutation_dist[0].sample(&mut thread_rng) as usize;
         let mut dup_count: usize = 0;
 
-        while rand_val < element.structure_mutation_map.duplication_rate
-            && element
-                .structure_mutation_map
-                .max_duplications
-                .map_or(true, |max| dup_count < max)
-        {
+        for _ in 0..num_dups {
             dup_count += 1;
 
             // for non-TEs sample from poisson distribution to determine where duplication goes
@@ -123,9 +127,9 @@ pub fn mutate_intra_genome(
             let duplication_pos = duplication_pos as i64;
 
             // determine if position is before or after gene, adjust if too large
-            let pos_rand_val = mu_dist.sample(&mut thread_rng);
+            let pos_rand_val = thread_rng.gen_range(0..=9);
             let pos_order: i64 =
-                if pos_rand_val < 0.5 {
+                if pos_rand_val < 5 {
                     -1
                 } else {
                     1
@@ -176,18 +180,21 @@ pub fn mutate_intra_genome(
             te_cut_deletions += 1;
         } else {
             // All other gene features
-            rand_val = mu_dist.sample(&mut thread_rng);
-            if rand_val < element.structure_mutation_map.deletion_rate {
+            let mut n_deletions = mutation_dist[1].sample(&mut thread_rng) as usize;
+            n_deletions = n_deletions.min(new_positions_vec.len());
+
+            // delete as many copies as possible
+            for _ in 0..n_deletions {
                 let _ = new_positions_vec.remove(0);
-            }
-            else if feature_type.contains("TE") {
-                if feature_type == "TE-CUT" {
-                        te_cut_deletions += 1;
+                if feature_type.contains("TE") {
+                    if feature_type == "TE-CUT" {
+                            te_cut_deletions += 1;
+                        } else {
+                            te_copy_deletions += 1;
+                        }
                     } else {
-                        te_copy_deletions += 1;
-                    }
-            } else {
-                    total_non_te_deletions += 1;
+                            total_non_te_deletions += 1;
+                }
             }
         }
 
@@ -197,10 +204,10 @@ pub fn mutate_intra_genome(
         for (contig_id, pos) in new_positions_vec {
             let mut inversion = 1;
 
-            // flip sign
-            rand_val = mu_dist.sample(&mut thread_rng);
-            if rand_val < element.structure_mutation_map.inversion_rate {
-                inversion = -1;
+            // flip sign for number of inversions
+            let n_inversions = mutation_dist[2].sample(&mut thread_rng) as usize;
+            for _ in 0..n_inversions {
+                inversion *= -1;
                 total_inversions += 1;
             }
 
@@ -537,7 +544,6 @@ mod tests {
                     seq: vec![],
                     mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
                     strand: true,
-                    structure_mutation_map: base_map.clone(),
                 },
                 NucElement {
                     contig_id: 0,
@@ -548,7 +554,6 @@ mod tests {
                     seq: vec![],
                     mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
                     strand: false,
-                    structure_mutation_map: base_map.clone(),
                 },
                 NucElement {
                     contig_id: 0,
@@ -559,7 +564,6 @@ mod tests {
                     seq: vec![],
                     mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
                     strand: false,
-                    structure_mutation_map: base_map,
                 },
             ],
             seq_length: 0,
@@ -591,7 +595,6 @@ mod tests {
             seq: vec![],
             mutation_map: MutationMap::new(0, 0, &vec![], sel_dist, rng),
             strand,
-            structure_mutation_map: base_map.clone(),
         };
 
         Genome {
@@ -642,7 +645,6 @@ mod tests {
                 } else {
                     !strand_seed
                 },
-                structure_mutation_map: base_map.clone(),
             });
         }
 

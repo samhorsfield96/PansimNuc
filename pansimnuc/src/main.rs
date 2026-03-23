@@ -126,7 +126,7 @@ fn main() {
                     // generate distributions to draw mutations from
                     let mut site_mutation_dists: Vec<Distribution> = Vec::new();
                     let mut site_mutation_mus_vals: Vec<f64> = Vec::new();
-                    let mut structural_dists: Vec<StructureMutationMap> = Vec::new();
+                    let mut structural_dists: Vec<Vec<Distribution>> = Vec::new();
 					let mut multiplier_dists: Vec<Distribution> = Vec::new();
 
                     for section in feature_sections {
@@ -151,12 +151,11 @@ fn main() {
                             .get(&max_duplications_key)
                             .map(|_| parse_usize(&max_duplications_key));
 
-                        structural_dists.push(StructureMutationMap {
-                            duplication_rate: parse_f64(&duplication_rate_key),
-                            deletion_rate: parse_f64(&deletion_rate_key),
-                            inversion_rate: parse_f64(&inversion_rate_key),
-                            max_duplications,
-                        });
+                        structural_dists.push(vec![
+                            Distribution::new_poisson(parse_f64(&duplication_rate_key)).expect("Failed to create duplication distribution"),
+                            Distribution::new_poisson(parse_f64(&deletion_rate_key)).expect("Failed to create deletion distribution"),
+                            Distribution::new_poisson(parse_f64(&inversion_rate_key)).expect("Failed to create inversion distribution"),
+                        ]);
 
 						// get multiplier just for TE sections
 						if section.starts_with("TE") {
@@ -164,10 +163,10 @@ fn main() {
 							let multiplier_scale_key = format!("{}.multiplier_scale", section);
 							let multiplier_rate = parse_f64(&multiplier_rate_key);
 							let multiplier_scale = parse_f64(&multiplier_scale_key);
-							multiplier_dists.push(Distribution::new_gamma(multiplier_rate, multiplier_scale).unwrap());
+							multiplier_dists.push(Distribution::new_gamma(multiplier_rate, multiplier_scale).expect("Failed to create multiplier distribution"));
 						} else {
 							// set multiplier to 1 for non-TE sections
-							multiplier_dists.push(Distribution::new_gamma(1.0, 1.0).unwrap());
+							multiplier_dists.push(Distribution::new_gamma(1.0, 1.0).expect("Failed to create multiplier distribution"));
 						}
                     }
 

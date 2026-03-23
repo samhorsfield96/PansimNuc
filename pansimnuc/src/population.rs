@@ -24,7 +24,6 @@ pub struct NucElement {
     pub seq: Vec<u8>,
     pub mutation_map: MutationMap,
     pub strand: bool,
-    pub structure_mutation_map: StructureMutationMap,
 }
 
 impl NucElement {
@@ -83,6 +82,7 @@ pub struct Population {
     pub core_vec: Vec<Vec<u8>>,
     pub selection_dists: Vec<MutationDistribution>,
     pub mu_dists: Vec<MutationDistribution>,
+    pub structural_mu_dists: Vec<Vec<MutationDistribution>>,
     pub recombination_dists: Vec<MutationDistribution>,
     pub recombination_threshold: f64,
     pub homology_map: Vec<Vec<Vec<usize>>>, // Map from original element ID to positions of homologous regions in other genomes, outermost loop is the homology group, middle loop is genomes, inner loop is positions
@@ -316,7 +316,7 @@ impl Population {
         mu_dist_vals: &Vec<f64>,
         recombination_dists: Vec<MutationDistribution>,
         recombination_threshold: f64,
-        structural_dists: Vec<StructureMutationMap>,
+        structural_mu_dists: Vec<Vec<MutationDistribution>>,
         max_multiplier_dist: usize,
         multiplier_dists: Vec<MutationDistribution>,
         n_generations: usize,
@@ -353,15 +353,6 @@ impl Population {
                     "intergenic" => 2,
                     "TE-CUT" => 3,
                     "TE-COPY" => 4,
-                    _ => panic!("Unknown feature type: {}", feature.feature_type),
-                };
-
-                let structural_map: StructureMutationMap = match feature.feature_type.as_str() {
-                    "exon" => structural_dists[0].clone(),
-                    "intron" => structural_dists[1].clone(),
-                    "intergenic" => structural_dists[2].clone(),
-                    "TE-CUT" => structural_dists[3].clone(),
-                    "TE-COPY" => structural_dists[4].clone(),
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
@@ -406,7 +397,6 @@ impl Population {
                         &selection_dists[selection_dist_id],
                         rng,
                     ),
-                    structure_mutation_map: structural_map.clone(),
                     multiplier: multiplier,
                 });
                 element_id += 1;
@@ -454,6 +444,7 @@ impl Population {
             core_vec,
             selection_dists,
             mu_dists,
+            structural_mu_dists: structural_mu_dists,
             recombination_dists,
             recombination_threshold,
             homology_map,
@@ -508,8 +499,6 @@ impl Population {
 
     pub fn structural_intra_genome(&mut self) {
         // probabilities for structural variations
-        let mu_dist = MutationDistribution::new_uniform(0.0, 1.0)
-            .expect("Failed to create uniform distribution for structural variations");
         let pos_dist = MutationDistribution::new_poisson(1.0)
             .expect("Failed to create poisson distribution for structural variations");
 
@@ -517,7 +506,7 @@ impl Population {
         let totals = self
             .pop
             .par_iter_mut()
-            .map(|genome| mutate_intra_genome(genome, &mu_dist, &pos_dist))
+            .map(|genome| mutate_intra_genome(genome, &self.structural_mu_dists, &pos_dist))
             .reduce(
                 || (0usize, 0usize, 0usize, 0usize, 0usize, 0usize, 0usize),
                 |a, b| (
