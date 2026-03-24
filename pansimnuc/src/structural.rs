@@ -302,18 +302,17 @@ fn connected_components(
 pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize) {
     let mut rng = rand::thread_rng();
 
-    // Empties population.pop; slots are indexed by genome_id (== vec index)
-    let mut pop_opt: Vec<Option<Genome>> = population.pop.drain(..).map(Some).collect();
-
     // get number of recombination events across whole population
     let n_recombinations = population.recombination_dists[0].sample(&mut rng) as usize;
 
     let pop_size = population.pop.len();
 
-   // All ordered pairs where donor != recipient
+    // All ordered pairs where donor != recipient
     let all_pairs: Vec<(u32, u32)> = (0..pop_size)
         .flat_map(|i| (0..pop_size).filter(move |&j| j != i).map(move |j| (i as u32, j as u32)))
         .collect();
+
+    println!("all_pairs: {:?}", all_pairs);
 
     let mut recombination_map_tmp: HashMap<usize, Vec<usize>> = HashMap::new();
     for _ in 0..n_recombinations {
@@ -325,6 +324,8 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
         .iter()
         .flat_map(|(&donor, recipients)| recipients.iter().map(move |&recipient| (donor as u32, recipient as u32)))
         .collect();
+
+    println!("sampled_edges: {:?}", sampled_edges);
 
     let components = connected_components(0..pop_size as u32, &sampled_edges);
 
@@ -343,6 +344,9 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
             recombination_map_list.push(component_map);
         }
     }
+
+    // Empties population.pop; slots are indexed by genome_id (== vec index)
+    let mut pop_opt: Vec<Option<Genome>> = population.pop.drain(..).map(Some).collect();
 
     // create component packages
     let component_packages: Vec<(HashMap<usize, Vec<usize>>, Vec<(usize, Genome)>)> =
@@ -372,17 +376,13 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
             // iterate over recombinations
             for (donor, recipients) in recombination_map {
                 for recipient in recipients {
-                    let (donor_idx, recipient_idx) = if donor < recipient as usize {
-                        (donor, recipient as usize)
+
+                    let (donor_genome, recipient_genome): (&Genome, &mut Genome) = if donor < recipient {
+                        let (left, right) = genomes.split_at_mut(recipient);
+                        (&left[donor].1, &mut right[0].1)
                     } else {
-                        (recipient as usize, donor)
-                    };
-                    
-                    let (first_part, second_part) = genomes.split_at_mut(donor_idx.max(recipient_idx));
-                    let (donor_genome, recipient_genome) = if donor < recipient as usize {
-                        (&first_part[donor_idx].1, &mut second_part[recipient_idx - donor_idx.max(recipient_idx)].1)
-                    } else {
-                        (&first_part[recipient_idx].1, &mut second_part[donor_idx - donor_idx.max(recipient_idx)].1)
+                        let (left, right) = genomes.split_at_mut(donor);
+                        (&right[0].1, &mut left[recipient].1)
                     };
 
                     // look for donor and recipient site, maximum total donor length attempts, if not found, skip recombination event
