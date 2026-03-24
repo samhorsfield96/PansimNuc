@@ -144,6 +144,8 @@ fn overlay_te_intervals(
     for interval in intervals {
         let mut updated: Vec<FeaturePos> = Vec::new();
 
+        let mut inserted_te = false;
+
         for feature in &*features {
             let overlap_start = feature.start.max(interval.start);
             let overlap_end = feature.end.min(interval.end);
@@ -154,6 +156,7 @@ fn overlay_te_intervals(
                     feature.feature_type.as_str()
                 };
 
+            // if no overlap, keep feature as is
             if overlap_start >= overlap_end {
                 updated.push(FeaturePos {
                     contig_id: feature.contig_id,
@@ -166,39 +169,49 @@ fn overlay_te_intervals(
                 });
                 continue;
             }
+            
+            // add start of feature
+            if feature.start < interval.start {
+                push_feature_segment(
+                    &mut updated,
+                    contig_id,
+                    feature.feature_id,
+                    flank_feature_type,
+                    feature.start,
+                    interval.start,
+                    feature.strand,
+                    contig_seq,
+                );
+            }
 
-            push_feature_segment(
-                &mut updated,
-                contig_id,
-                feature.feature_id,
-                flank_feature_type,
-                feature.start,
-                overlap_start,
-                feature.strand,
-                contig_seq,
-            );
+            // check if te inserted
+            if !inserted_te {
+                push_feature_segment(
+                    &mut updated,
+                    contig_id,
+                    0,
+                    &interval.feature_type,
+                    interval.start,
+                    interval.end,
+                    interval.strand,
+                    contig_seq,
+                );
+                inserted_te = true;
+            }
 
-            push_feature_segment(
-                &mut updated,
-                contig_id,
-                0,
-                &interval.feature_type,
-                overlap_start,
-                overlap_end,
-                interval.strand,
-                contig_seq,
-            );
-
-            push_feature_segment(
-                &mut updated,
-                contig_id,
-                feature.feature_id,
-                flank_feature_type,
-                overlap_end,
-                feature.end,
-                feature.strand,
-                contig_seq,
-            );
+            // add remainder of element
+            if feature.end >= interval.end {
+                push_feature_segment(
+                    &mut updated,
+                    contig_id,
+                    feature.feature_id,
+                    flank_feature_type,
+                    interval.end,
+                    feature.end,
+                    feature.strand,
+                    contig_seq,
+                );
+            }
         }
 
         *features = updated;
@@ -841,14 +854,18 @@ contig1\t.\texon\t30\t40\t.\t+\t.\tID=exon2
 contig1\t.\tgene\t50\t100\t.\t+\t.\tID=gene2
 contig1\t.\texon\t50\t70\t.\t+\t.\tID=exon3
 contig1\t.\texon\t75\t100\t.\t+\t.\tID=exon4
+contig1\t.\tgene\t150\t300\t.\t+\t.\tID=gene3
+contig1\t.\texon\t150\t200\t.\t+\t.\tID=exon5
+contig1\t.\texon\t250\t300\t.\t+\t.\tID=exon6
 ";
 
         let mut fasta_content = String::from(">contig1\n");
-        fasta_content.push_str(&"A".repeat(110));
+        fasta_content.push_str(&"A".repeat(300));
 
         let earlgrey_content = "##gff-version 3
 contig1\t.\tLINE\t1\t5\t.\t-\t.\tID=te_copy_1
 contig1\t.\tDNA\t15\t18\t.\t+\t.\tID=te_cut_1
+contig1\t.\tDNA\t245\t300\t.\t+\t.\tID=te_cut_2
 contig1\t.\tLINE\t35\t45\t.\t-\t.\tID=te_copy_2";
 
         let gff_file = create_temp_file("test", ".gff", gff_content);
@@ -877,7 +894,7 @@ contig1\t.\tLINE\t35\t45\t.\t-\t.\tID=te_copy_2";
 
         // Coverage should start at 0 and end at full contig length.
         assert_eq!(contig_features[0].start, 0);
-        assert_eq!(contig_features.last().unwrap().end, 110);
+        assert_eq!(contig_features.last().unwrap().end, 300);
 
         for window in contig_features.windows(2) {
             let left = &window[0];
@@ -904,12 +921,12 @@ contig1\t.\tLINE\t35\t45\t.\t-\t.\tID=te_copy_2";
         assert!(
             contig_features
                 .iter()
-                .any(|f| f.feature_type == "TE-COPY" && f.start == 34 && f.end == 40)
+                .any(|f| f.feature_type == "TE-COPY" && f.start == 34 && f.end == 45)
         );
         assert!(
             contig_features
                 .iter()
-                .any(|f| f.feature_type == "TE-COPY" && f.start == 40 && f.end == 45)
+                .any(|f| f.feature_type == "TE-CUT" && f.start == 244 && f.end == 300)
         );
 
         // Non-TE segments should still be represented correctly.
@@ -946,7 +963,17 @@ contig1\t.\tLINE\t35\t45\t.\t-\t.\tID=te_copy_2";
         assert!(
             contig_features
                 .iter()
-                .any(|f| f.feature_type == "intergenic" && f.start == 100 && f.end == 110)
+                .any(|f| f.feature_type == "intergenic" && f.start == 100 && f.end == 149)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "exon" && f.start == 149 && f.end == 200)
+        );
+        assert!(
+            contig_features
+                .iter()
+                .any(|f| f.feature_type == "intergenic" && f.start == 200 && f.end == 244)
         );
         assert!(
             contig_features
