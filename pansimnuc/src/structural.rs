@@ -7,6 +7,7 @@ use rand::Rng;
 use rand::seq::SliceRandom;
 use triple_accel::levenshtein::*;
 use std::collections::HashMap;
+use std::os::unix::thread;
 use petgraph::graph::{NodeIndex, UnGraph};
 use petgraph::visit::Dfs;
 use std::collections::HashSet;
@@ -299,17 +300,13 @@ fn connected_components(
 }
 
 pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize) {
-    let mut thread_rng = rand::thread_rng();
+    let mut rng = rand::thread_rng();
 
-    // Wrap pop in per-element mutexes so disjoint components can be accessed safely
-    // let mut pop: Vec<Mutex<Genome>> = population.pop.drain(..).map(Mutex::new).collect();
-    // let homology_map: Vec<Mutex<Vec<Vec<usize>>>> = population.homology_map
-    //     .drain(..)
-    //     .map(Mutex::new)
-    //     .collect();
+    // Empties population.pop; slots are indexed by genome_id (== vec index)
+    let mut pop_opt: Vec<Option<Genome>> = population.pop.drain(..).map(Some).collect();
 
     // get number of recombination events across whole population
-    let n_recombinations = population.recombination_dists[0].sample(&mut thread_rng) as usize;
+    let n_recombinations = population.recombination_dists[0].sample(&mut rng) as usize;
 
     let pop_size = population.pop.len();
 
@@ -320,7 +317,7 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
 
     let mut recombination_map_tmp: HashMap<usize, Vec<usize>> = HashMap::new();
     for _ in 0..n_recombinations {
-        let (donor, recipient) = all_pairs.choose(&mut thread_rng).expect("Failed to select a random pair for recombination");
+        let (donor, recipient) = all_pairs.choose(&mut rng).expect("Failed to select a random pair for recombination");
         recombination_map_tmp.entry(*donor as usize).or_default().push(*recipient as usize);
     }
 
@@ -347,233 +344,275 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
         }
     }
 
-    let mut total_donor_length = 0;
-    let mut total_recipient_length = 0;
+    // create component packages
+    let component_packages: Vec<(HashMap<usize, Vec<usize>>, Vec<(usize, Genome)>)> =
+        recombination_map_list.into_iter().map(|recombination_map| {
+            // collect every genome ID this component touches
+            let mut ids: HashSet<usize> = HashSet::new();
+            for (&donor, recipients) in &recombination_map {
+                ids.insert(donor);
+                for &r in recipients { ids.insert(r); }
+            }
+            // move each genome out of its Option slot — panics if already taken (impossible: components are disjoint)
+            let genomes: Vec<(usize, Genome)> = ids.into_iter()
+                .map(|id| (id, pop_opt[id].take().expect("genome already taken")))
+                .collect();
+            (recombination_map, genomes)
+        }).collect();
 
-    // iterate through each donor and recipient pair, in future make parallelisable by processing each independent recombination map separately
-    let mut successful_recombinations = 0;
+    let results = 
+        component_packages.into_par_iter().map(|(recombination_map, mut genomes)| {
+            // thread specific variables
+            let mut thread_rng = rand::thread_rng();
+            let mut thread_homology_map = population.homology_map.clone();
+            let mut thread_total_donor_length = 0;
+            let mut thread_total_recipient_length = 0;
+            let mut thread_successful_recombinations = 0;
 
-    recombination_map_list.iter()
-        .for_each(|recombination_map| {
-        for (donor, recipients) in recombination_map {
-            for recipient in recipients {
-                // donor != recipient by construction (from all_pairs)
-                let (donor_genome, recipient_genome): (&Genome, &mut Genome) = if donor < recipient {
-                    let (left, right) = population.pop.split_at_mut(*recipient);
-                    (
-                        &left[*donor],
-                        &mut right[0],
-                    )
-                } else {
-                    let (left, right) = population.pop.split_at_mut(*donor);
-                    (&right[0], &mut left[*recipient])
-                };
+            // iterate over recombinations
+            for (donor, recipients) in recombination_map {
+                for recipient in recipients {
+                    let (donor_idx, recipient_idx) = if donor < recipient as usize {
+                        (donor, recipient as usize)
+                    } else {
+                        (recipient as usize, donor)
+                    };
+                    
+                    let (first_part, second_part) = genomes.split_at_mut(donor_idx.max(recipient_idx));
+                    let (donor_genome, recipient_genome) = if donor < recipient as usize {
+                        (&first_part[donor_idx].1, &mut second_part[recipient_idx - donor_idx.max(recipient_idx)].1)
+                    } else {
+                        (&first_part[recipient_idx].1, &mut second_part[donor_idx - donor_idx.max(recipient_idx)].1)
+                    };
 
-                // look for donor and recipient site, maximum total donor length attempts, if not found, skip recombination event
-                let mut donor_site_chosen: bool = false;
+                    // look for donor and recipient site, maximum total donor length attempts, if not found, skip recombination event
+                    let mut donor_site_chosen: bool = false;
 
-                // set up sampling with replacement
-                let mut indices: Vec<usize> = (0..donor_genome.seq.len()).collect();
-                indices.shuffle(&mut thread_rng);
+                    // set up sampling with replacement
+                    let mut indices: Vec<usize> = (0..donor_genome.seq.len()).collect();
+                    indices.shuffle(&mut thread_rng);
 
-                let mut start_donor_site: usize = 0;
-                let mut start_recipient_site: usize = 0;
+                    let mut start_donor_site: usize = 0;
+                    let mut start_recipient_site: usize = 0;
 
-                for recombination_pos in indices {
-                    if donor_site_chosen {
-                        break;
-                    }
-                    let recombination_pos_idx = donor_genome.seq[recombination_pos].element_id;
+                    for recombination_pos in indices {
+                        if donor_site_chosen {
+                            break;
+                        }
+                        let recombination_pos_idx = donor_genome.seq[recombination_pos].element_id;
 
-                    // determine if position in both donor and recipient genome, if not, resample
-                    let recomb_element = &population.homology_map[recombination_pos_idx];
+                        // determine if position in both donor and recipient genome, if not, resample
+                        let recomb_element = &population.homology_map[recombination_pos_idx];
 
-                    let donor_has_site = !recomb_element[*donor].is_empty();
-                    let recipient_has_site =
-                        recomb_element.len() > *recipient && !recomb_element[*recipient].is_empty();
+                        let donor_has_site = !recomb_element[donor].is_empty();
+                        let recipient_has_site =
+                            recomb_element.len() > recipient && !recomb_element[recipient].is_empty();
 
-                    // if both vectors are not empty, then search through each and test to make sure they have sufficient homology
-                    if donor_has_site && recipient_has_site {
-                        for donor_site in &recomb_element[*donor] {
-                            // check that site present in donor
-                            if donor_site >= &donor_genome.seq.len() {
-                                continue;
-                            }
-                            for recipient_site in &recomb_element[*recipient] {
-                                // check that site present in recipient
-                                if recipient_site >= &recipient_genome.seq.len() {
+                        // if both vectors are not empty, then search through each and test to make sure they have sufficient homology
+                        if donor_has_site && recipient_has_site {
+                            for donor_site in &recomb_element[donor] {
+                                // check that site present in donor
+                                if donor_site >= &donor_genome.seq.len() {
                                     continue;
                                 }
-                                // check homology between donor and recipient site, if sufficient, break loop and move to recombination, if not, continue searching
-                                let homology = calculate_homology(
-                                    &donor_genome.seq[*donor_site],
-                                    &recipient_genome.seq[*recipient_site],
-                                    population.recombination_threshold
-                                );
-                                if homology >= population.recombination_threshold {
-                                    // perform recombination event, break out of loops
+                                for recipient_site in &recomb_element[recipient] {
+                                    // check that site present in recipient
+                                    if recipient_site >= &recipient_genome.seq.len() {
+                                        continue;
+                                    }
+                                    // check homology between donor and recipient site, if sufficient, break loop and move to recombination, if not, continue searching
+                                    let homology = calculate_homology(
+                                        &donor_genome.seq[*donor_site],
+                                        &recipient_genome.seq[*recipient_site],
+                                        population.recombination_threshold
+                                    );
+                                    if homology >= population.recombination_threshold {
+                                        // perform recombination event, break out of loops
 
-                                    start_donor_site = *donor_site;
-                                    start_recipient_site = *recipient_site;
+                                        start_donor_site = *donor_site;
+                                        start_recipient_site = *recipient_site;
 
-                                    donor_site_chosen = true;
+                                        donor_site_chosen = true;
+                                        break;
+                                    }
+                                }
+                                if donor_site_chosen {
                                     break;
                                 }
                             }
-                            if donor_site_chosen {
-                                break;
-                            }
                         }
                     }
-                }
 
-                if donor_site_chosen {
-                    // now sample from poisson distribution to determine minumum size of recombination track
-                    let min_recombination_len =
-                        population.recombination_dists[1].sample(&mut thread_rng) as usize;
+                    if donor_site_chosen {
+                        // now sample from poisson distribution to determine minumum size of recombination track
+                        let min_recombination_len =
+                            population.recombination_dists[1].sample(&mut thread_rng) as usize;
 
-                    // determine whether there is a track that can be recombined
-                    let mut track_found = false;
-                    let mut end_donor_site = start_donor_site;
-                    let mut end_recipient_site = start_recipient_site;
-                    let mut recombination_len = donor_genome.seq[start_donor_site].seq.len();
+                        // determine whether there is a track that can be recombined
+                        let mut track_found = false;
+                        let mut end_donor_site = start_donor_site;
+                        let mut end_recipient_site = start_recipient_site;
+                        let mut recombination_len = donor_genome.seq[start_donor_site].seq.len();
 
-                    // ensure recombination occurs in single chromosome each
-                    let donor_contig_id = donor_genome.seq[start_donor_site].contig_id;
-                    let recipient_contig_id = recipient_genome.seq[start_recipient_site].contig_id;
+                        // ensure recombination occurs in single chromosome each
+                        let donor_contig_id = donor_genome.seq[start_donor_site].contig_id;
+                        let recipient_contig_id = recipient_genome.seq[start_recipient_site].contig_id;
 
-                    // track contig end of donor
-                    let mut donor_contig_end = false;
+                        // track contig end of donor
+                        let mut donor_contig_end = false;
 
-                    while !track_found {
-                        // determine length of donor DNA
-                        while recombination_len < min_recombination_len {
-                            let new_end_donor_site = end_donor_site + 1;
+                        while !track_found {
+                            // determine length of donor DNA
+                            while recombination_len < min_recombination_len {
+                                let new_end_donor_site = end_donor_site + 1;
 
-                            // run off end of contig, assume complete recombination
-                            if new_end_donor_site >= donor_genome.seq.len() {
-                                donor_contig_end = true;
-                            } else if donor_genome.seq[new_end_donor_site].contig_id != donor_contig_id {
-                                donor_contig_end = true
-                            }
-                            if donor_contig_end 
-                            {
-                                recombination_len += donor_genome.seq[end_donor_site].seq.len();
+                                // run off end of contig, assume complete recombination
+                                if new_end_donor_site >= donor_genome.seq.len() {
+                                    donor_contig_end = true;
+                                } else if donor_genome.seq[new_end_donor_site].contig_id != donor_contig_id {
+                                    donor_contig_end = true
+                                }
+                                if donor_contig_end 
+                                {
+                                    recombination_len += donor_genome.seq[end_donor_site].seq.len();
 
-                                // find end of recipient track
-                                let mut recipient_contig_end = false;
-                                while !recipient_contig_end {
-                                    let new_end_recipient_site = end_recipient_site + 1;
-                                    
-                                    // check if at end of contig
-                                    if new_end_recipient_site >= recipient_genome.seq.len() {
-                                        recipient_contig_end = true;
-                                    } else if recipient_genome.seq[new_end_recipient_site].contig_id
-                                        != recipient_contig_id {
+                                    // find end of recipient track
+                                    let mut recipient_contig_end = false;
+                                    while !recipient_contig_end {
+                                        let new_end_recipient_site = end_recipient_site + 1;
+                                        
+                                        // check if at end of contig
+                                        if new_end_recipient_site >= recipient_genome.seq.len() {
                                             recipient_contig_end = true;
-                                    } else {
-                                        end_recipient_site = new_end_recipient_site;
+                                        } else if recipient_genome.seq[new_end_recipient_site].contig_id
+                                            != recipient_contig_id {
+                                                recipient_contig_end = true;
+                                        } else {
+                                            end_recipient_site = new_end_recipient_site;
+                                        }
                                     }
+                                    
+                                    track_found = true;
+                                    break;
                                 }
                                 
-                                track_found = true;
-                                break;
-                            }
-                            
 
-                            // else continue going through contig
-                            end_donor_site = new_end_donor_site;
-                            recombination_len += donor_genome.seq[end_donor_site].seq.len();
+                                // else continue going through contig
+                                end_donor_site = new_end_donor_site;
+                                recombination_len += donor_genome.seq[end_donor_site].seq.len();
+                            }
+
+                            // use to determine homology between sites
+                            let donor_site = &donor_genome.seq[end_donor_site];
+
+                            // now iterate through recipient genome until homology found between end and donor site
+                            let mut recipient_end_found = false;
+                            while !recipient_end_found {
+                                // run off end of contig, assume complete recombination
+                                if end_recipient_site >= recipient_genome.seq.len()
+                                {
+                                    // reduce index by 1
+                                    end_recipient_site -= 1;
+                                    track_found = true;
+                                    recipient_end_found = true;
+                                    break;
+                                } else if recipient_genome.seq[end_recipient_site].contig_id != recipient_contig_id {
+                                    // reduce index by 1
+                                    end_recipient_site -= 1;
+                                    track_found = true;
+                                    recipient_end_found = true;
+                                    break;
+                                }
+
+                                let recipient_site = &recipient_genome.seq[end_recipient_site];
+                                let homology = calculate_homology(donor_site, recipient_site, population.recombination_threshold);
+                                if homology >= population.recombination_threshold {
+                                    track_found = true;
+                                    recipient_end_found = true;
+                                    break;
+                                }
+
+                                // continue iterating through recipient contig until homology found, or end of contig reached
+                                end_recipient_site += 1;
+                            }
                         }
 
-                        // use to determine homology between sites
-                        let donor_site = &donor_genome.seq[end_donor_site];
+                        // perform recombination event, replacing recipient track with donor track
+                        // clone the donor track first, before any mutable borrow of pop
+                        let mut donor_track: Vec<NucElement> = donor_genome.seq
+                            [start_donor_site..=end_donor_site]
+                            .to_vec()
+                            .clone();
 
-                        // now iterate through recipient genome until homology found between end and donor site
-                        let mut recipient_end_found = false;
-                        while !recipient_end_found {
-                            // run off end of contig, assume complete recombination
-                            if end_recipient_site >= recipient_genome.seq.len()
-                            {
-                                // reduce index by 1
-                                end_recipient_site -= 1;
-                                track_found = true;
-                                recipient_end_found = true;
-                                break;
-                            } else if recipient_genome.seq[end_recipient_site].contig_id != recipient_contig_id {
-                                // reduce index by 1
-                                end_recipient_site -= 1;
-                                track_found = true;
-                                recipient_end_found = true;
-                                break;
-                            }
-
-                            let recipient_site = &recipient_genome.seq[end_recipient_site];
-                            let homology = calculate_homology(donor_site, recipient_site, population.recombination_threshold);
-                            if homology >= population.recombination_threshold {
-                                track_found = true;
-                                recipient_end_found = true;
-                                break;
-                            }
-
-                            // continue iterating through recipient contig until homology found, or end of contig reached
-                            end_recipient_site += 1;
+                        // update information from recipient track
+                        for element in &mut donor_track {
+                            element.contig_id = recipient_contig_id;
                         }
+
+                        // store donor_track length before it is moved
+                        let donor_track_len = donor_track.len();
+                        let donor_track_seq_len: usize = donor_track.iter().map(|e| e.seq.len()).sum();
+
+                        let recipient_track_seq_len: usize = recipient_genome.seq
+                            [start_recipient_site..=end_recipient_site]
+                            .iter()
+                            .map(|e| e.seq.len())
+                            .sum();
+
+                        thread_total_donor_length += donor_track_seq_len;
+                        thread_total_recipient_length += recipient_track_seq_len;
+                        thread_successful_recombinations += 1;
+
+                        // update homology map for recipient genome, need to add new positions for each element in donor track, and remove old positions for each element in recipient track
+                        // remove old positions
+                        for element_idx in start_recipient_site..=end_recipient_site {
+                            let element_id = recipient_genome.seq[element_idx].element_id;
+                            let homology_group =
+                                &mut thread_homology_map[element_id][recipient_genome.genome_id];
+                            homology_group.retain(|&pos| pos != element_idx); // remove old position
+                        }
+
+                        // now safe to mutably borrow recipient
+                        recipient_genome
+                            .seq
+                            .splice(start_recipient_site..=end_recipient_site, donor_track);
+
+                        // add new positions
+                        for element_idx in start_recipient_site..(start_recipient_site + donor_track_len) {
+                            let element_id = recipient_genome.seq[element_idx].element_id;
+                            let homology_group =
+                                &mut thread_homology_map[element_id][recipient_genome.genome_id];
+                            homology_group.push(element_idx); // add new position
+                        }
+                        // update contig_ids
+                        recipient_genome.update_contig_starts();
                     }
-
-                    // perform recombination event, replacing recipient track with donor track
-                    // clone the donor track first, before any mutable borrow of pop
-                    let mut donor_track: Vec<NucElement> = donor_genome.seq
-                        [start_donor_site..=end_donor_site]
-                        .to_vec()
-                        .clone();
-
-                    // update information from recipient track
-                    for element in &mut donor_track {
-                        element.contig_id = recipient_contig_id;
-                    }
-
-                    // store donor_track length before it is moved
-                    let donor_track_len = donor_track.len();
-                    let donor_track_seq_len: usize = donor_track.iter().map(|e| e.seq.len()).sum();
-
-                    let recipient_track_seq_len: usize = recipient_genome.seq
-                        [start_recipient_site..=end_recipient_site]
-                        .iter()
-                        .map(|e| e.seq.len())
-                        .sum();
-
-                    total_donor_length += donor_track_seq_len;
-                    total_recipient_length += recipient_track_seq_len;
-                    successful_recombinations += 1;
-
-                    // update homology map for recipient genome, need to add new positions for each element in donor track, and remove old positions for each element in recipient track
-                    // remove old positions
-                    for element_idx in start_recipient_site..=end_recipient_site {
-                        let element_id = recipient_genome.seq[element_idx].element_id;
-                        let homology_group =
-                            &mut population.homology_map[element_id][recipient_genome.genome_id];
-                        homology_group.retain(|&pos| pos != element_idx); // remove old position
-                    }
-
-                    // now safe to mutably borrow recipient
-                    recipient_genome
-                        .seq
-                        .splice(start_recipient_site..=end_recipient_site, donor_track);
-
-                    // add new positions
-                    for element_idx in start_recipient_site..(start_recipient_site + donor_track_len) {
-                        let element_id = recipient_genome.seq[element_idx].element_id;
-                        let homology_group =
-                            &mut population.homology_map[element_id][recipient_genome.genome_id];
-                        homology_group.push(element_idx); // add new position
-                    }
-                    // update contig_ids
-                    recipient_genome.update_contig_starts();
                 }
             }
+        (genomes, thread_homology_map, thread_total_donor_length, thread_total_recipient_length, thread_successful_recombinations)
+    }).collect::<Vec<_>>();
+
+    // combine results from each thread
+    let mut successful_recombinations = 0;
+    let mut total_donor_length = 0;
+    let mut total_recipient_length = 0;
+
+    for (genomes, thread_homology_map, thread_donor_length, thread_recipient_length, thread_successful_recombinations) in results {
+        total_donor_length += thread_donor_length;
+        total_recipient_length += thread_recipient_length;
+        successful_recombinations += thread_successful_recombinations;
+
+        // update population with new genomes
+        for (id, genome) in genomes {
+            population.pop[id] = genome;
+
+            // update population homology map with new homology map
+            for (element_id, homology_groups) in thread_homology_map.iter().enumerate() {
+                population.homology_map[element_id][id] = homology_groups[id].clone();
+            }
         }
-    }); 
+    }
+
     (successful_recombinations, total_donor_length, total_recipient_length)
 }
 
