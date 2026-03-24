@@ -11,7 +11,7 @@ use std::os::unix::thread;
 use petgraph::graph::{NodeIndex, UnGraph};
 use petgraph::visit::Dfs;
 use std::collections::HashSet;
-use rayon::prelude::*;
+use rayon::{prelude::*, vec};
 use std::sync::Mutex;
 
 // for a given NucElement, store its position in the genome
@@ -597,16 +597,17 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
     let mut total_donor_length = 0;
     let mut total_recipient_length = 0;
 
+    // staging vec for indexed insertion by genome_id
+    let mut new_pop: Vec<Option<Genome>> = (0..pop_size).map(|_| None).collect();
+
     for (genomes, thread_homology_map, thread_donor_length, thread_recipient_length, thread_successful_recombinations) in results {
         total_donor_length += thread_donor_length;
         total_recipient_length += thread_recipient_length;
         successful_recombinations += thread_successful_recombinations;
 
         // update population with new genomes
-        let mut genomes = genomes;
-        genomes.sort_by_key(|(genome_id, _)| *genome_id);
         for (genome_id, genome) in genomes.into_iter() {
-            population.pop.push(genome);
+            new_pop[genome_id] = Some(genome);
 
             // update population homology map with new homology map
             for (element_id, homology_groups) in thread_homology_map.iter().enumerate() {
@@ -615,13 +616,25 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
         }
     }
 
+    // Push back any genomes not involved in any recombination component
+    for maybe_genome in pop_opt.into_iter() {
+        if let Some(genome) = maybe_genome {
+            let genome_id = genome.genome_id;
+            new_pop[genome_id] = Some(genome);
+        }
+    }
+
+    // Unwrap back into population.pop (all slots must be filled)
+    population.pop = new_pop.into_iter()
+        .enumerate()
+        .map(|(i, opt)| opt.unwrap_or_else(|| panic!("genome slot {} was never filled", i)))
+        .collect();
+
     (successful_recombinations, total_donor_length, total_recipient_length)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::default;
-
     use super::*;
     use crate::mutation::{Distribution as MutationDistribution, MutationMap};
     use crate::population::{Genome, NucElement};
