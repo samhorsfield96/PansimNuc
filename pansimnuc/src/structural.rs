@@ -7,12 +7,10 @@ use rand::Rng;
 use rand::seq::SliceRandom;
 use triple_accel::levenshtein::*;
 use std::collections::HashMap;
-use std::os::unix::thread;
 use petgraph::graph::{NodeIndex, UnGraph};
 use petgraph::visit::Dfs;
 use std::collections::HashSet;
-use rayon::{prelude::*, vec};
-use std::sync::Mutex;
+use rayon::{prelude::*};
 
 // for a given NucElement, store its position in the genome
 // which can then be shuffled around by structural mutations, or copied
