@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use petgraph::graph::{NodeIndex, UnGraph};
 use petgraph::visit::Dfs;
 use std::collections::HashSet;
+use rayon::prelude::*;
+use std::sync::Mutex;
 
 // for a given NucElement, store its position in the genome
 // which can then be shuffled around by structural mutations, or copied
@@ -299,26 +301,38 @@ fn connected_components(
 pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize) {
     let mut thread_rng = rand::thread_rng();
 
+    // Wrap pop in per-element mutexes so disjoint components can be accessed safely
+    // let mut pop: Vec<Mutex<Genome>> = population.pop.drain(..).map(Mutex::new).collect();
+    // let homology_map: Vec<Mutex<Vec<Vec<usize>>>> = population.homology_map
+    //     .drain(..)
+    //     .map(Mutex::new)
+    //     .collect();
+
     // get number of recombination events across whole population
     let n_recombinations = population.recombination_dists[0].sample(&mut thread_rng) as usize;
 
     let pop_size = population.pop.len();
 
-    // All ordered pairs where donor != recipient
-    let all_pairs: Vec<(u32, u32)> = (0..pop_size as u32)
-        .flat_map(|i| (0..pop_size as u32).filter(move |&j| j != i).map(move |j| (i, j)))
+   // All ordered pairs where donor != recipient
+    let all_pairs: Vec<(u32, u32)> = (0..pop_size)
+        .flat_map(|i| (0..pop_size).filter(move |&j| j != i).map(move |j| (i as u32, j as u32)))
         .collect();
-
-    let components = connected_components(0..pop_size as u32, &all_pairs);
-
-    // generate list of recombination_maps which can be parralellised over
-    let mut recombination_map_list: Vec<HashMap<usize, Vec<usize>>> = vec![HashMap::new(); components.len()];
 
     let mut recombination_map_tmp: HashMap<usize, Vec<usize>> = HashMap::new();
     for _ in 0..n_recombinations {
         let (donor, recipient) = all_pairs.choose(&mut thread_rng).expect("Failed to select a random pair for recombination");
         recombination_map_tmp.entry(*donor as usize).or_default().push(*recipient as usize);
     }
+
+    let sampled_edges: Vec<(u32, u32)> = recombination_map_tmp
+        .iter()
+        .flat_map(|(&donor, recipients)| recipients.iter().map(move |&recipient| (donor as u32, recipient as u32)))
+        .collect();
+
+    let components = connected_components(0..pop_size as u32, &sampled_edges);
+
+    // generate list of independent recombination maps to process
+    let mut recombination_map_list: Vec<HashMap<usize, Vec<usize>>> = Vec::with_capacity(components.len());
 
     // pull out each connected component
     for component in components {
@@ -328,7 +342,9 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                 component_map.insert(donor as usize, recipients.clone());
             }
         }
-        recombination_map_list.push(component_map);
+        if !component_map.is_empty() {
+            recombination_map_list.push(component_map);
+        }
     }
 
     let mut total_donor_length = 0;
@@ -337,14 +353,17 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
     // iterate through each donor and recipient pair, in future make parallelisable by processing each independent recombination map separately
     let mut successful_recombinations = 0;
 
-    for recombination_map in recombination_map_list.iter_mut() {
+    recombination_map_list.iter()
+        .for_each(|recombination_map| {
         for (donor, recipients) in recombination_map {
             for recipient in recipients {
-
                 // donor != recipient by construction (from all_pairs)
                 let (donor_genome, recipient_genome): (&Genome, &mut Genome) = if donor < recipient {
                     let (left, right) = population.pop.split_at_mut(*recipient);
-                    (&left[*donor], &mut right[0])
+                    (
+                        &left[*donor],
+                        &mut right[0],
+                    )
                 } else {
                     let (left, right) = population.pop.split_at_mut(*donor);
                     (&right[0], &mut left[*recipient])
@@ -503,7 +522,7 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                     }
 
                     // perform recombination event, replacing recipient track with donor track
-                    // clone the donor track first, before any mutable borrow of population.pop
+                    // clone the donor track first, before any mutable borrow of pop
                     let mut donor_track: Vec<NucElement> = donor_genome.seq
                         [start_donor_site..=end_donor_site]
                         .to_vec()
@@ -554,7 +573,7 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                 }
             }
         }
-    } 
+    }); 
     (successful_recombinations, total_donor_length, total_recipient_length)
 }
 
