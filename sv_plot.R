@@ -108,8 +108,8 @@ sim_paths <- args[-1L]
 root_path <- "/Users/samhorsfield/Software/PansimNuc/output/root_test_output.gff"
 contig_gap <- 500
 no_links <- FALSE
-link_types <- "all"
-keep_types <- "all"
+link_types <- c("exon", "intron", "intergenic", "TE-COPY", "TE-CUT")
+keep_types <- c("exon", "intron", "intergenic", "TE-COPY", "TE-CUT")
 p_width <- 16
 p_height <- 16
 out_file <- "/Users/samhorsfield/Software/PansimNuc/output/sv_plot.pdf"
@@ -133,9 +133,9 @@ if (is.null(all_feats) || nrow(all_feats) == 0L) {
   stop("No features loaded. Check that the GFF files are valid PansimNuc output.")
 }
 
-# if (!is.null(keep_types)) {
-#   all_feats <- filter(all_feats, feature_type %in% keep_types)
-# }
+if (!is.null(keep_types)) {
+  all_feats <- filter(all_feats, feature_type %in% keep_types)
+}
 
 # ── linearize contigs (Progressive Mauve style) ──────────────────────────────
 # Within each genome, sort contigs by their numeric suffix (contig_1 < contig_2
@@ -202,25 +202,34 @@ seqs <- all_feats |>
 # absent link = deletion.
 
 if (!no_links) {
-  root_anchors <- all_feats |>
-    filter(bin_id == "root") |>
-    select(seq_id1 = seq_id, start1 = start, end1 = end,
-           strand1 = strand, element_id, feature_type)
+  ordered_genomes <- seqs$seq_id  # root, 0, 1, 2, ... in figure order
 
-  if (!is.null(link_types)) {
-    root_anchors <- filter(root_anchors, feature_type %in% link_types)
+  links_list <- vector("list", length(ordered_genomes) - 1L)
+  for (i in seq_len(length(ordered_genomes) - 1L)) {
+    upper_anchors <- all_feats |>
+      filter(seq_id == ordered_genomes[i]) |>
+      select(seq_id = seq_id, start = start, end = end,
+             strand1 = strand, element_id, feature_type)
+
+    if (!is.null(link_types)) {
+      upper_anchors <- filter(upper_anchors, feature_type %in% link_types)
+    }
+
+    lower_anchors <- all_feats |>
+      filter(seq_id == ordered_genomes[i + 1L]) |>
+      select(seq_id2 = seq_id, start2 = start, end2 = end,
+             strand2 = strand, element_id)
+
+    links_list[[i]] <- inner_join(upper_anchors, lower_anchors,
+                                  by = "element_id",
+                                  relationship = "many-to-many") |>
+      select(element_id, seq_id, start, end, strand1,
+             seq_id2, start2, end2, strand2, feature_type)
   }
 
-  sim_anchors <- all_feats |>
-    filter(bin_id != "root") |>
-    select(seq_id2 = seq_id, start2 = start, end2 = end,
-           strand2 = strand, element_id)
-
-  links <- inner_join(root_anchors, sim_anchors,
-                      by = "element_id",
-                      relationship = "many-to-many") |>
-    select(seq_id1, start1, end1, strand1,
-           seq_id2, start2, end2, strand2, feature_type)
+  links <- bind_rows(links_list)
+  links$strand <- ifelse(links$strand1 == links$strand2, "+", "-")
+  if (nrow(links) == 0L) links <- NULL
 } else {
   links <- NULL
 }
@@ -304,13 +313,6 @@ p <- p +
   scale_fill_manual(
     values = feature_colors, na.value = "grey60",
     name   = "Feature type"
-  ) +
-  labs(
-    title    = "PansimNuc structural variation",
-    subtitle = sprintf(
-      "%d genome(s) | contigs linearized in numeric order | elements linked by element_id",
-      n_bins
-    )
   ) +
   theme_gggenomes_clean()
 
