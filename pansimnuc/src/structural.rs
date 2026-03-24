@@ -603,12 +603,14 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
         successful_recombinations += thread_successful_recombinations;
 
         // update population with new genomes
-        for (id, genome) in genomes {
-            population.pop[id] = genome;
+        let mut genomes = genomes;
+        genomes.sort_by_key(|(genome_id, _)| *genome_id);
+        for (genome_id, genome) in genomes.into_iter() {
+            population.pop.push(genome);
 
             // update population homology map with new homology map
             for (element_id, homology_groups) in thread_homology_map.iter().enumerate() {
-                population.homology_map[element_id][id] = homology_groups[id].clone();
+                population.homology_map[element_id][genome_id] = homology_groups[genome_id].clone();
             }
         }
     }
