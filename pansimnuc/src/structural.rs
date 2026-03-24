@@ -514,9 +514,9 @@ mod tests {
         let mut structural_dists = Vec::new();
         for _ in 0..5 {
             structural_dists.push(vec![
-                MutationDistribution::new_poisson(1e-9).expect("Failed to create poisson distribution for duplication"),
-                MutationDistribution::new_poisson(1e-9).expect("Failed to create poisson distribution for deletions"),
-                MutationDistribution::new_poisson(1e-9).expect("Failed to create poisson distribution for inversions"),
+                MutationDistribution::new_uniform(0.0, 0.1).expect("Failed to create uniform distribution for duplication"),
+                MutationDistribution::new_uniform(0.0, 0.1).expect("Failed to create uniform distribution for deletions"),
+                MutationDistribution::new_uniform(0.0, 0.1).expect("Failed to create uniform distribution for inversions"),
             ]);
         }
 
@@ -699,7 +699,7 @@ mod tests {
         let mut default_structural_dists = default_structural_dists();
 
         // update inversion rate to 1 for all elements, so that all elements are inverted
-        default_structural_dists[0][2] = MutationDistribution::new_uniform(1.0, 10.0).unwrap();
+        default_structural_dists[0][2] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
 
         let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
@@ -1081,7 +1081,7 @@ mod tests {
         // High probability of duplication, zero deletion
         default_structural_dists[3][0] = MutationDistribution::new_uniform(2.0, 2.1).unwrap();
         default_structural_dists[3][1] = MutationDistribution::new_uniform(2.0, 2.1).unwrap();
-        let pos = MutationDistribution::new_uniform(2.0, 3.0).unwrap();
+        let pos = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
         
         mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
         
@@ -1123,7 +1123,6 @@ mod tests {
         default_structural_dists[2][0] = MutationDistribution::new_uniform(2.0, 2.1).unwrap();
         
         // Use Poisson position distribution for non-TEs
-        let mu = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
         let pos = MutationDistribution::new_poisson(1.5).unwrap();
         
         mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
