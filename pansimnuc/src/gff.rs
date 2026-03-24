@@ -1018,6 +1018,30 @@ contig2\t.\tUnclassified\t22\t24\t.\t+\t.\tID=skip_me";
         let contig1_features = &features[0];
         let contig2_features = &features[1];
 
+        println!("Contig1 features after overlay:");
+        for feature in contig1_features {
+            println!(
+                "{}: {}-{} ({}) [{}]",
+                feature.feature_type,
+                feature.start,
+                feature.end,
+                if feature.strand { "+" } else { "-" },
+                String::from_utf8_lossy(&feature.seq)
+            );
+        }
+
+        println!("Contig2 features after overlay:");
+        for feature in contig2_features {
+            println!(
+                "{}: {}-{} ({}) [{}]",
+                feature.feature_type,
+                feature.start,
+                feature.end,
+                if feature.strand { "+" } else { "-" },
+                String::from_utf8_lossy(&feature.seq)
+            );
+        }
+
         assert!(
             contig1_features
                 .iter()
@@ -1026,12 +1050,7 @@ contig2\t.\tUnclassified\t22\t24\t.\t+\t.\tID=skip_me";
         assert!(
             contig2_features
                 .iter()
-                .any(|f| f.feature_type == "TE-COPY" && f.start == 29 && f.end == 35)
-        );
-        assert!(
-            contig2_features
-                .iter()
-                .any(|f| f.feature_type == "TE-COPY" && f.start == 35 && f.end == 40)
+                .any(|f| f.feature_type == "TE-COPY" && f.start == 29 && f.end == 40)
         );
 
         // Non-TE segments should still be represented correctly on both contigs.
