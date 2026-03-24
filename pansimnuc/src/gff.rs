@@ -500,13 +500,14 @@ mod tests {
 
     fn create_temp_file(prefix: &str, suffix: &str, content: &str) -> String {
         let temp_dir = std::env::temp_dir();
+
+        // sample random ID to avoid collisions in parallel test runs
+        let random_id: u64 = rand::random::<u64>();
+
         let temp_path = temp_dir.join(format!(
             "{}_{}{}",
             prefix,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
+            random_id,
             suffix
         ));
         let mut file = File::create(&temp_path).expect("Failed to create temp file");
@@ -616,6 +617,18 @@ contig1\t.\texon\t30\t40\t.\t+\t.\tID=exon2";
         let contig_features = &features[0];
         assert!(!contig_features.is_empty());
 
+        println!("Contig features after overlay:");
+        for feature in contig_features {
+            println!(
+                "{}: {}-{} ({}) [{}]",
+                feature.feature_type,
+                feature.start,
+                feature.end,
+                if feature.strand { "+" } else { "-" },
+                String::from_utf8_lossy(&feature.seq)
+            );
+        }
+
         // Coverage starts at contig start via leading intergenic segment.
         assert_eq!(contig_features[0].start, 0);
         // Coverage reaches the end of the last exon in this synthetic input.
@@ -677,6 +690,18 @@ contig2\t.\texon\t80\t100\t.\t-\t.\tID=c2g2e2";
                 // Continuous coverage across generated range.
                 assert_eq!(left.end, right.start);
             }
+
+            println!("Contig features after overlay:");
+            for feature in contig_features {
+                println!(
+                    "{}: {}-{} ({}) [{}]",
+                    feature.feature_type,
+                    feature.start,
+                    feature.end,
+                    if feature.strand { "+" } else { "-" },
+                    String::from_utf8_lossy(&feature.seq)
+                );
+            }
         }
 
         // Overlapping exons are currently not merged; overlapping records are not represented.
@@ -735,6 +760,18 @@ contig1\t.\texon\t20\t50\t.\t+\t.\tID=gene2_exon1";
         let features = result.unwrap();
         assert_eq!(features.len(), 1);
         let contig_features = &features[0];
+
+        println!("Contig features after overlay:");
+        for feature in contig_features {
+            println!(
+                "{}: {}-{} ({}) [{}]",
+                feature.feature_type,
+                feature.start,
+                feature.end,
+                if feature.strand { "+" } else { "-" },
+                String::from_utf8_lossy(&feature.seq)
+            );
+        }
 
         // Exons from different genes must not be merged into one larger overlapping exon.
         assert!(
