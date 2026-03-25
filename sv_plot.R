@@ -218,13 +218,13 @@ if (!no_links) {
     lower_anchors <- all_feats |>
       filter(seq_id == ordered_genomes[i + 1L]) |>
       select(seq_id2 = seq_id, start2 = start, end2 = end,
-             strand2 = strand, element_id)
+             strand2 = strand, element_id, feature_type2 = feature_type)
 
     links_list[[i]] <- inner_join(upper_anchors, lower_anchors,
                                   by = "element_id",
                                   relationship = "many-to-many") |>
       select(element_id, seq_id, start, end, strand1,
-             seq_id2, start2, end2, strand2, feature_type)
+             seq_id2, start2, end2, strand2, feature_type, feature_type2)
   }
 
   links <- bind_rows(links_list)
@@ -298,9 +298,9 @@ if (!no_links && !is.null(links) && nrow(links) > 0L) {
   p <- p +
     geom_link(
       aes(fill = feature_type),
-      alpha  = 0.28
-    ) +
-    scale_fill_manual(
+      alpha  = 0.28,
+      colour = NA
+    ) + scale_fill_manual(
       values = feature_colors, na.value = "grey60",
       name   = "Feature type"
     ) +
