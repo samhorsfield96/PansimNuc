@@ -1,0 +1,36 @@
+executable=../pansimnuc/target/release/PansimNuc
+config_dir=../test_configs
+outdir=../parameter_sweep
+plotting_script=../sv_plot.R
+
+mkdir -p $outdir
+
+# baseline
+for config in "$config_dir"/baseline*.conf; do
+    run_name=$(basename "$config" .conf)
+    outdir_run=$outdir/$run_name
+    mkdir -p "$outdir_run"
+    echo "Running $run_name..."
+    $executable --config "$config" > "$outdir_run/$run_name.log"
+    Rscript "$plotting_script" "$outdir_run/root_out.gff" "$outdir_run" --out "$outdir_run/sv_plot.pdf" --width 16 --height 16 --types exon,intron,intergenic,TE-COPY,TE-CUT --link-types exon,TE-COPY,TE-CUT --gap 50000
+done
+
+# exon selection parameter sweep
+for config in "$config_dir"/exon_selection*.conf; do
+    run_name=$(basename "$config" .conf)
+    outdir_run=$outdir/$run_name
+    mkdir -p "$outdir_run"
+    echo "Running $run_name..."
+    $executable --config "$config" > "$outdir_run/$run_name.log"
+    Rscript "$plotting_script" "$outdir_run/root_out.gff" "$outdir_run" --out "$outdir_run/sv_plot.pdf" --width 16 --height 16 --types exon,intron,intergenic,TE-COPY,TE-CUT --link-types exon,TE-COPY,TE-CUT --gap 50000
+done
+
+# TE selection parameter sweep
+for config in "$config_dir"/TE-*.conf; do
+    run_name=$(basename "$config" .conf)
+    outdir_run=$outdir/$run_name
+    mkdir -p "$outdir_run"
+    echo "Running $run_name..."
+    $executable --config "$config" > "$outdir_run/$run_name.log"
+    Rscript "$plotting_script" "$outdir_run/root_out.gff" "$outdir_run" --out "$outdir_run/sv_plot.pdf" --width 16 --height 16 --types exon,intron,intergenic,TE-COPY,TE-CUT --link-types exon,TE-COPY,TE-CUT --gap 50000
+done
