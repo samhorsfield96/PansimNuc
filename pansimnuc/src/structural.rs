@@ -321,8 +321,6 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
         .flat_map(|(&donor, recipients)| recipients.iter().map(move |&recipient| (donor as u32, recipient as u32)))
         .collect();
 
-    println!("sampled_edges: {:?}", sampled_edges);
-
     let components = connected_components(0..pop_size as u32, &sampled_edges);
 
     // generate list of independent recombination maps to process
