@@ -310,8 +310,6 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
         .flat_map(|i| (0..pop_size).filter(move |&j| j != i).map(move |j| (i as u32, j as u32)))
         .collect();
 
-    println!("all_pairs: {:?}", all_pairs);
-
     let mut recombination_map_tmp: HashMap<usize, Vec<usize>> = HashMap::new();
     for _ in 0..n_recombinations {
         let (donor, recipient) = all_pairs.choose(&mut rng).expect("Failed to select a random pair for recombination");
@@ -371,16 +369,27 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
             let mut thread_total_recipient_length = 0;
             let mut thread_successful_recombinations = 0;
 
+            // Before the for (donor, recipients) loop, build a local index map:
+            let genome_id_to_local_idx: HashMap<usize, usize> = genomes
+                .iter()
+                .enumerate()
+                .map(|(local_idx, (genome_id, _))| (*genome_id, local_idx))
+                .collect();
+
             // iterate over recombinations
             for (donor, recipients) in recombination_map {
+                // get local donor index in genomes vec
+                let donor_local = genome_id_to_local_idx[&donor];
                 for recipient in recipients {
+                    // get local recipient index in genomes vec
+                    let recipient_local = genome_id_to_local_idx[&recipient];
 
-                    let (donor_genome, recipient_genome): (&Genome, &mut Genome) = if donor < recipient {
-                        let (left, right) = genomes.split_at_mut(recipient);
-                        (&left[donor].1, &mut right[0].1)
+                    let (donor_genome, recipient_genome): (&Genome, &mut Genome) = if donor_local < recipient_local {
+                        let (left, right) = genomes.split_at_mut(recipient_local);
+                        (&left[donor_local].1, &mut right[0].1)
                     } else {
-                        let (left, right) = genomes.split_at_mut(donor);
-                        (&right[0].1, &mut left[recipient].1)
+                        let (left, right) = genomes.split_at_mut(donor_local);
+                        (&right[0].1, &mut left[recipient_local].1)
                     };
 
                     // look for donor and recipient site, maximum total donor length attempts, if not found, skip recombination event
