@@ -225,7 +225,7 @@ fn main() {
                         // sample next generation
                         let sampled_indices = population.sample_individuals(&mut rng);
                         population.next_generation(sampled_indices);
-                        eprintln!("Finished generation {generation}");
+                        println!("Finished generation {generation}");
 
                         if generation < n_generations {
                             population.update_mu_dists(&site_mutation_mus_vals);
