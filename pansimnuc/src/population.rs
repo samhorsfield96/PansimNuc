@@ -665,9 +665,10 @@ impl Population {
         self.generation += 1;
     }
 
-    pub fn write_fasta(&self, output_path: &str) -> io::Result<()> {
+    pub fn write_fasta(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
         for (genome_index, genome) in self.pop.iter().enumerate() {
-            let genome_output_path = Self::genome_output_path(output_path, &genome_index.to_string())?;
+            let prefix = if root_genome { "root" } else { &genome_index.to_string() };
+            let genome_output_path = Self::genome_output_path(output_path, prefix)?;
             let file = File::create(&genome_output_path)?;
             let mut writer = BufWriter::new(file);
 
@@ -712,6 +713,10 @@ impl Population {
             }
 
             writer.flush()?;
+
+            if root_genome {
+                break; // only write root genome if specified
+            }
         }
 
         Ok(())
@@ -986,7 +991,7 @@ mod tests {
         let genome_output_path = Population::genome_output_path(&output_path, "0")
             .expect("failed to construct per-genome output path");
 
-        pop.write_fasta(&output_path)
+        pop.write_fasta(&output_path, false)
             .expect("failed to write test FASTA file");
 
         let mut content = String::new();

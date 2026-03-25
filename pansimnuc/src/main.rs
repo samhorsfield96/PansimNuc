@@ -76,8 +76,6 @@ fn main() {
             .expect("Failed to initialise rayon pool");
     }
 
-
-
     // initialise RNG with seed for reproducibility
     let seed_str = configuration
         .get("misc.seed")
@@ -210,6 +208,12 @@ fn main() {
                             panic!("Failed to write root genome GFF file: {err}");
                         });
                     }
+                    if let Some(root_fasta_path) = configuration
+                        .get("output.fasta_file") {
+                        population.write_fasta(root_fasta_path, true).unwrap_or_else(|err| {
+                            panic!("Failed to write root genome FASTA file: {err}");
+                        });
+                    }
 
                     // mutate population
                     for generation in 1..=n_generations {
@@ -245,7 +249,7 @@ fn main() {
                         }
                     }
 
-                    if let Err(err) = population.write_fasta(&output_fasta) {
+                    if let Err(err) = population.write_fasta(&output_fasta, false) {
                         eprintln!("Failed to write final population FASTA files: {err}");
                         std::process::exit(1);
                     }
