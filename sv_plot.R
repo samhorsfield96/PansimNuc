@@ -7,7 +7,7 @@
 # (shared element_id) are connected by synteny ribbons across genomes.
 #
 # Usage:
-#   Rscript sv_plot.R <root.gff> <sim0.gff> [sim1.gff ...] [options]
+#   Rscript sv_plot.R <root.gff> <sim.directory> [options]
 #
 # Options:
 #   --out FILE       output file (default: sv_plot.pdf)
@@ -101,23 +101,23 @@ r <- take_flag("--gap",        args, "500");         contig_gap <- as.integer(r$
 r <- take_switch("--no-links", args);                no_links   <- r$val; args <- r$args
 
 root_path <- args[1L]
-sim_paths <- args[-1L]
+sim_directory <- args[-1L]
 
 # ── read data ─────────────────────────────────────────────────────────────────
 
-root_path <- "/Users/samhorsfield/Software/PansimNuc/output/root_test_output.gff"
-contig_gap <- 500
-no_links <- FALSE
-link_types <- c("exon", "intron", "intergenic", "TE-COPY", "TE-CUT")
-keep_types <- c("exon", "intron", "intergenic", "TE-COPY", "TE-CUT")
-p_width <- 16
-p_height <- 16
-out_file <- "/Users/samhorsfield/Software/PansimNuc/output/sv_plot.pdf"
+# root_path <- "/Users/samhorsfield/Software/PansimNuc/parameter_sweep/baseline/root_out.gff"
+# sim_directory <- "/Users/samhorsfield/Software/PansimNuc/parameter_sweep/baseline"
+# contig_gap <- 500
+# no_links <- FALSE
+# link_types <- c("TE-COPY", "TE-CUT")
+# keep_types <- c("exon", "intron", "intergenic", "TE-COPY", "TE-CUT")
+# p_width <- 16
+# p_height <- 16
+# out_file <- "/Users/samhorsfield/Software/PansimNuc/parameter_sweep/baseline/sv_plot.pdf"
 
 message("Reading root GFF: ", root_path)
 all_feats <- read_pansimnuc_gff(root_path, "root")
 
-sim_directory <- "/Users/samhorsfield/Software/PansimNuc/output"
 sim_paths <- list.files(sim_directory, pattern = "*.gff", full.names = TRUE)
 sim_paths <- sim_paths[sim_paths != root_path]
 
