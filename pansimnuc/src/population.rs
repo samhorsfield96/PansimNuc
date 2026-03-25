@@ -62,12 +62,10 @@ pub struct Genome {
 impl Genome {
     pub fn update_contig_starts(&mut self) {
         self.contig_starts.clear();
-        let mut current_start = 0;
         let mut total_length = 0;
         for (idx, element) in self.seq.iter().enumerate() {
             if idx == 0 || element.contig_id != self.seq[idx - 1].contig_id {
-                self.contig_starts.push(current_start);
-                current_start = idx;
+                self.contig_starts.push(idx);
             }
             total_length += element.seq.len();
         }
@@ -682,8 +680,10 @@ impl Population {
                     .push(idx);
             }
 
-            // Write each contig group as a separate FASTA entry
-            for (contig_id, indices) in contig_groups {
+            // Write each contig group as a separate FASTA entry, in ascending contig order
+            let mut sorted_contig_groups: Vec<(usize, Vec<usize>)> = contig_groups.into_iter().collect();
+            sorted_contig_groups.sort_by_key(|&(id, _)| id);
+            for (contig_id, indices) in sorted_contig_groups {
                 writeln!(
                     writer,
                     ">{id}_contig{contig_id} parent={parent} generation={generation}",
@@ -749,7 +749,13 @@ impl Population {
             let genome_selection_coefficient = selection_weights[genome_index].ln();
             let mut contig_offsets: HashMap<usize, usize> = HashMap::new();
 
-            for element in &genome.seq {
+            // Sort element indices by (contig_id, seq position) so GFF is grouped
+            // by contig and entries within each contig appear in physical order.
+            let mut sorted_seq_indices: Vec<usize> = (0..genome.seq.len()).collect();
+            sorted_seq_indices.sort_by_key(|&i| (genome.seq[i].contig_id, i));
+
+            for seq_idx in sorted_seq_indices {
+                let element = &genome.seq[seq_idx];
                 let offset = contig_offsets.entry(element.contig_id).or_insert(0);
                 let start_0 = *offset;
                 let end_0 = start_0 + element.seq.len();
