@@ -121,3 +121,146 @@ impl MetaPopulation {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::population::Genome;
+
+    fn test_split_config(migration_rate: f64) -> PopulationSplitConfig {
+        PopulationSplitConfig {
+            population_splits: vec![1],
+            generation_splits: vec![1],
+            migration_rate,
+        }
+    }
+
+    fn test_genomes(n: usize, prefix: &str) -> Vec<Genome> {
+        (0..n)
+            .map(|idx| Genome {
+                identifier: format!("{}_{}", prefix, idx),
+                genome_id: idx,
+                contig_starts: Vec::new(),
+                parent: "root".to_string(),
+                seq: Vec::new(),
+                seq_length: 0,
+            })
+            .collect()
+    }
+
+    fn test_population(id: usize, n_genomes: usize, prefix: &str) -> Population {
+        Population {
+            id,
+            generation: 0,
+            pop: test_genomes(n_genomes, prefix),
+            core_vec: Vec::new(),
+            selection_dists: Vec::new(),
+            mu_dists: Vec::new(),
+            structural_mu_dists: Vec::new(),
+            recombination_dists: Vec::new(),
+            recombination_threshold: 0.0,
+            homology_map: Vec::new(),
+            feature_map: std::collections::HashMap::new(),
+            max_multiplier_dist: 0,
+            n_generations: 1,
+            verbose: false,
+        }
+    }
+
+    #[test]
+    fn test_new_initialises_single_population() {
+        let population = test_population(7, 2, "p0");
+        let split_config = test_split_config(0.1);
+
+        let meta = MetaPopulation::new(population.clone(), split_config.clone());
+
+        assert_eq!(meta.populations.len(), 1);
+        assert_eq!(meta.populations[0].id, 7);
+        assert_eq!(meta.population_split_config, split_config);
+    }
+
+    #[test]
+    fn test_max_population_id_returns_largest_id() {
+        let population = test_population(2, 1, "p0");
+        let mut meta = MetaPopulation::new(population, test_split_config(0.1));
+        meta.populations.push(test_population(9, 1, "p1"));
+        meta.populations.push(test_population(4, 1, "p2"));
+
+        assert_eq!(meta.max_population_id(), 9);
+    }
+
+    #[test]
+    fn test_split_population_adds_population_with_new_id() {
+        let mut meta = MetaPopulation::new(test_population(3, 2, "p0"), test_split_config(0.1));
+
+        meta.split_population();
+
+        assert_eq!(meta.populations.len(), 2);
+        let ids: Vec<usize> = meta.populations.iter().map(|p| p.id).collect();
+        assert!(ids.contains(&3));
+        assert!(ids.contains(&4));
+    }
+
+    #[test]
+    fn test_merge_populations_merges_two_into_one() {
+        let mut meta = MetaPopulation::new(test_population(1, 2, "p0"), test_split_config(0.1));
+        meta.populations.push(test_population(5, 2, "p1"));
+
+        meta.merge_populations();
+
+        assert_eq!(meta.populations.len(), 1);
+        assert_eq!(meta.populations[0].id, 6);
+        assert_eq!(meta.populations[0].pop.len(), 2);
+    }
+
+    #[test]
+    fn test_merge_populations_noop_when_single_population() {
+        let mut meta = MetaPopulation::new(test_population(10, 2, "p0"), test_split_config(0.1));
+
+        meta.merge_populations();
+
+        assert_eq!(meta.populations.len(), 1);
+        assert_eq!(meta.populations[0].id, 10);
+    }
+
+    #[test]
+    fn test_migrate_noop_when_rate_zero() {
+        let mut meta = MetaPopulation::new(test_population(1, 2, "a"), test_split_config(0.0));
+        meta.populations.push(test_population(2, 2, "b"));
+
+        let before: Vec<Vec<String>> = meta
+            .populations
+            .iter()
+            .map(|p| p.pop.iter().map(|g| g.identifier.clone()).collect())
+            .collect();
+
+        meta.migrate();
+
+        let after: Vec<Vec<String>> = meta
+            .populations
+            .iter()
+            .map(|p| p.pop.iter().map(|g| g.identifier.clone()).collect())
+            .collect();
+
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn test_migrate_noop_when_single_population() {
+        let mut meta = MetaPopulation::new(test_population(1, 2, "solo"), test_split_config(1.0));
+        let before: Vec<String> = meta.populations[0]
+            .pop
+            .iter()
+            .map(|g| g.identifier.clone())
+            .collect();
+
+        meta.migrate();
+
+        let after: Vec<String> = meta.populations[0]
+            .pop
+            .iter()
+            .map(|g| g.identifier.clone())
+            .collect();
+        assert_eq!(before, after);
+    }
+}
