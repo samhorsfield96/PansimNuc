@@ -7,6 +7,13 @@ pub struct Config {
     pub sections: HashMap<String, HashMap<String, String>>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct PopulationSplitConfig {
+    pub population_splits: Vec<usize>,
+    pub generation_splits: Vec<usize>,
+    pub migration_rate: f64,
+}
+
 impl Config {
     /// Parse a config file with sections marked by [header]
     pub fn from_file(path: &str) -> io::Result<Self> {
@@ -52,6 +59,75 @@ impl Config {
         self.sections
             .get(section)
             .and_then(|section_map| section_map.get(key).cloned())
+    }
+
+    /// Parse a comma-separated list of positive integers from a section key.
+    pub fn get_usize_vec(&self, section: &str, key: &str) -> Result<Vec<usize>, String> {
+        let value = self
+            .get(section, key)
+            .ok_or_else(|| format!("Missing required config key: {}.{}", section, key))?;
+
+        if value.trim().is_empty() {
+            return Err(format!(
+                "Config key '{}.{}' must contain at least one integer",
+                section, key
+            ));
+        }
+
+        value
+            .split(',')
+            .map(|part| {
+                let trimmed = part.trim();
+                if trimmed.is_empty() {
+                    return Err(format!(
+                        "Config key '{}.{}' contains an empty list entry",
+                        section, key
+                    ));
+                }
+                trimmed.parse::<usize>().map_err(|_| {
+                    format!(
+                        "Config key '{}.{}' contains a non-integer value: '{}'",
+                        section, key, trimmed
+                    )
+                })
+            })
+            .collect()
+    }
+
+    /// Parse an f64 from a section key.
+    pub fn get_f64(&self, section: &str, key: &str) -> Result<f64, String> {
+        let value = self
+            .get(section, key)
+            .ok_or_else(|| format!("Missing required config key: {}.{}", section, key))?;
+
+        value.parse::<f64>().map_err(|_| {
+            format!(
+                "Config key '{}.{}' must be a floating-point number",
+                section, key
+            )
+        })
+    }
+
+    /// Parse and validate migration split settings from [population].
+    pub fn population_split_config(&self) -> Result<PopulationSplitConfig, String> {
+        let population_splits = self.get_usize_vec("population", "population_splits")?;
+        let generation_splits = self.get_usize_vec("population", "generation_splits")?;
+
+        if population_splits.len() != generation_splits.len() {
+            return Err(format!(
+                "population.population_splits and population.generation_splits must have the same length (got {} and {})",
+                population_splits.len(),
+                generation_splits.len()
+            ));
+        }
+
+        let migration_rate = self.get_f64("population", "migration_rate")?;
+
+        Ok(PopulationSplitConfig {
+            population_splits,
+            generation_splits,
+            migration_rate,
+        })
     }
 
     /// Get all keys in a section
@@ -245,6 +321,60 @@ selection_coefficient=0.02";
 
         // Total of 6 values
         assert_eq!(flat.len(), 6);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_population_split_config_parses_successfully() {
+        let content = "[population]
+population_splits=1,2,1,3
+generation_splits=1,5,10,15
+migration_rate=0.01";
+
+        let path = create_test_config(content);
+        let config = Config::from_file(&path).unwrap();
+        let split_config = config.population_split_config().unwrap();
+
+        assert_eq!(split_config.population_splits, vec![1, 2, 1, 3]);
+        assert_eq!(split_config.generation_splits, vec![1, 5, 10, 15]);
+        assert_eq!(split_config.migration_rate, 0.01);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_population_split_config_requires_equal_lengths() {
+        let content = "[population]
+population_splits=1,2,1
+generation_splits=1,5
+migration_rate=0.01";
+
+        let path = create_test_config(content);
+        let config = Config::from_file(&path).unwrap();
+        let result = config.population_split_config();
+
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(err.contains("must have the same length"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_population_split_config_rejects_non_integer_split_values() {
+        let content = "[population]
+population_splits=1,2,a
+generation_splits=1,5,10
+migration_rate=0.01";
+
+        let path = create_test_config(content);
+        let config = Config::from_file(&path).unwrap();
+        let result = config.population_split_config();
+
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(err.contains("non-integer"));
 
         let _ = std::fs::remove_file(&path);
     }
