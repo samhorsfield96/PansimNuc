@@ -1,11 +1,11 @@
 // TODO plot GFFs with ggGenome to show how the genome evolves over time
-// TODO make recombination multi-threaded by adding in component traversal and updating of homology_map afterwards
 
 mod config;
 mod gff;
 mod mutation;
 mod population;
 mod structural;
+mod demography;
 
 use crate::mutation::Distribution;
 use clap::Parser;

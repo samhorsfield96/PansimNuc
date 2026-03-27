@@ -796,6 +796,7 @@ mod tests {
         }
 
         Population {
+            id: 0,
             generation: 0,
             pop: vec![g0, g1],
             core_vec: vec![],

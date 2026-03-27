@@ -73,7 +73,9 @@ impl Genome {
     }
 }
 
+#[derive(Clone)]
 pub struct Population {
+    pub id: usize,
     pub generation: usize,
     pub pop: Vec<Genome>,
     pub core_vec: Vec<Vec<u8>>,
@@ -444,6 +446,7 @@ impl Population {
             vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
 
         Self {
+            id: 0,
             generation: 0,
             pop: population,
             core_vec,
