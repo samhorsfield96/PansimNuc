@@ -2,6 +2,7 @@ use crate::population::Population;
 use crate::config::PopulationSplitConfig;
 use rand::Rng;
 use rand::seq::IteratorRandom;
+use std::collections::HashSet;
 
 pub struct MetaPopulation {
     pub populations: Vec<Population>,
@@ -96,6 +97,8 @@ impl MetaPopulation {
         let mut rng = rand::thread_rng();
         let population_indices: Vec<usize> = (0..self.populations.len()).collect();
 
+        let mut updated_populations: HashSet<usize> = HashSet::new();
+
         for i in 0..self.populations.len() {
             let genomes_to_migrate: Vec<(usize, usize, _)> = {
                 let source_pop = &self.populations[i];
@@ -105,6 +108,10 @@ impl MetaPopulation {
                     .filter_map(|genome| {
                         if rng.gen_bool(migration_rate) {
                             let target_pop_idx = target_indices[rng.gen_range(0..target_indices.len())];
+
+                            // keep track of updated populations
+                            updated_populations.insert(target_pop_idx);
+
                             let target_pop_length = self.populations[target_pop_idx].pop.len();
                             let target_genome_idx = self.populations[target_pop_idx].pop[rng.gen_range(0..target_pop_length)].genome_id;
                             Some((target_pop_idx, target_genome_idx, genome.clone()))
@@ -118,6 +125,11 @@ impl MetaPopulation {
             for (target_pop_idx, target_genome_idx, migrated_genome) in genomes_to_migrate {
                 self.populations[target_pop_idx].pop[target_genome_idx] = migrated_genome;
             }
+        }
+
+        // update homology maps for all populations after migration, to ensure they are consistent with the new population structure
+        for population_idx in updated_populations {
+            self.populations[population_idx].update_homology_map();
         }
     }
 }
@@ -262,5 +274,38 @@ mod tests {
             .map(|g| g.identifier.clone())
             .collect();
         assert_eq!(before, after);
+    }
+
+    #[test]
+    fn test_migrate_moves_members_between_populations() {
+        let mut meta = MetaPopulation::new(test_population(1, 2, "a"), test_split_config(1.0));
+        meta.populations.push(test_population(2, 2, "b"));
+
+        let pop00_before = meta.populations[0].pop[0].identifier.clone();
+        let pop01_before = meta.populations[0].pop[1].identifier.clone();
+        let pop10_before = meta.populations[1].pop[0].identifier.clone();
+        let pop11_before = meta.populations[1].pop[1].identifier.clone();
+
+        meta.migrate();
+
+        let pop00_after = meta.populations[0].pop[0].identifier.clone();
+        let pop01_after = meta.populations[0].pop[1].identifier.clone();
+        let pop10_after = meta.populations[1].pop[0].identifier.clone();
+        let pop11_after = meta.populations[1].pop[1].identifier.clone();
+
+        let moved_from_pop0_to_pop1 = pop10_after == pop00_before || pop11_after == pop01_before || pop10_after == pop01_before || pop11_after == pop00_before;
+        let moved_from_pop1_to_pop0 = pop00_after == pop10_before || pop01_after == pop11_before || pop00_after == pop11_before || pop01_after == pop10_before;
+
+        // assert that A genome moves from pop0 to pop1 and B genome moves from pop1 to pop0
+
+        println!("Pop00 before: {}, Pop01 before: {}", pop00_before, pop01_before);
+        println!("Pop10 before: {}, Pop11 before: {}", pop10_before, pop11_before);
+        println!("Pop00 after: {}, Pop01 after: {}", pop00_after, pop01_after);
+        println!("Pop10 after: {}, Pop11 after: {}", pop10_after, pop11_after);
+
+        assert!(
+            moved_from_pop0_to_pop1 || moved_from_pop1_to_pop0,
+            "Expected at least one genome to move between populations during migration"
+        );
     }
 }

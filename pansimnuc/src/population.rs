@@ -315,6 +315,23 @@ impl Population {
         (selection_weights, logsumexp_value)
     }
 
+    pub fn update_homology_map(&mut self) {
+        // update homology map for all new elements
+        for genome in &self.pop {
+            self.homology_map
+                .iter_mut()
+                .for_each(|element_homology_map| {
+                    element_homology_map[genome.genome_id].clear();
+                });
+
+            for (element_idx, element) in genome.seq.iter().enumerate() {
+                let element_id = element.element_id;
+                let homology_group = &mut self.homology_map[element_id][genome.genome_id];
+                homology_group.push(element_idx); // convert back to 0 indexed
+            }
+        }
+    }
+
     pub fn new(
         root: Vec<Vec<FeaturePos>>,
         n_genomes: usize,
@@ -553,19 +570,7 @@ impl Population {
         }
 
         // update homology map for all new elements
-        for genome in &self.pop {
-            self.homology_map
-                .iter_mut()
-                .for_each(|element_homology_map| {
-                    element_homology_map[genome.genome_id].clear();
-                });
-
-            for (element_idx, element) in genome.seq.iter().enumerate() {
-                let element_id = element.element_id;
-                let homology_group = &mut self.homology_map[element_id][genome.genome_id];
-                homology_group.push(element_idx); // convert back to 0 indexed
-            }
-        }
+        self.update_homology_map();
     }
 
     pub fn structural_inter_genome(&mut self, recombination_rate: f64, total_sites: usize, recombination_size_mean: f64) {
