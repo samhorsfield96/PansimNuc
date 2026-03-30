@@ -137,7 +137,8 @@ impl MetaPopulation {
                     .collect()
             };
 
-            for (target_pop_idx, target_genome_idx, migrated_genome) in genomes_to_migrate {
+            for (target_pop_idx, target_genome_idx, mut migrated_genome) in genomes_to_migrate {
+                migrated_genome.genome_id = target_genome_idx; // assign genome ID of target genome to migrated genome to maintain population structure 
                 self.populations[target_pop_idx].pop[target_genome_idx] = migrated_genome;
             }
         }
@@ -167,12 +168,12 @@ impl MetaPopulation {
                 // sample next generation
                 let sampled_indices = population.sample_individuals(&mut rng);
                 population.next_generation(sampled_indices);
-                println!("Finished generation {generation}");
 
                 if generation < self.n_generations {
                     population.update_mu_dists(&self.site_mutation_mus_vals);
                 }
             });
+            println!("Finished generation {}", generation);
 
             // perform migration between populations
             self.migrate();
@@ -188,7 +189,7 @@ impl MetaPopulation {
                     // perform population splits until we have the required number of populations
 
                     if verbose {
-                        println!("Splitting populations from {current_gen_size} to {new_gen_size} at generation {generation}");
+                        println!("Splitting populations from {} to {} at generation {}", current_gen_size, new_gen_size, generation);
                     }
 
                     while self.populations.len() < new_gen_size {
@@ -197,7 +198,7 @@ impl MetaPopulation {
                 } else if new_gen_size < current_gen_size {
 
                     if verbose {
-                        println!("Merging populations from {current_gen_size} to {new_gen_size} at generation {generation}");
+                        println!("Merging populations from {} to {} at generation {}", current_gen_size, new_gen_size, generation);
                     }
 
                     // perform population merges until we have the required number of populations
