@@ -207,6 +207,7 @@ impl MetaPopulation {
             }
     }
 }
+}
 
 #[cfg(test)]
 mod tests {
@@ -258,7 +259,7 @@ mod tests {
         let population = test_population(7, 2, "p0");
         let split_config = test_split_config(0.1);
 
-        let meta = MetaPopulation::new(population.clone(), split_config.clone());
+        let meta = MetaPopulation::new(population.clone(), split_config.clone(), 10, 0.01, 100.0, vec![0.01]);
 
         assert_eq!(meta.populations.len(), 1);
         assert_eq!(meta.populations[0].id, 7);
@@ -268,7 +269,7 @@ mod tests {
     #[test]
     fn test_max_population_id_returns_largest_id() {
         let population = test_population(2, 1, "p0");
-        let mut meta = MetaPopulation::new(population, test_split_config(0.1));
+        let mut meta = MetaPopulation::new(population, test_split_config(0.1), 10, 0.01, 100.0, vec![0.01]);
         meta.populations.push(test_population(9, 1, "p1"));
         meta.populations.push(test_population(4, 1, "p2"));
 
@@ -277,7 +278,7 @@ mod tests {
 
     #[test]
     fn test_split_population_adds_population_with_new_id() {
-        let mut meta = MetaPopulation::new(test_population(3, 2, "p0"), test_split_config(0.1));
+        let mut meta = MetaPopulation::new(test_population(3, 2, "p0"), test_split_config(0.1), 10, 0.01, 100.0, vec![0.01]);
 
         meta.split_population();
 
@@ -289,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_merge_populations_merges_two_into_one() {
-        let mut meta = MetaPopulation::new(test_population(1, 2, "p0"), test_split_config(0.1));
+        let mut meta = MetaPopulation::new(test_population(1, 2, "p0"), test_split_config(0.1), 10, 0.01, 100.0, vec![0.01]);
         meta.populations.push(test_population(5, 2, "p1"));
 
         meta.merge_populations();
@@ -301,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_merge_populations_noop_when_single_population() {
-        let mut meta = MetaPopulation::new(test_population(10, 2, "p0"), test_split_config(0.1));
+        let mut meta = MetaPopulation::new(test_population(10, 2, "p0"), test_split_config(0.1), 10, 0.01, 100.0, vec![0.01]);
 
         meta.merge_populations();
 
@@ -311,7 +312,7 @@ mod tests {
 
     #[test]
     fn test_migrate_noop_when_rate_zero() {
-        let mut meta = MetaPopulation::new(test_population(1, 2, "a"), test_split_config(0.0));
+        let mut meta = MetaPopulation::new(test_population(1, 2, "a"), test_split_config(0.0), 10, 0.01, 100.0, vec![0.01]);
         meta.populations.push(test_population(2, 2, "b"));
 
         let before: Vec<Vec<String>> = meta
@@ -333,7 +334,7 @@ mod tests {
 
     #[test]
     fn test_migrate_noop_when_single_population() {
-        let mut meta = MetaPopulation::new(test_population(1, 2, "solo"), test_split_config(1.0));
+        let mut meta = MetaPopulation::new(test_population(1, 2, "solo"), test_split_config(1.0), 10, 0.01, 100.0, vec![0.01]);
         let before: Vec<String> = meta.populations[0]
             .pop
             .iter()
@@ -352,7 +353,7 @@ mod tests {
 
     #[test]
     fn test_migrate_moves_members_between_populations() {
-        let mut meta = MetaPopulation::new(test_population(1, 2, "a"), test_split_config(1.0));
+        let mut meta = MetaPopulation::new(test_population(1, 2, "a"), test_split_config(1.0), 10, 0.01, 100.0, vec![0.01]);
         meta.populations.push(test_population(2, 2, "b"));
 
         let pop00_before = meta.populations[0].pop[0].identifier.clone();
