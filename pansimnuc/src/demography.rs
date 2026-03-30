@@ -1,9 +1,10 @@
 use crate::population::Population;
-use crate::config::PopulationSplitConfig;
+use crate::config::{self, PopulationSplitConfig};
 use rand::Rng;
 use rand::seq::IteratorRandom;
 use std::collections::HashSet;
 use rayon::prelude::*;
+use std::collections::HashMap;
 
 pub struct MetaPopulation {
     pub populations: Vec<Population>,
@@ -205,8 +206,29 @@ impl MetaPopulation {
                     }
                 }
             }
+        }
     }
-}
+
+    pub fn write_output(&self, configuration: &HashMap<String, String>) {
+        for population in &self.populations {
+            let output_fasta = configuration
+                .get("output.fasta_file")
+                .cloned()
+                .unwrap_or_else(|| "final_population.fasta".to_string());
+
+            if let Some(output_gff) = configuration.get("output.gff_file") {
+                if let Err(err) = population.write_gff(output_gff, false) {
+                    eprintln!("Failed to write final population GFF files: {err}");
+                    std::process::exit(1);
+                }
+            }
+
+            if let Err(err) = population.write_fasta(&output_fasta, false) {
+                eprintln!("Failed to write final population FASTA files: {err}");
+                std::process::exit(1);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

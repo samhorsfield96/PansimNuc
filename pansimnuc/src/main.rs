@@ -243,22 +243,8 @@ fn main() {
                     
                     // TODO update GFF writing with population indexes
                     println!("Writing output...");
-                    let output_fasta = configuration
-                        .get("output.fasta_file")
-                        .cloned()
-                        .unwrap_or_else(|| "final_population.fasta".to_string());
+                    metapopopulation.write_output(&configuration);
 
-                    if let Some(output_gff) = configuration.get("output.gff_file") {
-                        if let Err(err) = population.write_gff(output_gff, false) {
-                            eprintln!("Failed to write final population GFF files: {err}");
-                            std::process::exit(1);
-                        }
-                    }
-
-                    if let Err(err) = population.write_fasta(&output_fasta, false) {
-                        eprintln!("Failed to write final population FASTA files: {err}");
-                        std::process::exit(1);
-                    }
                 }
             }
             Err(err) => {
