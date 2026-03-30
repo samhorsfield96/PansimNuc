@@ -3,17 +3,33 @@ use crate::config::PopulationSplitConfig;
 use rand::Rng;
 use rand::seq::IteratorRandom;
 use std::collections::HashSet;
+use rayon::prelude::*;
 
 pub struct MetaPopulation {
     pub populations: Vec<Population>,
     pub population_split_config: PopulationSplitConfig,
+    pub n_generations: usize,
+    pub recombination_rate: f64,
+    pub recombination_size_mean: f64,
+    pub site_mutation_mus_vals: Vec<f64>,
 }
 
 impl MetaPopulation {
-    pub fn new(population: Population, population_split_config: PopulationSplitConfig) -> Self {
+    pub fn new(
+        population: Population, 
+        population_split_config: PopulationSplitConfig, 
+        n_generations: usize,
+        recombination_rate: f64,
+        recombination_size_mean: f64,
+        site_mutation_mus_vals: Vec<f64>,
+    ) -> Self {
         MetaPopulation {
             populations: vec![population],
             population_split_config,
+            n_generations,
+            recombination_rate,
+            recombination_size_mean,
+            site_mutation_mus_vals,
         }
     }
 
@@ -42,8 +58,6 @@ impl MetaPopulation {
         let mut rng = rand::thread_rng();
         let selected_indices = (0..self.populations.len()).choose_multiple(&mut rng, 2);
 
-        let pop1_id = self.populations[selected_indices[0]].id;
-        let pop2_id = self.populations[selected_indices[1]].id;
         let pop1 = &self.populations[selected_indices[0]];
         let pop2 = &self.populations[selected_indices[1]];
 
@@ -130,6 +144,66 @@ impl MetaPopulation {
         // update homology maps for all populations after migration, to ensure they are consistent with the new population structure
         for population_idx in updated_populations {
             self.populations[population_idx].update_homology_map();
+        }
+    }
+
+    pub fn run_simulation(&mut self) {
+        let verbose = self.populations[0].verbose; // assume all populations have same verbose setting
+
+        for generation in 1..=self.n_generations {
+            self.populations.par_iter_mut().for_each(|population| {
+                let mut rng = rand::thread_rng();
+                
+                // mutate at nucleotide level
+                let total_sites = population.mutate();
+
+                // perform intragenome structural mutations
+                population.structural_intra_genome();
+
+                // perform intergenome structural mutations
+                population.structural_inter_genome(self.recombination_rate, total_sites, self.recombination_size_mean);
+
+                // sample next generation
+                let sampled_indices = population.sample_individuals(&mut rng);
+                population.next_generation(sampled_indices);
+                println!("Finished generation {generation}");
+
+                if generation < self.n_generations {
+                    population.update_mu_dists(&self.site_mutation_mus_vals);
+                }
+            });
+
+            // perform migration between populations
+            self.migrate();
+
+            // perform population splits and merges at specified generations
+            let current_gen_size = self.populations.len();
+
+            // determine if population split required at this generation by getting index of current generation in population_split_config.generation_splits, if it exists
+            if let Some(split_index) = self.population_split_config.generation_splits.iter().position(|&g| g == generation) {
+                let new_gen_size = self.population_split_config.population_splits[split_index];
+
+                if new_gen_size > current_gen_size {
+                    // perform population splits until we have the required number of populations
+
+                    if verbose {
+                        println!("Splitting populations from {current_gen_size} to {new_gen_size} at generation {generation}");
+                    }
+
+                    while self.populations.len() < new_gen_size {
+                        self.split_population();
+                    }
+                } else if new_gen_size < current_gen_size {
+
+                    if verbose {
+                        println!("Merging populations from {current_gen_size} to {new_gen_size} at generation {generation}");
+                    }
+
+                    // perform population merges until we have the required number of populations
+                    while self.populations.len() > new_gen_size {
+                        self.merge_populations();
+                    }
+            }
         }
     }
 }

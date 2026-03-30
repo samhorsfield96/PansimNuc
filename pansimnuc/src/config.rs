@@ -14,6 +14,16 @@ pub struct PopulationSplitConfig {
     pub migration_rate: f64,
 }
 
+impl PopulationSplitConfig {
+    pub fn new() -> Self {
+        PopulationSplitConfig {
+            population_splits: Vec::new(),
+            generation_splits: Vec::new(),
+            migration_rate: 0.0,
+        }
+    }
+}
+
 impl Config {
     /// Parse a config file with sections marked by [header]
     pub fn from_file(path: &str) -> io::Result<Self> {

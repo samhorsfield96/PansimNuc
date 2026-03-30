@@ -6,7 +6,10 @@ mod mutation;
 mod population;
 mod structural;
 mod demography;
+use rayon::prelude::*;
 
+use crate::config::PopulationSplitConfig;
+use crate::demography::MetaPopulation;
 use crate::mutation::Distribution;
 use clap::Parser;
 use config::Config;
@@ -29,6 +32,7 @@ fn main() {
     let args = Args::parse();
 
     let mut configuration: HashMap<String, String> = HashMap::new();
+    let mut population_split_config = PopulationSplitConfig::new();
 
     // Load config if provided
     let mut verbose = false;
@@ -54,6 +58,11 @@ fn main() {
                         println!("  {} = {}", key, value);
                     }
                 }
+
+                population_split_config = config.population_split_config().unwrap_or_else(|err| {
+                    eprintln!("Failed to generate population split configuration: {err}");
+                    std::process::exit(1);
+                });
             }
             Err(err) => {
                 eprintln!("Failed to read config file: {err}");
@@ -183,6 +192,10 @@ fn main() {
                     let n_generations: usize = n_generation_str
                         .parse::<usize>()
                         .expect("n_generation must be an integer.");
+
+                    // TODO initialise metapopulation, include population splits etc. in config file
+                    // show actually initialise metapopulation and run structural and mutation events there
+                    // can also add in different mutation distributions for each population.
                     
                     println!("Initialising population...");
                     let mut population = Population::new(
@@ -215,27 +228,20 @@ fn main() {
                         });
                     }
 
-                    // mutate population
-                    for generation in 1..=n_generations {
-                        // mutate at nucleotide level
-                        let total_sites = population.mutate();
+                    // generate metapopulation with different mutation distributions
+                    let mut metapopopulation = MetaPopulation::new(
+                        population, 
+                        population_split_config, 
+                        n_generations, 
+                        recombination_rate, 
+                        recombination_size_mean, 
+                        site_mutation_mus_vals);
 
-                        // perform intragenome structural mutations
-                        population.structural_intra_genome();
+                    // run simulation
+                    metapopopulation.run_simulation();
 
-                        // perform intergenome structural mutations
-                        population.structural_inter_genome(recombination_rate, total_sites, recombination_size_mean);
-
-                        // sample next generation
-                        let sampled_indices = population.sample_individuals(&mut rng);
-                        population.next_generation(sampled_indices);
-                        println!("Finished generation {generation}");
-
-                        if generation < n_generations {
-                            population.update_mu_dists(&site_mutation_mus_vals);
-                        }
-                    }
-
+                    
+                    // TODO update GFF writing with population indexes
                     println!("Writing output...");
                     let output_fasta = configuration
                         .get("output.fasta_file")

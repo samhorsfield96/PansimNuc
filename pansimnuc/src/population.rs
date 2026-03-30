@@ -7,6 +7,7 @@ use logsumexp::LogSumExp;
 use rand::SeedableRng;
 use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
 use rand::rngs::StdRng;
+use rand::rngs::ThreadRng;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::File;
@@ -591,7 +592,7 @@ impl Population {
     }
 
     // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights
-    pub fn sample_individuals(&mut self, rng: &mut StdRng) -> Vec<usize> {
+    pub fn sample_individuals(&mut self, rng: &mut ThreadRng) -> Vec<usize> {
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
 
         #[cfg(debug_assertions)]
