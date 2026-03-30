@@ -37,7 +37,7 @@ impl MetaPopulation {
         self.populations.iter().map(|p| p.id).max().unwrap_or(0)
     }
 
-    pub fn split_population(&mut self) {
+    fn split_population(&mut self) {
         // pick random population to duplicate
         let mut rng = rand::thread_rng();
         let population_index = rng.gen_range(0..self.populations.len());
@@ -49,7 +49,7 @@ impl MetaPopulation {
         self.populations.push(new_population);
     }
 
-    pub fn merge_populations(&mut self) {
+    fn merge_populations(&mut self) {
         if self.populations.len() < 2 {
             return; // Need at least two populations to merge
         }
@@ -101,7 +101,7 @@ impl MetaPopulation {
         self.populations.push(merged_population);
     }
 
-    pub fn migrate(&mut self) {
+    fn migrate(&mut self) {
         if self.populations.len() < 2 {
             return; // Need at least two populations to migrate
         }
@@ -203,8 +203,8 @@ impl MetaPopulation {
                     while self.populations.len() > new_gen_size {
                         self.merge_populations();
                     }
+                }
             }
-        }
     }
 }
 
