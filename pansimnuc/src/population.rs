@@ -676,7 +676,7 @@ impl Population {
 
     pub fn write_fasta(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
         for (genome_index, genome) in self.pop.iter().enumerate() {
-            let prefix = if root_genome { "root".to_string() } else { format!("{}-{}", self.id, genome_index) };
+            let prefix = if root_genome { "root".to_string() } else { format!("pop_{}_gen_{:0>4}_genome_{}", self.id, self.generation, genome_index) };
             let genome_output_path = Self::genome_output_path(output_path, &prefix)?;
             let file = File::create(&genome_output_path)?;
             let mut writer = BufWriter::new(file);
@@ -753,7 +753,7 @@ impl Population {
             .collect();
 
         for (genome_index, genome) in self.pop.iter().enumerate() {
-            let prefix = if root_genome { "root".to_string() } else { format!("{}-{}", self.id, genome_index) };
+            let prefix = if root_genome { "root".to_string() } else { format!("pop_{}_gen_{:0>4}_genome_{}", self.id, self.generation, genome_index) };
             let genome_output_path = Self::genome_output_path(output_path, &prefix)?;
             let file = File::create(&genome_output_path)?;
             let mut writer = BufWriter::new(file);
