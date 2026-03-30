@@ -676,7 +676,7 @@ impl Population {
 
     pub fn write_fasta(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
         for (genome_index, genome) in self.pop.iter().enumerate() {
-            let prefix = if root_genome { "root".to_string() } else { format!("pop_{}_gen_{:0>4}_genome_{}", self.id, self.generation, genome_index) };
+            let prefix = if root_genome { "root".to_string() } else { format!("pop_{}_gen_{}_genome_{}", self.id, self.generation, genome_index) };
             let genome_output_path = Self::genome_output_path(output_path, &prefix)?;
             let file = File::create(&genome_output_path)?;
             let mut writer = BufWriter::new(file);
@@ -753,7 +753,7 @@ impl Population {
             .collect();
 
         for (genome_index, genome) in self.pop.iter().enumerate() {
-            let prefix = if root_genome { "root".to_string() } else { format!("pop_{}_gen_{:0>4}_genome_{}", self.id, self.generation, genome_index) };
+            let prefix = if root_genome { "root".to_string() } else { format!("pop_{}_gen_{}_genome_{}", self.id, self.generation, genome_index) };
             let genome_output_path = Self::genome_output_path(output_path, &prefix)?;
             let file = File::create(&genome_output_path)?;
             let mut writer = BufWriter::new(file);
@@ -997,7 +997,7 @@ mod tests {
                 .as_nanos()
         ));
         let output_path = temp_path.to_string_lossy().into_owned();
-        let genome_output_path = Population::genome_output_path(&output_path, "0")
+        let genome_output_path = Population::genome_output_path(&output_path, "pop_0_gen_0_genome_0")
             .expect("failed to construct per-genome output path");
 
         pop.write_fasta(&output_path, false)
@@ -1077,7 +1077,7 @@ mod tests {
                 .as_nanos()
         ));
         let output_path = temp_path.to_string_lossy().into_owned();
-        let genome_output_path = Population::genome_output_path(&output_path, "0")
+        let genome_output_path = Population::genome_output_path(&output_path, "pop_0_gen_0_genome_0")
             .expect("failed to construct per-genome output path");
 
         pop.write_gff(&output_path, false)
