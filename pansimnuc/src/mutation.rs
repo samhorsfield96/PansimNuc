@@ -1079,4 +1079,48 @@ mod tests {
         assert_eq!(map.get(8, 2), Some(&0.40)); // site 3 coefficient shifted down to site 2
         assert_eq!(map.get(8, 3), None); // site 3 deleted, should be removed from map
     }
+
+    #[test]
+    fn test_frameshift_flag_matches_length_change_mod3() {
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
+        let seq: Vec<u8> = vec![1u8; 100];
+        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        let mut seq_mut = seq.clone();
+        let original_length = seq.len();
+
+        let mu_dist = Distribution::new_poisson(1e-12).unwrap();
+        let indel_dist = Distribution::new_poisson(10.0).unwrap();
+        let core_vec: Vec<Vec<u8>> = vec![
+            vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16],
+        ];
+
+        let mut frameshift = true;
+        map.mutate(&core_vec, &mut seq_mut, original_length, &mut frameshift, &dist, &mu_dist, &indel_dist);
+
+        let expected = seq_mut.len().abs_diff(original_length) % 3 != 0;
+        println!("Original length: {}, New length: {}, Frameshift: {}, Expected frameshift: {}", original_length, seq_mut.len(), frameshift, expected);
+        assert_eq!(frameshift, expected);
+    }
+
+    #[test]
+    fn test_frameshift_not_updated_when_no_indels() {
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
+        let seq: Vec<u8> = vec![1u8; 12];
+        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        let mut seq_mut = seq.clone();
+
+        let mu_dist = Distribution::new_poisson(1e-12).unwrap();
+        let indel_dist = Distribution::new_poisson(1e-12).unwrap();
+        let core_vec: Vec<Vec<u8>> = vec![
+            vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16],
+        ];
+
+        // Start with frameshift already set; expect it to remain unchanged when no indels fire
+        let mut frameshift = true;
+        map.mutate(&core_vec, &mut seq_mut, seq.len(), &mut frameshift, &dist, &mu_dist, &indel_dist);
+
+        assert!(frameshift);
+    }
 }
