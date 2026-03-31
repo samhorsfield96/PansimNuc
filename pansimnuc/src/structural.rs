@@ -680,6 +680,7 @@ mod tests {
                     strand: true,
                     original_length: 0,
                     frameshift: false,
+                    tracked: false,
                 },
                 NucElement {
                     contig_id: 0,
@@ -692,6 +693,7 @@ mod tests {
                     strand: false,
                     original_length: 0,
                     frameshift: false,
+                    tracked: false,
                 },
                 NucElement {
                     contig_id: 0,
@@ -704,6 +706,7 @@ mod tests {
                     strand: false,
                     original_length: 0,
                     frameshift: false,
+                    tracked: false,
                 },
             ],
             seq_length: 0,
@@ -730,6 +733,7 @@ mod tests {
             strand,
             original_length: 0,
             frameshift: false,
+            tracked: false,
         };
 
         Genome {
@@ -777,6 +781,7 @@ mod tests {
                 },
                 original_length: marker_seq.len(),
                 frameshift: false,
+                tracked: false,
             });
         }
 
@@ -1160,6 +1165,7 @@ mod tests {
                 strand: true,
                 original_length: 4,
                 frameshift: false,
+                tracked: false,
             },
             NucElement {
                 contig_id: 0,
@@ -1172,6 +1178,7 @@ mod tests {
                 strand: true,
                 original_length: 4,
                 frameshift: false,
+                tracked: false,
             },
             NucElement {
                 contig_id: 0,
@@ -1184,6 +1191,7 @@ mod tests {
                 strand: true,
                 original_length: 4,
                 frameshift: false,
+                tracked: false,
             }],
             seq_length: 0,
         };

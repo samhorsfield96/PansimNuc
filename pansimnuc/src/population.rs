@@ -26,6 +26,7 @@ pub struct NucElement {
     pub strand: bool,
     pub original_length: usize,
     pub frameshift: bool,
+    pub tracked: bool
 }
 
 impl NucElement {
@@ -50,6 +51,24 @@ impl NucElement {
             }
         }
         element_log_sum
+    }
+
+    pub fn generate_selection_coefficients(&self) -> Vec<f64> {
+        self.seq
+            .iter()
+            .enumerate()
+            .map(|(site, allele)| {
+                if let Some(coeff) = self.mutation_map.get(*allele, site) {
+                    let log_coeff = (1.0 + coeff).ln(); // add log of coefficient to log sum
+                    log_coeff
+                } else {
+                    panic!(
+                        "Failed to generate selection coefficient for allele {} at site {}",
+                        allele, site
+                    );
+                }
+            })
+            .collect()
     }
 }
 
@@ -276,7 +295,7 @@ impl Population {
         Ok(path.with_file_name(prefixed_name))
     }
 
-    fn decode_base(base: u8) -> u8 {
+    pub fn decode_base(base: u8) -> u8 {
         match base {
             1 => b'A',
             2 => b'C',
@@ -442,6 +461,7 @@ impl Population {
                     multiplier: multiplier,
                     original_length: feature.seq.len(),
                     frameshift: false,
+                    tracked: false,
                 });
                 element_id += 1;
 
@@ -1627,6 +1647,7 @@ mod tests {
             strand: true,
             original_length: seq.len(),
             frameshift: false,
+            tracked: false,
         }
     }
 

@@ -7,6 +7,7 @@ mod mutation;
 mod population;
 mod structural;
 mod demography;
+mod tracking;
 use rayon::prelude::*;
 
 use crate::config::PopulationSplitConfig;
