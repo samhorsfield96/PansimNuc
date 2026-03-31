@@ -30,6 +30,18 @@ pub struct NucElement {
 impl NucElement {
     fn element_selection_coefficient(&self, genome_identifier: &str) -> f64 {
         let mut element_log_sum = 0.0;
+
+        // if exon and original length changed by non-multiple of 3, assume frameshift, return 0.0 (no impact on fitness)
+        if self.feature_type == "exon" {
+            let current_seq_length = self.seq.len();
+            let max_len = self.original_length.max(current_seq_length);
+            let min_len = self.original_length.min(current_seq_length);
+
+            if (max_len - min_len) % 3 != 0 {
+                return 0.0;
+            }
+        }
+
         for (site, allele) in self.seq.iter().enumerate() {
             let allele_shifted = 1 >> allele;
             if let Some(coeff) = self.mutation_map.get(*allele, site) {
