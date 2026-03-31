@@ -1,5 +1,5 @@
 use rand::Rng;
-use rand::rngs::StdRng;
+use rand::rngs::{StdRng, ThreadRng};
 use rand::seq::IteratorRandom;
 use rand_distr::{Distribution as RandDist, Exp, Normal, Uniform, Gamma};
 use rustc_hash::FxHashMap;
@@ -489,6 +489,36 @@ impl MutationMap {
         }
     }
 
+    fn update_data (&mut self, site: usize, is_insertion: bool) {
+        // if is_insertion, need to shift all existing keys at this site and above up by 1 to account for new site
+        if is_insertion {
+            for allele_map in self.data.iter_mut() {
+                let num_sites = allele_map.len();
+                
+                // start at end to correctly handle shifting keys without overwriting existing entries before they are processed
+                for key in (site..num_sites).rev() {
+                    if let Some(value) = allele_map.get(&key) {
+                        allele_map.insert(key + 1, *value);
+                    }
+                }
+            }
+        } else {
+            // deletion: need to remove any entries for this site and shift down keys above this site
+            for allele_map in self.data.iter_mut() {
+                allele_map.remove(&site);
+                let num_sites = allele_map.len();
+                // start at site + 1 to shift down keys above the deleted site
+                for key in site + 1..num_sites {
+                    if let Some(value) = allele_map.get(&key) {
+                        allele_map.insert(key - 1, *value);
+                    }
+                }
+                // remove the last key which is now duplicated after shifting down
+                allele_map.remove(&(num_sites - 1));
+            }
+        }
+    }
+
     fn insert(&mut self, level: u8, key: usize, value: f64) {
         let allele_index = Self::allele_to_index(level)
             .expect("Cannot insert selection coefficient for invalid allele code");
@@ -506,20 +536,18 @@ impl MutationMap {
         self.insert(level, key, value);
     }
 
-    pub fn mutate(
+    fn mutate_SNPs (
         &mut self,
         core_vec: &Vec<Vec<u8>>,
         seq: &mut Vec<u8>,
         selection_dist: &Distribution,
         mu_dist: &Distribution,
+        thread_rng: &mut ThreadRng
     ) -> usize {
-        // thread-specific random number generator
-        let mut thread_rng = rand::thread_rng();
-
         // sample from Poisson distribution for number of sites to mutate in this isolate
-        let n_sites = mu_dist.sample(&mut thread_rng) as usize;
+        let n_sites = mu_dist.sample(thread_rng) as usize;
         let seq_len = seq.len();
-        let sampled_sites = (0..seq_len).choose_multiple(&mut thread_rng, n_sites);
+        let sampled_sites = (0..seq_len).choose_multiple(thread_rng, n_sites);
 
         // iterate for number of mutations required to reach mutation rate
         for mutant_site in sampled_sites {
@@ -536,7 +564,7 @@ impl MutationMap {
             let values = &core_vec[allele_index];
 
             // sample new allele
-            let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
+            let new_allele = values.iter().choose_multiple(thread_rng, 1)[0];
             let mut selection_coefficient: f64 = 0.0;
 
             // generate new selection coefficient for this mutation if necessary, otherwise retrieve existing one
@@ -544,7 +572,7 @@ impl MutationMap {
                 // value exists
                 selection_coefficient = *coeff;
             } else {
-                selection_coefficient = selection_dist.sample(&mut thread_rng);
+                selection_coefficient = selection_dist.sample(thread_rng);
             }
 
             // set value in place
@@ -552,6 +580,71 @@ impl MutationMap {
             self.insert(*new_allele, mutant_site, selection_coefficient);
         }
         n_sites
+
+    }
+
+    fn mutate_indels (
+        &mut self,
+        core_vec: &Vec<Vec<u8>>,
+        seq: &mut Vec<u8>,
+        selection_dist: &Distribution,
+        indel_dist: &Distribution,
+        thread_rng: &mut ThreadRng
+    ) -> usize {
+        // sample from Poisson distribution for number of sites to mutate in this isolate
+        let n_sites = indel_dist.sample(thread_rng) as usize;
+
+        // iterate for number of mutations required to reach mutation rate
+        // needs to be dynamic to allow for changes in sequence length from indels
+        for _ in 0..n_sites {
+            // sample new site to mutate
+            let seq_len = seq.len();
+            let mutant_site = thread_rng.gen_range(0..seq_len);
+            let value = seq[mutant_site];
+
+            // N is stored in the map but should not be mutated; skip
+            if value == 16 {
+                continue;
+            }
+
+            // determine whether will be insertion or deletion
+            let is_insertion = thread_rng.gen_bool(0.5);
+
+            // update data for selection coefficient
+            self.update_data(mutant_site, is_insertion);
+
+            if is_insertion {
+                // insertion: sample new allele to insert
+                let new_allele = core_vec[4].iter().choose(thread_rng).expect("Failed to sample from core_vec");
+                seq.insert(mutant_site, *new_allele);
+
+                // add selection coefficient
+                let selection_coefficient = selection_dist.sample(thread_rng);
+                self.insert(*new_allele, mutant_site, selection_coefficient);
+            } else {
+                // deletion: remove allele at mutant_site
+                seq.remove(mutant_site);
+            }
+        }
+        n_sites
+    }
+
+    pub fn mutate(
+        &mut self,
+        core_vec: &Vec<Vec<u8>>,
+        seq: &mut Vec<u8>,
+        selection_dist: &Distribution,
+        mu_dist: &Distribution,
+        indel_dist: &Distribution,
+    ) -> (usize, usize) {
+        // thread-specific random number generator
+        let mut thread_rng = rand::thread_rng();
+
+        // mutate SNPs
+        let n_snps = self.mutate_SNPs(core_vec, seq, selection_dist, mu_dist, &mut thread_rng);
+        let n_indels = self.mutate_indels(core_vec, seq, selection_dist, indel_dist, &mut thread_rng);
+
+        (n_snps, n_indels)
     }
 }
 
