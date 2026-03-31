@@ -651,11 +651,16 @@ impl MutationMap {
         let n_indels = self.mutate_indels(core_vec, seq, selection_dist, indel_dist, &mut thread_rng);
 
         // update frameshift status
-        let max_length = usize::max(original_length, seq.len());
-        let min_length = usize::min(original_length, seq.len());
-        if (max_length - min_length) % 3 != 0 {
-            *frameshift = true;
+        if n_indels > 0 {
+            let max_length = usize::max(original_length, seq.len());
+            let min_length = usize::min(original_length, seq.len());
+            if (max_length - min_length) % 3 != 0 {
+                *frameshift = true;
+            } else {
+                *frameshift = false;
+            }
         }
+        
 
         (n_snps, n_indels)
     }
