@@ -1,12 +1,16 @@
 // TODO plot GFFs with ggGenome to show how the genome evolves over time
-// TODO make recombination multi-threaded by adding in component traversal and updating of homology_map afterwards
+// Plot time series data with allelic drift/with selection added
 
 mod config;
 mod gff;
 mod mutation;
 mod population;
 mod structural;
+mod demography;
+use rayon::prelude::*;
 
+use crate::config::PopulationSplitConfig;
+use crate::demography::MetaPopulation;
 use crate::mutation::Distribution;
 use clap::Parser;
 use config::Config;
@@ -29,6 +33,7 @@ fn main() {
     let args = Args::parse();
 
     let mut configuration: HashMap<String, String> = HashMap::new();
+    let mut population_split_config = PopulationSplitConfig::new();
 
     // Load config if provided
     let mut verbose = false;
@@ -54,6 +59,11 @@ fn main() {
                         println!("  {} = {}", key, value);
                     }
                 }
+
+                population_split_config = config.population_split_config().unwrap_or_else(|err| {
+                    eprintln!("Failed to generate population split configuration: {err}");
+                    std::process::exit(1);
+                });
             }
             Err(err) => {
                 eprintln!("Failed to read config file: {err}");
@@ -122,6 +132,7 @@ fn main() {
                     // generate distributions to draw mutations from
                     let mut site_mutation_dists: Vec<Distribution> = Vec::new();
                     let mut site_mutation_mus_vals: Vec<f64> = Vec::new();
+                    let mut site_indel_mus_vals: Vec<f64> = Vec::new();
                     let mut structural_dists: Vec<Vec<Distribution>> = Vec::new();
 					let mut multiplier_dists: Vec<Distribution> = Vec::new();
 
@@ -130,6 +141,7 @@ fn main() {
                         let duplication_rate_key = format!("{}.duplication_rate", section);
                         let deletion_rate_key = format!("{}.deletion_rate", section);
                         let inversion_rate_key = format!("{}.inversion_rate", section);
+                        let indel_rate_key = format!("{}.indel_rate", section);
 
                         site_mutation_dists.push(
 							Distribution::from_selection_config(&configuration, section).unwrap_or_else(|err| {
@@ -140,7 +152,9 @@ fn main() {
 							}),
 						);
 
+                        // each position takes two elements of vector
                         site_mutation_mus_vals.push(parse_f64(&mutation_rate_key));
+                        site_indel_mus_vals.push(parse_f64(&indel_rate_key));
 
                         structural_dists.push(vec![
                             Distribution::new_poisson(parse_f64(&duplication_rate_key)).expect("Failed to create duplication distribution"),
@@ -183,6 +197,10 @@ fn main() {
                     let n_generations: usize = n_generation_str
                         .parse::<usize>()
                         .expect("n_generation must be an integer.");
+
+                    // TODO initialise metapopulation, include population splits etc. in config file
+                    // show actually initialise metapopulation and run structural and mutation events there
+                    // can also add in different mutation distributions for each population.
                     
                     println!("Initialising population...");
                     let mut population = Population::new(
@@ -190,6 +208,7 @@ fn main() {
                         n_individuals,
                         site_mutation_dists,
                         &site_mutation_mus_vals,
+                        &site_indel_mus_vals,
                         recombination_dists,
                         recombination_threshold,
                         structural_dists,
@@ -215,44 +234,23 @@ fn main() {
                         });
                     }
 
-                    // mutate population
-                    for generation in 1..=n_generations {
-                        // mutate at nucleotide level
-                        let total_sites = population.mutate();
+                    // generate metapopulation with different mutation distributions
+                    let mut metapopopulation = MetaPopulation::new(
+                        population, 
+                        population_split_config, 
+                        n_generations, 
+                        recombination_rate, 
+                        recombination_size_mean, 
+                        site_mutation_mus_vals);
 
-                        // perform intragenome structural mutations
-                        population.structural_intra_genome();
+                    // run simulation
+                    metapopopulation.run_simulation();
 
-                        // perform intergenome structural mutations
-                        population.structural_inter_genome(recombination_rate, total_sites, recombination_size_mean);
-
-                        // sample next generation
-                        let sampled_indices = population.sample_individuals(&mut rng);
-                        population.next_generation(sampled_indices);
-                        println!("Finished generation {generation}");
-
-                        if generation < n_generations {
-                            population.update_mu_dists(&site_mutation_mus_vals);
-                        }
-                    }
-
+                    
+                    // TODO update GFF writing with population indexes
                     println!("Writing output...");
-                    let output_fasta = configuration
-                        .get("output.fasta_file")
-                        .cloned()
-                        .unwrap_or_else(|| "final_population.fasta".to_string());
+                    metapopopulation.write_output(&configuration);
 
-                    if let Some(output_gff) = configuration.get("output.gff_file") {
-                        if let Err(err) = population.write_gff(output_gff, false) {
-                            eprintln!("Failed to write final population GFF files: {err}");
-                            std::process::exit(1);
-                        }
-                    }
-
-                    if let Err(err) = population.write_fasta(&output_fasta, false) {
-                        eprintln!("Failed to write final population FASTA files: {err}");
-                        std::process::exit(1);
-                    }
                 }
             }
             Err(err) => {

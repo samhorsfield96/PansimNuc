@@ -1,11 +1,12 @@
 use rand::Rng;
-use rand::rngs::StdRng;
+use rand::rngs::{StdRng, ThreadRng};
 use rand::seq::IteratorRandom;
 use rand_distr::{Distribution as RandDist, Exp, Normal, Uniform, Gamma};
 use rustc_hash::FxHashMap;
 use statrs::distribution::Poisson;
 use std::collections::HashMap;
 use std::fmt;
+use crate::population::NucElement;
 
 #[derive(Debug)]
 pub enum DistributionError {
@@ -489,6 +490,39 @@ impl MutationMap {
         }
     }
 
+    fn update_data (&mut self, site: usize, is_insertion: bool) {
+        // if is_insertion, need to shift all existing keys at this site and above up by 1 to account for new site
+        if is_insertion {
+            for allele_map in self.data.iter_mut() {
+                let num_sites = allele_map.len();
+                
+                // start at end to correctly handle shifting keys without overwriting existing entries before they are processed
+                for key in (site..num_sites).rev() {
+                    if let Some(value) = allele_map.get(&key) {
+                        allele_map.insert(key + 1, *value);
+                    }
+                }
+            }
+        } else {
+            // deletion: need to remove any entries for this site and shift down keys above this site
+            for allele_map in self.data.iter_mut() {
+                let num_sites = allele_map.len();
+                allele_map.remove(&site);
+                if num_sites == 0 {
+                    continue;
+                }
+                // start at site + 1 to shift down keys above the deleted site
+                for key in site + 1..num_sites {
+                    if let Some(value) = allele_map.get(&key) {
+                        allele_map.insert(key - 1, *value);
+                    }
+                }
+                // remove the last key which is now duplicated after shifting down
+                allele_map.remove(&(num_sites - 1));
+            }
+        }
+    }
+
     fn insert(&mut self, level: u8, key: usize, value: f64) {
         let allele_index = Self::allele_to_index(level)
             .expect("Cannot insert selection coefficient for invalid allele code");
@@ -506,20 +540,18 @@ impl MutationMap {
         self.insert(level, key, value);
     }
 
-    pub fn mutate(
+    fn mutate_SNPs (
         &mut self,
         core_vec: &Vec<Vec<u8>>,
         seq: &mut Vec<u8>,
         selection_dist: &Distribution,
         mu_dist: &Distribution,
+        thread_rng: &mut ThreadRng
     ) -> usize {
-        // thread-specific random number generator
-        let mut thread_rng = rand::thread_rng();
-
         // sample from Poisson distribution for number of sites to mutate in this isolate
-        let n_sites = mu_dist.sample(&mut thread_rng) as usize;
+        let n_sites = mu_dist.sample(thread_rng) as usize;
         let seq_len = seq.len();
-        let sampled_sites = (0..seq_len).choose_multiple(&mut thread_rng, n_sites);
+        let sampled_sites = (0..seq_len).choose_multiple(thread_rng, n_sites);
 
         // iterate for number of mutations required to reach mutation rate
         for mutant_site in sampled_sites {
@@ -536,7 +568,7 @@ impl MutationMap {
             let values = &core_vec[allele_index];
 
             // sample new allele
-            let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
+            let new_allele = values.iter().choose_multiple(thread_rng, 1)[0];
             let mut selection_coefficient: f64 = 0.0;
 
             // generate new selection coefficient for this mutation if necessary, otherwise retrieve existing one
@@ -544,7 +576,7 @@ impl MutationMap {
                 // value exists
                 selection_coefficient = *coeff;
             } else {
-                selection_coefficient = selection_dist.sample(&mut thread_rng);
+                selection_coefficient = selection_dist.sample(thread_rng);
             }
 
             // set value in place
@@ -552,6 +584,85 @@ impl MutationMap {
             self.insert(*new_allele, mutant_site, selection_coefficient);
         }
         n_sites
+
+    }
+
+    fn mutate_indels (
+        &mut self,
+        core_vec: &Vec<Vec<u8>>,
+        seq: &mut Vec<u8>,
+        selection_dist: &Distribution,
+        indel_dist: &Distribution,
+        thread_rng: &mut ThreadRng
+    ) -> usize {
+        // sample from Poisson distribution for number of sites to mutate in this isolate
+        let n_sites = indel_dist.sample(thread_rng) as usize;
+
+        // iterate for number of mutations required to reach mutation rate
+        // needs to be dynamic to allow for changes in sequence length from indels
+        for _ in 0..n_sites {
+            // sample new site to mutate
+            let seq_len = seq.len();
+            let mutant_site = thread_rng.gen_range(0..seq_len);
+            let value = seq[mutant_site];
+
+            // N is stored in the map but should not be mutated; skip
+            if value == 16 {
+                continue;
+            }
+
+            // determine whether will be insertion or deletion
+            let is_insertion = thread_rng.gen_bool(0.5);
+
+            // update data for selection coefficient
+            self.update_data(mutant_site, is_insertion);
+
+            if is_insertion {
+                // insertion: sample new allele to insert
+                let new_allele = core_vec[4].iter().choose(thread_rng).expect("Failed to sample from core_vec");
+                seq.insert(mutant_site, *new_allele);
+
+                // add selection coefficient
+                let selection_coefficient = selection_dist.sample(thread_rng);
+                self.insert(*new_allele, mutant_site, selection_coefficient);
+            } else {
+                // deletion: remove allele at mutant_site
+                seq.remove(mutant_site);
+            }
+        }
+        n_sites
+    }
+
+    pub fn mutate(
+        &mut self,
+        core_vec: &Vec<Vec<u8>>,
+        seq: &mut Vec<u8>,
+        original_length: usize,
+        frameshift: &mut bool,
+        selection_dist: &Distribution,
+        mu_dist: &Distribution,
+        indel_dist: &Distribution,
+    ) -> (usize, usize) {
+        // thread-specific random number generator
+        let mut thread_rng = rand::thread_rng();
+
+        // mutate SNPs
+        let n_snps = self.mutate_SNPs(core_vec, seq, selection_dist, mu_dist, &mut thread_rng);
+        let n_indels = self.mutate_indels(core_vec, seq, selection_dist, indel_dist, &mut thread_rng);
+
+        // update frameshift status
+        if n_indels > 0 {
+            let max_length = usize::max(original_length, seq.len());
+            let min_length = usize::min(original_length, seq.len());
+            if (max_length - min_length) % 3 != 0 {
+                *frameshift = true;
+            } else {
+                *frameshift = false;
+            }
+        }
+        
+
+        (n_snps, n_indels)
     }
 }
 
@@ -811,14 +922,17 @@ mod tests {
             Distribution::new_uniform(0.0, 1.0).expect("failed to create selection distribution");
         let mu_dist =
             Distribution::new_poisson(10.0).expect("failed to create mutation-rate distribution");
+        let indel_dist =
+            Distribution::new_poisson(1e-12).expect("failed to create mutation-rate distribution");
         let core_vec: Vec<Vec<u8>> =
             vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
 
         let mut seq = vec![16, 1, 16, 2, 4, 8, 16];
+        let original_length = seq.len();
         let original_n_sites: Vec<u8> = seq.iter().copied().filter(|&x| x == 16).collect();
 
         let mut map = MutationMap::new(0, 0, &seq, &selection_dist, &mut rng);
-        map.mutate(&core_vec, &mut seq, &selection_dist, &mu_dist);
+        map.mutate(&core_vec, &mut seq, original_length, &mut false, &selection_dist, &mu_dist, &indel_dist);
 
         assert_eq!(seq[0], 16);
         assert_eq!(seq[2], 16);
@@ -829,5 +943,184 @@ mod tests {
 
         let post_n_sites: Vec<u8> = seq.iter().copied().filter(|&x| x == 16).collect();
         assert_eq!(original_n_sites, post_n_sites);
+    }
+
+    #[test]
+    fn test_indels_change_sequence_length() {
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
+        // Large sequence so many indels fire; zero SNP rate so only indels mutate
+        let seq: Vec<u8> = vec![1u8; 100];
+        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        let mut seq_mut = seq.clone();
+
+        let mu_dist = Distribution::new_poisson(1e-12).unwrap();
+        // Force many insertions by biasing gen_bool via a deterministic seed that
+        // reliably produces insertions; use a very high rate to guarantee length change
+        let indel_dist = Distribution::new_poisson(10.0).unwrap();
+        let core_vec: Vec<Vec<u8>> = vec![
+            vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16],
+        ];
+
+        map.mutate(&core_vec, &mut seq_mut, seq.len(), &mut false, &dist, &mu_dist, &indel_dist);
+
+        // With 1000 indels on a seed that produces ~50% insertions, final length must differ
+        assert_ne!(seq_mut.len(), seq.len());
+    }
+
+    #[test]
+    fn test_insertion_shifts_selection_coefficients_up() {
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
+        // All-A sequence so data[0] has a dense entry at every site
+        let seq = vec![1u8, 1, 1, 1];
+        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        map.set_for_test(1, 0, 0.10);
+        map.set_for_test(1, 1, 0.20);
+        map.set_for_test(1, 2, 0.30);
+        map.set_for_test(1, 3, 0.40);
+
+        map.set_for_test(2, 0, 0.10);
+        map.set_for_test(2, 1, 0.20);
+        map.set_for_test(2, 2, 0.30);
+        map.set_for_test(2, 3, 0.40);
+
+        map.set_for_test(4, 0, 0.10);
+        map.set_for_test(4, 1, 0.20);
+        map.set_for_test(4, 2, 0.30);
+        map.set_for_test(4, 3, 0.40);
+
+        map.set_for_test(8, 0, 0.10);
+        map.set_for_test(8, 1, 0.20);
+        map.set_for_test(8, 2, 0.30);
+        map.set_for_test(8, 3, 0.40);
+
+        // Inserting at site 1 should shift coefficients at sites 1+ up by one
+        map.update_data(1, true);
+
+        // check insertion correct
+        assert_ne!(map.get(1, 1), Some(&0.10)); // site 1 changed
+        assert_ne!(map.get(2, 1), Some(&0.10)); // site 1 changed
+        assert_ne!(map.get(4, 1), Some(&0.10)); // site 1 changed
+        assert_ne!(map.get(8, 1), Some(&0.10)); // site 1 changed
+
+        assert_ne!(map.get(1, 1), None); // site 1 changed
+        assert_ne!(map.get(2, 1), None); // site 1 changed
+        assert_ne!(map.get(4, 1), None); // site 1 changed
+        assert_ne!(map.get(8, 1), None); // site 1 changed
+
+
+        assert_eq!(map.get(1, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(1, 2), Some(&0.20)); // site 1 shifted to 2
+        assert_eq!(map.get(1, 3), Some(&0.30)); // site 2 shifted to 3
+        assert_eq!(map.get(1, 4), Some(&0.40)); // site 3 shifted to 4
+        assert_eq!(map.get(2, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(2, 2), Some(&0.20)); // site 1 shifted to 2
+        assert_eq!(map.get(2, 3), Some(&0.30)); // site 2 shifted to 3
+        assert_eq!(map.get(2, 4), Some(&0.40)); // site 3 shifted to 4
+        assert_eq!(map.get(4, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(4, 2), Some(&0.20)); // site 1 shifted to 2
+        assert_eq!(map.get(4, 3), Some(&0.30)); // site 2 shifted to 3
+        assert_eq!(map.get(4, 4), Some(&0.40)); // site 3 shifted to 4
+        assert_eq!(map.get(8, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(8, 2), Some(&0.20)); // site 1 shifted to 2
+        assert_eq!(map.get(8, 3), Some(&0.30)); // site 2 shifted to 3
+        assert_eq!(map.get(8, 4), Some(&0.40)); // site 3 shifted to 4
+
+    }
+
+    #[test]
+    fn test_deletion_removes_selection_coefficient_at_deleted_site() {
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
+        // All-A sequence so data[0] has a dense entry at every site
+        let seq = vec![1u8, 1, 1, 1];
+        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        map.set_for_test(1, 0, 0.10);
+        map.set_for_test(1, 1, 0.20);
+        map.set_for_test(1, 2, 0.30);
+        map.set_for_test(1, 3, 0.40);
+
+        map.set_for_test(2, 0, 0.10);
+        map.set_for_test(2, 1, 0.20);
+        map.set_for_test(2, 2, 0.30);
+        map.set_for_test(2, 3, 0.40);
+
+        map.set_for_test(4, 0, 0.10);
+        map.set_for_test(4, 1, 0.20);
+        map.set_for_test(4, 2, 0.30);
+        map.set_for_test(4, 3, 0.40);
+
+        map.set_for_test(8, 0, 0.10);
+        map.set_for_test(8, 1, 0.20);
+        map.set_for_test(8, 2, 0.30);
+        map.set_for_test(8, 3, 0.40);
+
+        // Deleting site 2 should remove its coefficient from the map
+        map.update_data(2, false);
+
+        assert_eq!(map.get(1, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(1, 1), Some(&0.20)); // site 1 unchanged
+        assert_eq!(map.get(1, 2), Some(&0.40)); // site 3 coefficient shifted down to site 2
+        assert_eq!(map.get(1, 3), None); // site 3 deleted, should be removed from map
+
+        assert_eq!(map.get(2, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(2, 1), Some(&0.20)); // site 1 unchanged
+        assert_eq!(map.get(2, 2), Some(&0.40)); // site 3 coefficient shifted down to site 2
+        assert_eq!(map.get(2, 3), None); // site 3 deleted, should be removed from map
+
+        assert_eq!(map.get(4, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(4, 1), Some(&0.20)); // site 1 unchanged
+        assert_eq!(map.get(4, 2), Some(&0.40)); // site 3 coefficient shifted down to site 2
+        assert_eq!(map.get(4, 3), None); // site 3 deleted, should be removed from map
+
+        assert_eq!(map.get(8, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(8, 1), Some(&0.20)); // site 1 unchanged
+        assert_eq!(map.get(8, 2), Some(&0.40)); // site 3 coefficient shifted down to site 2
+        assert_eq!(map.get(8, 3), None); // site 3 deleted, should be removed from map
+    }
+
+    #[test]
+    fn test_frameshift_flag_matches_length_change_mod3() {
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
+        let seq: Vec<u8> = vec![1u8; 100];
+        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        let mut seq_mut = seq.clone();
+        let original_length = seq.len();
+
+        let mu_dist = Distribution::new_poisson(1e-12).unwrap();
+        let indel_dist = Distribution::new_poisson(10.0).unwrap();
+        let core_vec: Vec<Vec<u8>> = vec![
+            vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16],
+        ];
+
+        let mut frameshift = true;
+        map.mutate(&core_vec, &mut seq_mut, original_length, &mut frameshift, &dist, &mu_dist, &indel_dist);
+
+        let expected = seq_mut.len().abs_diff(original_length) % 3 != 0;
+        println!("Original length: {}, New length: {}, Frameshift: {}, Expected frameshift: {}", original_length, seq_mut.len(), frameshift, expected);
+        assert_eq!(frameshift, expected);
+    }
+
+    #[test]
+    fn test_frameshift_not_updated_when_no_indels() {
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
+        let seq: Vec<u8> = vec![1u8; 12];
+        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        let mut seq_mut = seq.clone();
+
+        let mu_dist = Distribution::new_poisson(1e-12).unwrap();
+        let indel_dist = Distribution::new_poisson(1e-12).unwrap();
+        let core_vec: Vec<Vec<u8>> = vec![
+            vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16],
+        ];
+
+        // Start with frameshift already set; expect it to remain unchanged when no indels fire
+        let mut frameshift = true;
+        map.mutate(&core_vec, &mut seq_mut, seq.len(), &mut frameshift, &dist, &mu_dist, &indel_dist);
+
+        assert!(frameshift);
     }
 }

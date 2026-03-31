@@ -7,6 +7,7 @@ use logsumexp::LogSumExp;
 use rand::SeedableRng;
 use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
 use rand::rngs::StdRng;
+use rand::rngs::ThreadRng;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::File;
@@ -23,11 +24,14 @@ pub struct NucElement {
     pub seq: Vec<u8>,
     pub mutation_map: MutationMap,
     pub strand: bool,
+    pub original_length: usize,
+    pub frameshift: bool,
 }
 
 impl NucElement {
     fn element_selection_coefficient(&self, genome_identifier: &str) -> f64 {
         let mut element_log_sum = 0.0;
+
         for (site, allele) in self.seq.iter().enumerate() {
             let allele_shifted = 1 >> allele;
             if let Some(coeff) = self.mutation_map.get(*allele, site) {
@@ -73,12 +77,15 @@ impl Genome {
     }
 }
 
+#[derive(Clone)]
 pub struct Population {
+    pub id: usize,
     pub generation: usize,
     pub pop: Vec<Genome>,
     pub core_vec: Vec<Vec<u8>>,
     pub selection_dists: Vec<MutationDistribution>,
     pub mu_dists: Vec<MutationDistribution>,
+    pub indel_dists: Vec<MutationDistribution>,
     pub structural_mu_dists: Vec<Vec<MutationDistribution>>,
     pub recombination_dists: Vec<MutationDistribution>,
     pub recombination_threshold: f64,
@@ -136,7 +143,13 @@ impl Population {
                 if actual_element_id == expected_element_id
                     && actual_element.strand == element.strand
                 {
-                    continue;
+                    // check if frameshift occurred, if so then feature is broken, as likely to be non-functional
+                    if actual_element.feature_type == "exon" && actual_element.frameshift {
+                        feature_broken = true;
+                        break;
+                    } else {
+                        continue;
+                    }
                 } else {
                     // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
                     // check if last feature matches in feature_map_entry
@@ -175,7 +188,13 @@ impl Population {
                     if actual_element_id == expected_element_id
                         && actual_element.strand == element.strand
                     {
-                        continue;
+                        // check if frameshift occurred, if so then feature is broken, as likely to be non-functional
+                        if actual_element.feature_type == "exon" && actual_element.frameshift {
+                            feature_broken = true;
+                            break;
+                        } else {
+                            continue;
+                        }
                     } else {
                         // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
                         // check if last feature matches in feature_map_entry
@@ -313,11 +332,29 @@ impl Population {
         (selection_weights, logsumexp_value)
     }
 
+    pub fn update_homology_map(&mut self) {
+        // update homology map for all new elements
+        for genome in &self.pop {
+            self.homology_map
+                .iter_mut()
+                .for_each(|element_homology_map| {
+                    element_homology_map[genome.genome_id].clear();
+                });
+
+            for (element_idx, element) in genome.seq.iter().enumerate() {
+                let element_id = element.element_id;
+                let homology_group = &mut self.homology_map[element_id][genome.genome_id];
+                homology_group.push(element_idx); // convert back to 0 indexed
+            }
+        }
+    }
+
     pub fn new(
         root: Vec<Vec<FeaturePos>>,
         n_genomes: usize,
         selection_dists: Vec<MutationDistribution>,
         mu_dist_vals: &Vec<f64>,
+        indel_dist_vals: &Vec<f64>,
         recombination_dists: Vec<MutationDistribution>,
         recombination_threshold: f64,
         structural_mu_dists: Vec<Vec<MutationDistribution>>,
@@ -403,6 +440,8 @@ impl Population {
                         rng,
                     ),
                     multiplier: multiplier,
+                    original_length: feature.seq.len(),
+                    frameshift: false,
                 });
                 element_id += 1;
 
@@ -439,16 +478,26 @@ impl Population {
                     .expect("Failed to create poisson distribution for mutation rates")
             })
             .collect();
+            
+        let indel_dists = indel_dist_vals
+            .into_iter()
+            .map(|mu| {
+                MutationDistribution::new_poisson(mu * (total_length as f64) * (n_genomes as f64) * n_generations as f64)
+                    .expect("Failed to create poisson distribution for indel rates")
+            })
+            .collect();
 
         let core_vec: Vec<Vec<u8>> =
-            vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
+            vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16]];
 
         Self {
+            id: 0,
             generation: 0,
             pop: population,
             core_vec,
             selection_dists,
             mu_dists,
+            indel_dists,
             structural_mu_dists: structural_mu_dists,
             recombination_dists,
             recombination_threshold,
@@ -461,34 +510,39 @@ impl Population {
     }
 
     // mutate individuals in the population according to their mutation maps and the provided distributions
-    pub fn mutate(&mut self) -> usize {
+    pub fn mutate(&mut self) -> (usize, usize) {
         let core_vec = &self.core_vec;
         let selection_dists = &self.selection_dists;
         let mu_dists = &self.mu_dists;
+        let indel_dists = &self.indel_dists;
 
-        let total_sites: usize = self
+        let (total_snps, total_indels): (usize, usize) = self
             .pop
             .par_iter_mut()
             .map(|genome| {
                 genome
                     .seq
                     .iter_mut()
-                    .map(|element| {
-                        element.mutation_map.mutate(
+                    .fold((0, 0), |(snps, indels), element| {
+                        let (s, i) = element.mutation_map.mutate(
                             core_vec,
                             &mut element.seq,
+                            element.original_length,
+                            &mut element.frameshift,
                             &selection_dists[element.mutation_map.selection_dist_id],
                             &mu_dists[element.mutation_map.mu_dist_id],
-                        )
+                            &indel_dists[element.mutation_map.mu_dist_id],
+                        );
+                        (snps + s, indels + i)
                     })
-                    .sum::<usize>()
             })
-            .sum();
+            .reduce(|| (0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1));
 
         if self.verbose {
-            println!("Total mutated sites: {}", total_sites);
+            println!("Total SNPs: {}", total_snps);
+            println!("Total indels: {}", total_indels);
         }
-        total_sites
+        (total_snps, total_indels)
     }
 
     pub fn update_mu_dists(&mut self, mu_dist_vals: &Vec<f64>) {
@@ -550,19 +604,7 @@ impl Population {
         }
 
         // update homology map for all new elements
-        for genome in &self.pop {
-            self.homology_map
-                .iter_mut()
-                .for_each(|element_homology_map| {
-                    element_homology_map[genome.genome_id].clear();
-                });
-
-            for (element_idx, element) in genome.seq.iter().enumerate() {
-                let element_id = element.element_id;
-                let homology_group = &mut self.homology_map[element_id][genome.genome_id];
-                homology_group.push(element_idx); // convert back to 0 indexed
-            }
-        }
+        self.update_homology_map();
     }
 
     pub fn structural_inter_genome(&mut self, recombination_rate: f64, total_sites: usize, recombination_size_mean: f64) {
@@ -583,7 +625,7 @@ impl Population {
     }
 
     // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights
-    pub fn sample_individuals(&mut self, rng: &mut StdRng) -> Vec<usize> {
+    pub fn sample_individuals(&mut self, rng: &mut ThreadRng) -> Vec<usize> {
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
 
         #[cfg(debug_assertions)]
@@ -667,8 +709,8 @@ impl Population {
 
     pub fn write_fasta(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
         for (genome_index, genome) in self.pop.iter().enumerate() {
-            let prefix = if root_genome { "root" } else { &genome_index.to_string() };
-            let genome_output_path = Self::genome_output_path(output_path, prefix)?;
+            let prefix = if root_genome { "root".to_string() } else { format!("pop_{}_gen_{}_genome_{}", self.id, self.generation, genome_index) };
+            let genome_output_path = Self::genome_output_path(output_path, &prefix)?;
             let file = File::create(&genome_output_path)?;
             let mut writer = BufWriter::new(file);
 
@@ -744,8 +786,8 @@ impl Population {
             .collect();
 
         for (genome_index, genome) in self.pop.iter().enumerate() {
-            let prefix = if root_genome { "root" } else { &genome_index.to_string() };
-            let genome_output_path = Self::genome_output_path(output_path, prefix)?;
+            let prefix = if root_genome { "root".to_string() } else { format!("pop_{}_gen_{}_genome_{}", self.id, self.generation, genome_index) };
+            let genome_output_path = Self::genome_output_path(output_path, &prefix)?;
             let file = File::create(&genome_output_path)?;
             let mut writer = BufWriter::new(file);
 
@@ -895,6 +937,7 @@ mod tests {
             n_genomes,
             site_mutation_dists,
             &site_mutation_mus,
+            &site_mutation_mus,
             recombination_dists,
             1.0,
             default_structural_dists(),
@@ -970,6 +1013,7 @@ mod tests {
             1,
             site_mutation_dists,
             &site_mutation_mus,
+            &site_mutation_mus,
             recombination_dists,
             1.0,
             default_structural_dists(),
@@ -988,7 +1032,7 @@ mod tests {
                 .as_nanos()
         ));
         let output_path = temp_path.to_string_lossy().into_owned();
-        let genome_output_path = Population::genome_output_path(&output_path, "0")
+        let genome_output_path = Population::genome_output_path(&output_path, "pop_0_gen_0_genome_0")
             .expect("failed to construct per-genome output path");
 
         pop.write_fasta(&output_path, false)
@@ -1050,6 +1094,7 @@ mod tests {
             1,
             site_mutation_dists,
             &site_mutation_mus,
+            &site_mutation_mus,
             recombination_dists,
             1.0,
             default_structural_dists(),
@@ -1068,7 +1113,7 @@ mod tests {
                 .as_nanos()
         ));
         let output_path = temp_path.to_string_lossy().into_owned();
-        let genome_output_path = Population::genome_output_path(&output_path, "0")
+        let genome_output_path = Population::genome_output_path(&output_path, "pop_0_gen_0_genome_0")
             .expect("failed to construct per-genome output path");
 
         pop.write_gff(&output_path, false)
@@ -1119,6 +1164,7 @@ mod tests {
         let intron_mu_dist = 1.0;
         let intergenic_mu_dist = 1.0;
         let site_mutation_mus = vec![force_mutation_dist, intron_mu_dist, intergenic_mu_dist];
+        let indel_mus = vec![1e-12, 1e-12, 1e-12]; // effectively no indels for this test
         let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
             .expect("Failed to create uniform distribution for recombination");
         let recombination_len_dist = MutationDistribution::new_poisson(1.0)
@@ -1135,6 +1181,7 @@ mod tests {
             1,
             site_mutation_dists,
             &site_mutation_mus,
+            &indel_mus,
             recombination_dists,
             1.0,
             default_structural_dists(),
@@ -1215,6 +1262,7 @@ mod tests {
             root,
             3,
             site_mutation_dists,
+            &site_mutation_mus,
             &site_mutation_mus,
             recombination_dists,
             1.0,
@@ -1348,6 +1396,7 @@ mod tests {
             root,
             1,
             site_mutation_dists,
+            &site_mutation_mus,
             &site_mutation_mus,
             recombination_dists,
             1.0,
@@ -1573,9 +1622,11 @@ mod tests {
             feature_id: feature_id,
             feature_type: "exon".to_string(),
             multiplier: 1.0,
-            seq,
+            seq: seq.clone(),
             mutation_map,
             strand: true,
+            original_length: seq.len(),
+            frameshift: false,
         }
     }
 
