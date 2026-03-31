@@ -904,6 +904,8 @@ mod tests {
             Distribution::new_uniform(0.0, 1.0).expect("failed to create selection distribution");
         let mu_dist =
             Distribution::new_poisson(10.0).expect("failed to create mutation-rate distribution");
+        let indel_dist =
+            Distribution::new_poisson(1e-12).expect("failed to create mutation-rate distribution");
         let core_vec: Vec<Vec<u8>> =
             vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
 
@@ -911,7 +913,7 @@ mod tests {
         let original_n_sites: Vec<u8> = seq.iter().copied().filter(|&x| x == 16).collect();
 
         let mut map = MutationMap::new(0, 0, &seq, &selection_dist, &mut rng);
-        map.mutate(&core_vec, &mut seq, &selection_dist, &mu_dist);
+        map.mutate(&core_vec, &mut seq, &selection_dist, &mu_dist, &indel_dist);
 
         assert_eq!(seq[0], 16);
         assert_eq!(seq[2], 16);

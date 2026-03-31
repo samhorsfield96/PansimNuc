@@ -1,4 +1,5 @@
 // TODO plot GFFs with ggGenome to show how the genome evolves over time
+// Plot time series data with allelic drift/with selection added
 
 mod config;
 mod gff;
@@ -131,6 +132,7 @@ fn main() {
                     // generate distributions to draw mutations from
                     let mut site_mutation_dists: Vec<Distribution> = Vec::new();
                     let mut site_mutation_mus_vals: Vec<f64> = Vec::new();
+                    let mut site_indel_mus_vals: Vec<f64> = Vec::new();
                     let mut structural_dists: Vec<Vec<Distribution>> = Vec::new();
 					let mut multiplier_dists: Vec<Distribution> = Vec::new();
 
@@ -139,6 +141,7 @@ fn main() {
                         let duplication_rate_key = format!("{}.duplication_rate", section);
                         let deletion_rate_key = format!("{}.deletion_rate", section);
                         let inversion_rate_key = format!("{}.inversion_rate", section);
+                        let indel_rate_key = format!("{}.indel_rate", section);
 
                         site_mutation_dists.push(
 							Distribution::from_selection_config(&configuration, section).unwrap_or_else(|err| {
@@ -149,7 +152,9 @@ fn main() {
 							}),
 						);
 
+                        // each position takes two elements of vector
                         site_mutation_mus_vals.push(parse_f64(&mutation_rate_key));
+                        site_indel_mus_vals.push(parse_f64(&indel_rate_key));
 
                         structural_dists.push(vec![
                             Distribution::new_poisson(parse_f64(&duplication_rate_key)).expect("Failed to create duplication distribution"),
@@ -203,6 +208,7 @@ fn main() {
                         n_individuals,
                         site_mutation_dists,
                         &site_mutation_mus_vals,
+                        &site_indel_mus_vals,
                         recombination_dists,
                         recombination_threshold,
                         structural_dists,

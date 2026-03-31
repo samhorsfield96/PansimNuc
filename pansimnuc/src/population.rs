@@ -24,6 +24,7 @@ pub struct NucElement {
     pub seq: Vec<u8>,
     pub mutation_map: MutationMap,
     pub strand: bool,
+    pub original_length: usize,
 }
 
 impl NucElement {
@@ -82,6 +83,7 @@ pub struct Population {
     pub core_vec: Vec<Vec<u8>>,
     pub selection_dists: Vec<MutationDistribution>,
     pub mu_dists: Vec<MutationDistribution>,
+    pub indel_dists: Vec<MutationDistribution>,
     pub structural_mu_dists: Vec<Vec<MutationDistribution>>,
     pub recombination_dists: Vec<MutationDistribution>,
     pub recombination_threshold: f64,
@@ -338,6 +340,7 @@ impl Population {
         n_genomes: usize,
         selection_dists: Vec<MutationDistribution>,
         mu_dist_vals: &Vec<f64>,
+        indel_dist_vals: &Vec<f64>,
         recombination_dists: Vec<MutationDistribution>,
         recombination_threshold: f64,
         structural_mu_dists: Vec<Vec<MutationDistribution>>,
@@ -423,6 +426,7 @@ impl Population {
                         rng,
                     ),
                     multiplier: multiplier,
+                    original_length: feature.seq.len(),
                 });
                 element_id += 1;
 
@@ -459,9 +463,17 @@ impl Population {
                     .expect("Failed to create poisson distribution for mutation rates")
             })
             .collect();
+            
+        let indel_dists = indel_dist_vals
+            .into_iter()
+            .map(|mu| {
+                MutationDistribution::new_poisson(mu * (total_length as f64) * (n_genomes as f64) * n_generations as f64)
+                    .expect("Failed to create poisson distribution for indel rates")
+            })
+            .collect();
 
         let core_vec: Vec<Vec<u8>> =
-            vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
+            vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16]];
 
         Self {
             id: 0,
@@ -470,6 +482,7 @@ impl Population {
             core_vec,
             selection_dists,
             mu_dists,
+            indel_dists,
             structural_mu_dists: structural_mu_dists,
             recombination_dists,
             recombination_threshold,
@@ -482,34 +495,37 @@ impl Population {
     }
 
     // mutate individuals in the population according to their mutation maps and the provided distributions
-    pub fn mutate(&mut self) -> usize {
+    pub fn mutate(&mut self) -> (usize, usize) {
         let core_vec = &self.core_vec;
         let selection_dists = &self.selection_dists;
         let mu_dists = &self.mu_dists;
+        let indel_dists = &self.indel_dists;
 
-        let total_sites: usize = self
+        let (total_snps, total_indels): (usize, usize) = self
             .pop
             .par_iter_mut()
             .map(|genome| {
                 genome
                     .seq
                     .iter_mut()
-                    .map(|element| {
-                        element.mutation_map.mutate(
+                    .fold((0, 0), |(snps, indels), element| {
+                        let (s, i) = element.mutation_map.mutate(
                             core_vec,
                             &mut element.seq,
                             &selection_dists[element.mutation_map.selection_dist_id],
                             &mu_dists[element.mutation_map.mu_dist_id],
-                        )
+                            &indel_dists[element.mutation_map.mu_dist_id],
+                        );
+                        (snps + s, indels + i)
                     })
-                    .sum::<usize>()
             })
-            .sum();
+            .reduce(|| (0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1));
 
         if self.verbose {
-            println!("Total mutated sites: {}", total_sites);
+            println!("Total SNPs: {}", total_snps);
+            println!("Total indels: {}", total_indels);
         }
-        total_sites
+        (total_snps, total_indels)
     }
 
     pub fn update_mu_dists(&mut self, mu_dist_vals: &Vec<f64>) {
@@ -904,6 +920,7 @@ mod tests {
             n_genomes,
             site_mutation_dists,
             &site_mutation_mus,
+            &site_mutation_mus,
             recombination_dists,
             1.0,
             default_structural_dists(),
@@ -978,6 +995,7 @@ mod tests {
             root,
             1,
             site_mutation_dists,
+            &site_mutation_mus,
             &site_mutation_mus,
             recombination_dists,
             1.0,
@@ -1059,6 +1077,7 @@ mod tests {
             1,
             site_mutation_dists,
             &site_mutation_mus,
+            &site_mutation_mus,
             recombination_dists,
             1.0,
             default_structural_dists(),
@@ -1128,6 +1147,7 @@ mod tests {
         let intron_mu_dist = 1.0;
         let intergenic_mu_dist = 1.0;
         let site_mutation_mus = vec![force_mutation_dist, intron_mu_dist, intergenic_mu_dist];
+        let indel_mus = vec![1e-12, 1e-12, 1e-12]; // effectively no indels for this test
         let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
             .expect("Failed to create uniform distribution for recombination");
         let recombination_len_dist = MutationDistribution::new_poisson(1.0)
@@ -1144,6 +1164,7 @@ mod tests {
             1,
             site_mutation_dists,
             &site_mutation_mus,
+            &indel_mus,
             recombination_dists,
             1.0,
             default_structural_dists(),
@@ -1224,6 +1245,7 @@ mod tests {
             root,
             3,
             site_mutation_dists,
+            &site_mutation_mus,
             &site_mutation_mus,
             recombination_dists,
             1.0,
@@ -1357,6 +1379,7 @@ mod tests {
             root,
             1,
             site_mutation_dists,
+            &site_mutation_mus,
             &site_mutation_mus,
             recombination_dists,
             1.0,
@@ -1582,9 +1605,10 @@ mod tests {
             feature_id: feature_id,
             feature_type: "exon".to_string(),
             multiplier: 1.0,
-            seq,
+            seq: seq.clone(),
             mutation_map,
             strand: true,
+            original_length: seq.len(),
         }
     }
 

@@ -157,13 +157,13 @@ impl MetaPopulation {
                 let mut rng = rand::thread_rng();
                 
                 // mutate at nucleotide level
-                let total_sites = population.mutate();
+                let (total_snps, total_indels) = population.mutate();
 
                 // perform intragenome structural mutations
                 population.structural_intra_genome();
 
-                // perform intergenome structural mutations
-                population.structural_inter_genome(self.recombination_rate, total_sites, self.recombination_size_mean);
+                // perform intergenome structural mutations, based on number of SNPs
+                population.structural_inter_genome(self.recombination_rate, total_snps, self.recombination_size_mean);
 
                 // sample next generation
                 let sampled_indices = population.sample_individuals(&mut rng);
@@ -266,6 +266,7 @@ mod tests {
             core_vec: Vec::new(),
             selection_dists: Vec::new(),
             mu_dists: Vec::new(),
+            indel_dists: Vec::new(),
             structural_mu_dists: Vec::new(),
             recombination_dists: Vec::new(),
             recombination_threshold: 0.0,

@@ -678,6 +678,7 @@ mod tests {
                     seq: vec![],
                     mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
                     strand: true,
+                    original_length: 0,
                 },
                 NucElement {
                     contig_id: 0,
@@ -688,6 +689,7 @@ mod tests {
                     seq: vec![],
                     mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
                     strand: false,
+                    original_length: 0,
                 },
                 NucElement {
                     contig_id: 0,
@@ -698,6 +700,7 @@ mod tests {
                     seq: vec![],
                     mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
                     strand: false,
+                    original_length: 0,
                 },
             ],
             seq_length: 0,
@@ -722,6 +725,7 @@ mod tests {
             seq: vec![],
             mutation_map: MutationMap::new(0, 0, &vec![], sel_dist, rng),
             strand,
+            original_length: 0,
         };
 
         Genome {
@@ -767,6 +771,7 @@ mod tests {
                 } else {
                     !strand_seed
                 },
+                original_length: 0,
             });
         }
 
@@ -802,6 +807,7 @@ mod tests {
             core_vec: vec![],
             selection_dists: vec![],
             mu_dists: vec![],
+            indel_dists: vec![],
             structural_mu_dists: vec![vec![]],
             recombination_dists: vec![recombination_count, recombination_len],
             recombination_threshold: 0.0,
@@ -1147,6 +1153,7 @@ mod tests {
                 seq: vec![1, 2, 4, 8],
                 mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
                 strand: true,
+                original_length: 4,
             },
             NucElement {
                 contig_id: 0,
@@ -1157,6 +1164,7 @@ mod tests {
                 seq: vec![1, 2, 4, 8],
                 mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
                 strand: true,
+                original_length: 4,
             },
             NucElement {
                 contig_id: 0,
@@ -1167,6 +1175,7 @@ mod tests {
                 seq: vec![1, 2, 4, 8],
                 mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
                 strand: true,
+                original_length: 4,
             }],
             seq_length: 0,
         };
