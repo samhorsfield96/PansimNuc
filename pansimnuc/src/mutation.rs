@@ -988,6 +988,11 @@ mod tests {
         assert_ne!(map.get(4, 1), Some(&0.10)); // site 1 changed
         assert_ne!(map.get(8, 1), Some(&0.10)); // site 1 changed
 
+        assert_ne!(map.get(1, 1), None); // site 1 changed
+        assert_ne!(map.get(2, 1), None); // site 1 changed
+        assert_ne!(map.get(4, 1), None); // site 1 changed
+        assert_ne!(map.get(8, 1), None); // site 1 changed
+
 
         assert_eq!(map.get(1, 0), Some(&0.10)); // site 0 unchanged
         assert_eq!(map.get(1, 2), Some(&0.20)); // site 1 shifted to 2
