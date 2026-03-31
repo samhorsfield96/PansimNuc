@@ -505,8 +505,8 @@ impl MutationMap {
         } else {
             // deletion: need to remove any entries for this site and shift down keys above this site
             for allele_map in self.data.iter_mut() {
-                allele_map.remove(&site);
                 let num_sites = allele_map.len();
+                allele_map.remove(&site);
                 if num_sites == 0 {
                     continue;
                 }
@@ -1019,6 +1019,21 @@ mod tests {
         map.set_for_test(1, 1, 0.20);
         map.set_for_test(1, 2, 0.30);
         map.set_for_test(1, 3, 0.40);
+
+        map.set_for_test(2, 0, 0.10);
+        map.set_for_test(2, 1, 0.20);
+        map.set_for_test(2, 2, 0.30);
+        map.set_for_test(2, 3, 0.40);
+
+        map.set_for_test(4, 0, 0.10);
+        map.set_for_test(4, 1, 0.20);
+        map.set_for_test(4, 2, 0.30);
+        map.set_for_test(4, 3, 0.40);
+
+        map.set_for_test(8, 0, 0.10);
+        map.set_for_test(8, 1, 0.20);
+        map.set_for_test(8, 2, 0.30);
+        map.set_for_test(8, 3, 0.40);
 
         // Deleting site 2 should remove its coefficient from the map
         map.update_data(2, false);
