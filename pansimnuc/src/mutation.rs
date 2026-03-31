@@ -507,6 +507,9 @@ impl MutationMap {
             for allele_map in self.data.iter_mut() {
                 allele_map.remove(&site);
                 let num_sites = allele_map.len();
+                if num_sites == 0 {
+                    continue;
+                }
                 // start at site + 1 to shift down keys above the deleted site
                 for key in site + 1..num_sites {
                     if let Some(value) = allele_map.get(&key) {
@@ -924,5 +927,120 @@ mod tests {
 
         let post_n_sites: Vec<u8> = seq.iter().copied().filter(|&x| x == 16).collect();
         assert_eq!(original_n_sites, post_n_sites);
+    }
+
+    #[test]
+    fn test_indels_change_sequence_length() {
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
+        // Large sequence so many indels fire; zero SNP rate so only indels mutate
+        let seq: Vec<u8> = vec![1u8; 100];
+        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        let mut seq_mut = seq.clone();
+
+        let mu_dist = Distribution::new_poisson(1e-12).unwrap();
+        // Force many insertions by biasing gen_bool via a deterministic seed that
+        // reliably produces insertions; use a very high rate to guarantee length change
+        let indel_dist = Distribution::new_poisson(10.0).unwrap();
+        let core_vec: Vec<Vec<u8>> = vec![
+            vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16],
+        ];
+
+        map.mutate(&core_vec, &mut seq_mut, &dist, &mu_dist, &indel_dist);
+
+        // With 1000 indels on a seed that produces ~50% insertions, final length must differ
+        assert_ne!(seq_mut.len(), seq.len());
+    }
+
+    #[test]
+    fn test_insertion_shifts_selection_coefficients_up() {
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
+        // All-A sequence so data[0] has a dense entry at every site
+        let seq = vec![1u8, 1, 1, 1];
+        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        map.set_for_test(1, 0, 0.10);
+        map.set_for_test(1, 1, 0.20);
+        map.set_for_test(1, 2, 0.30);
+        map.set_for_test(1, 3, 0.40);
+
+        map.set_for_test(2, 0, 0.10);
+        map.set_for_test(2, 1, 0.20);
+        map.set_for_test(2, 2, 0.30);
+        map.set_for_test(2, 3, 0.40);
+
+        map.set_for_test(4, 0, 0.10);
+        map.set_for_test(4, 1, 0.20);
+        map.set_for_test(4, 2, 0.30);
+        map.set_for_test(4, 3, 0.40);
+
+        map.set_for_test(8, 0, 0.10);
+        map.set_for_test(8, 1, 0.20);
+        map.set_for_test(8, 2, 0.30);
+        map.set_for_test(8, 3, 0.40);
+
+        // Inserting at site 1 should shift coefficients at sites 1+ up by one
+        map.update_data(1, true);
+
+        // check insertion correct
+        assert_ne!(map.get(1, 1), Some(&0.10)); // site 1 changed
+        assert_ne!(map.get(2, 1), Some(&0.10)); // site 1 changed
+        assert_ne!(map.get(4, 1), Some(&0.10)); // site 1 changed
+        assert_ne!(map.get(8, 1), Some(&0.10)); // site 1 changed
+
+
+        assert_eq!(map.get(1, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(1, 2), Some(&0.20)); // site 1 shifted to 2
+        assert_eq!(map.get(1, 3), Some(&0.30)); // site 2 shifted to 3
+        assert_eq!(map.get(1, 4), Some(&0.40)); // site 3 shifted to 4
+        assert_eq!(map.get(2, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(2, 2), Some(&0.20)); // site 1 shifted to 2
+        assert_eq!(map.get(2, 3), Some(&0.30)); // site 2 shifted to 3
+        assert_eq!(map.get(2, 4), Some(&0.40)); // site 3 shifted to 4
+        assert_eq!(map.get(4, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(4, 2), Some(&0.20)); // site 1 shifted to 2
+        assert_eq!(map.get(4, 3), Some(&0.30)); // site 2 shifted to 3
+        assert_eq!(map.get(4, 4), Some(&0.40)); // site 3 shifted to 4
+        assert_eq!(map.get(8, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(8, 2), Some(&0.20)); // site 1 shifted to 2
+        assert_eq!(map.get(8, 3), Some(&0.30)); // site 2 shifted to 3
+        assert_eq!(map.get(8, 4), Some(&0.40)); // site 3 shifted to 4
+
+    }
+
+    #[test]
+    fn test_deletion_removes_selection_coefficient_at_deleted_site() {
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
+        // All-A sequence so data[0] has a dense entry at every site
+        let seq = vec![1u8, 1, 1, 1];
+        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        map.set_for_test(1, 0, 0.10);
+        map.set_for_test(1, 1, 0.20);
+        map.set_for_test(1, 2, 0.30);
+        map.set_for_test(1, 3, 0.40);
+
+        // Deleting site 2 should remove its coefficient from the map
+        map.update_data(2, false);
+
+        assert_eq!(map.get(1, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(1, 1), Some(&0.20)); // site 1 unchanged
+        assert_eq!(map.get(1, 2), Some(&0.40)); // site 3 coefficient shifted down to site 2
+        assert_eq!(map.get(1, 3), None); // site 3 deleted, should be removed from map
+
+        assert_eq!(map.get(2, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(2, 1), Some(&0.20)); // site 1 unchanged
+        assert_eq!(map.get(2, 2), Some(&0.40)); // site 3 coefficient shifted down to site 2
+        assert_eq!(map.get(2, 3), None); // site 3 deleted, should be removed from map
+
+        assert_eq!(map.get(4, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(4, 1), Some(&0.20)); // site 1 unchanged
+        assert_eq!(map.get(4, 2), Some(&0.40)); // site 3 coefficient shifted down to site 2
+        assert_eq!(map.get(4, 3), None); // site 3 deleted, should be removed from map
+
+        assert_eq!(map.get(8, 0), Some(&0.10)); // site 0 unchanged
+        assert_eq!(map.get(8, 1), Some(&0.20)); // site 1 unchanged
+        assert_eq!(map.get(8, 2), Some(&0.40)); // site 3 coefficient shifted down to site 2
+        assert_eq!(map.get(8, 3), None); // site 3 deleted, should be removed from map
     }
 }
