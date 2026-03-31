@@ -1,4 +1,4 @@
-use crate::demography::MetaPopulation;
+use crate::population::MetaPopulation;
 use crate::population::Population;
 
 // function to take information about NucElements and write to output file for tracking purposes
@@ -9,6 +9,34 @@ fn write_tracking_header(out_path: &str) {
     wtr.write_record(&["element_id", "feature_id", "population_id", "genome_id", "contig_id", "feature_type", "multiplier", "start", "end", "strand", "original_length", "length", "sequence", "log_selection_coefficients"]).expect("Could not write header to tracking output file.");
     
     wtr.flush().expect("Could not flush tracking output file.");
+}
+
+fn identify_tracked_elements(population: &mut Population, tracking_regions: Vec<(usize, usize, usize)>) {
+    for genome in &mut population.pop {
+        // determine position of each element in the genome, and write to output file
+        let mut current_start = 0;
+        let mut current_contig_id = 0;
+
+        for element in &mut genome.seq {
+            if element.contig_id != current_contig_id {
+                // reset current start position for new contig
+                current_start = 0;
+                current_contig_id = element.contig_id;
+            }
+
+            let element_end = current_start + element.seq.len(); 
+
+            for (contig_id, start, end) in &tracking_regions {
+                // make sure there is an overlap between the element and the tracking region, and that they are on the same contig
+                if element.contig_id == *contig_id && current_start <= *end && *start <= element_end {) {
+                    element.tracked = true;
+                    break; // stop checking other tracking regions once a match is found
+                }
+            }
+
+            current_start = element_end;
+        }
+    }
 }
 
 fn write_tracking_output(out_path: &str, metapopulation: &MetaPopulation) {

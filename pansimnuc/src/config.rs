@@ -140,6 +140,26 @@ impl Config {
         })
     }
 
+    /// Parse tracking regions from [tracking] into a list of (contig, start, end) tuples.
+    pub fn tracking_regions(&self) -> Result<Vec<(usize, usize, usize)>, String> {
+        let contigs: Vec<usize> = self
+            .get_usize_vec("tracking", "contig")?
+            .into_iter()
+            .collect();
+
+        let starts: Vec<usize> = self.get_usize_vec("tracking", "start")?;
+        let ends: Vec<usize> = self.get_usize_vec("tracking", "end")?;
+
+        if contigs.len() != starts.len() || contigs.len() != ends.len() {
+            return Err(format!(
+                "tracking.contig, tracking.start, and tracking.end must all have the same number of entries (got {}, {}, {})",
+                contigs.len(), starts.len(), ends.len()
+            ));
+        }
+
+        Ok(contigs.into_iter().zip(starts).zip(ends).map(|((c, s), e)| (c, s, e)).collect())
+    }
+
     /// Get all keys in a section
     pub fn keys_in_section(&self, section: &str) -> Vec<String> {
         self.sections
@@ -185,6 +205,34 @@ mod tests {
             .expect("Failed to write test config file");
         drop(file);
         temp_path.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn test_tracking_regions_parses_correctly() {
+        let content = "[tracking]
+contig=0,0
+start=0,60000
+end=20000,100000
+";
+        let path = create_test_config(content);
+        let config = Config::from_file(&path).unwrap();
+        let regions = config.tracking_regions().unwrap();
+        assert_eq!(regions, vec![
+            (0, 0, 20000),
+            (0, 60000, 100000),
+        ]);
+    }
+
+    #[test]
+    fn test_tracking_regions_mismatched_lengths_returns_error() {
+        let content = "[tracking]
+contig=0,0,1
+start=0,60000
+end=20000,100000
+";
+        let path = create_test_config(content);
+        let config = Config::from_file(&path).unwrap();
+        assert!(config.tracking_regions().is_err());
     }
 
     #[test]
