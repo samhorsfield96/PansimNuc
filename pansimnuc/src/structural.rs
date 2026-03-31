@@ -679,6 +679,7 @@ mod tests {
                     mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
                     strand: true,
                     original_length: 0,
+                    frameshift: false,
                 },
                 NucElement {
                     contig_id: 0,
@@ -690,6 +691,7 @@ mod tests {
                     mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
                     strand: false,
                     original_length: 0,
+                    frameshift: false,
                 },
                 NucElement {
                     contig_id: 0,
@@ -701,6 +703,7 @@ mod tests {
                     mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
                     strand: false,
                     original_length: 0,
+                    frameshift: false,
                 },
             ],
             seq_length: 0,
@@ -726,6 +729,7 @@ mod tests {
             mutation_map: MutationMap::new(0, 0, &vec![], sel_dist, rng),
             strand,
             original_length: 0,
+            frameshift: false,
         };
 
         Genome {
@@ -771,7 +775,8 @@ mod tests {
                 } else {
                     !strand_seed
                 },
-                original_length: 0,
+                original_length: marker_seq.len(),
+                frameshift: false,
             });
         }
 
@@ -1154,6 +1159,7 @@ mod tests {
                 mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
                 strand: true,
                 original_length: 4,
+                frameshift: false,
             },
             NucElement {
                 contig_id: 0,
@@ -1165,6 +1171,7 @@ mod tests {
                 mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
                 strand: true,
                 original_length: 4,
+                frameshift: false,
             },
             NucElement {
                 contig_id: 0,
@@ -1176,6 +1183,7 @@ mod tests {
                 mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
                 strand: true,
                 original_length: 4,
+                frameshift: false,
             }],
             seq_length: 0,
         };

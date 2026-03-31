@@ -6,6 +6,7 @@ use rustc_hash::FxHashMap;
 use statrs::distribution::Poisson;
 use std::collections::HashMap;
 use std::fmt;
+use crate::population::NucElement;
 
 #[derive(Debug)]
 pub enum DistributionError {
@@ -636,6 +637,8 @@ impl MutationMap {
         &mut self,
         core_vec: &Vec<Vec<u8>>,
         seq: &mut Vec<u8>,
+        original_length: usize,
+        frameshift: &mut bool,
         selection_dist: &Distribution,
         mu_dist: &Distribution,
         indel_dist: &Distribution,
@@ -646,6 +649,13 @@ impl MutationMap {
         // mutate SNPs
         let n_snps = self.mutate_SNPs(core_vec, seq, selection_dist, mu_dist, &mut thread_rng);
         let n_indels = self.mutate_indels(core_vec, seq, selection_dist, indel_dist, &mut thread_rng);
+
+        // update frameshift status
+        let max_length = usize::max(original_length, seq.len());
+        let min_length = usize::min(original_length, seq.len());
+        if (max_length - min_length) % 3 != 0 {
+            *frameshift = true;
+        }
 
         (n_snps, n_indels)
     }
@@ -913,10 +923,11 @@ mod tests {
             vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
 
         let mut seq = vec![16, 1, 16, 2, 4, 8, 16];
+        let original_length = seq.len();
         let original_n_sites: Vec<u8> = seq.iter().copied().filter(|&x| x == 16).collect();
 
         let mut map = MutationMap::new(0, 0, &seq, &selection_dist, &mut rng);
-        map.mutate(&core_vec, &mut seq, &selection_dist, &mu_dist, &indel_dist);
+        map.mutate(&core_vec, &mut seq, original_length, &mut false, &selection_dist, &mu_dist, &indel_dist);
 
         assert_eq!(seq[0], 16);
         assert_eq!(seq[2], 16);
@@ -946,7 +957,7 @@ mod tests {
             vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16],
         ];
 
-        map.mutate(&core_vec, &mut seq_mut, &dist, &mu_dist, &indel_dist);
+        map.mutate(&core_vec, &mut seq_mut, seq.len(), &mut false, &dist, &mu_dist, &indel_dist);
 
         // With 1000 indels on a seed that produces ~50% insertions, final length must differ
         assert_ne!(seq_mut.len(), seq.len());

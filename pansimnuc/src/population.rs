@@ -25,22 +25,12 @@ pub struct NucElement {
     pub mutation_map: MutationMap,
     pub strand: bool,
     pub original_length: usize,
+    pub frameshift: bool,
 }
 
 impl NucElement {
     fn element_selection_coefficient(&self, genome_identifier: &str) -> f64 {
         let mut element_log_sum = 0.0;
-
-        // if exon and original length changed by non-multiple of 3, assume frameshift, return 0.0 (no impact on fitness)
-        if self.feature_type == "exon" {
-            let current_seq_length = self.seq.len();
-            let max_len = self.original_length.max(current_seq_length);
-            let min_len = self.original_length.min(current_seq_length);
-
-            if (max_len - min_len) % 3 != 0 {
-                return 0.0;
-            }
-        }
 
         for (site, allele) in self.seq.iter().enumerate() {
             let allele_shifted = 1 >> allele;
@@ -153,7 +143,13 @@ impl Population {
                 if actual_element_id == expected_element_id
                     && actual_element.strand == element.strand
                 {
-                    continue;
+                    // check if frameshift occurred, if so then feature is broken, as likely to be non-functional
+                    if actual_element.feature_type == "exon" && actual_element.frameshift {
+                        feature_broken = true;
+                        break;
+                    } else {
+                        continue;
+                    }
                 } else {
                     // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
                     // check if last feature matches in feature_map_entry
@@ -192,7 +188,13 @@ impl Population {
                     if actual_element_id == expected_element_id
                         && actual_element.strand == element.strand
                     {
-                        continue;
+                        // check if frameshift occurred, if so then feature is broken, as likely to be non-functional
+                        if actual_element.feature_type == "exon" && actual_element.frameshift {
+                            feature_broken = true;
+                            break;
+                        } else {
+                            continue;
+                        }
                     } else {
                         // check if reversed order and strand matches, if so continue, as likely to be functional just reversed
                         // check if last feature matches in feature_map_entry
@@ -439,6 +441,7 @@ impl Population {
                     ),
                     multiplier: multiplier,
                     original_length: feature.seq.len(),
+                    frameshift: false,
                 });
                 element_id += 1;
 
@@ -524,6 +527,8 @@ impl Population {
                         let (s, i) = element.mutation_map.mutate(
                             core_vec,
                             &mut element.seq,
+                            element.original_length,
+                            &mut element.frameshift,
                             &selection_dists[element.mutation_map.selection_dist_id],
                             &mu_dists[element.mutation_map.mu_dist_id],
                             &indel_dists[element.mutation_map.mu_dist_id],
@@ -1621,6 +1626,7 @@ mod tests {
             mutation_map,
             strand: true,
             original_length: seq.len(),
+            frameshift: false,
         }
     }
 
