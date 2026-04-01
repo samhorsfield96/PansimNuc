@@ -1,5 +1,6 @@
 // TODO plot GFFs with ggGenome to show how the genome evolves over time
 // Plot time series data with allelic drift/with selection added
+// TODO add selection contraint on genome size to prevent runaway genome expansion
 
 mod config;
 mod gff;
@@ -13,7 +14,7 @@ use rayon::prelude::*;
 use crate::config::PopulationSplitConfig;
 use crate::demography::MetaPopulation;
 use crate::mutation::Distribution;
-use crate::tracking::{identify_tracked_elements, write_tracking_header, write_tracking_output};
+use crate::tracking::{identify_tracked_elements, write_tracking_header};
 use clap::Parser;
 use config::Config;
 use gff::read_gff_lines;
@@ -36,7 +37,7 @@ fn main() {
 
     let mut configuration: HashMap<String, String> = HashMap::new();
     let mut population_split_config = PopulationSplitConfig::new();
-    let mut tracking_regions: Vec<(usize, usize, usize)> = Vec::new(); // vector of (contig_id, start, end) tuples for regions to track
+    let mut tracking_regions: Vec<(String, usize, usize)> = Vec::new(); // vector of (contig_id, start, end) tuples for regions to track
 
     // Load config if provided
     let mut verbose = false;
@@ -110,7 +111,7 @@ fn main() {
         configuration.get("input.fasta_file"),
     ) {
         match read_gff_lines(&gff_path, &fasta_path, earlgrey_gff_path) {
-            Ok(features) => {
+            Ok((features, contig_name_to_id)) => {
                 println!("Loaded {} contigs with features", features.len());
 
                 if let (Some(n_individuals_str), Some(n_generation_str)) = (
@@ -205,10 +206,6 @@ fn main() {
                     let n_generations: usize = n_generation_str
                         .parse::<usize>()
                         .expect("n_generation must be an integer.");
-
-                    // TODO initialise metapopulation, include population splits etc. in config file
-                    // show actually initialise metapopulation and run structural and mutation events there
-                    // can also add in different mutation distributions for each population.
                     
                     println!("Initialising population...");
                     let mut population = Population::new(
@@ -230,7 +227,7 @@ fn main() {
                     // add tracking regions to population struct so we can track mutations in these regions over time
                     let mut is_tracking = false;
                     if !tracking_regions.is_empty() {
-                        identify_tracked_elements(&mut population, &tracking_regions);
+                        identify_tracked_elements(&mut population, &tracking_regions, &contig_name_to_id);
                         if let Some(outdir) = configuration
                             .get("output.outdir") {
                             let output_path = format!("{}/tracking.csv", outdir);

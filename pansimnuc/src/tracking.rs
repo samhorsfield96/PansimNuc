@@ -13,7 +13,7 @@ pub fn write_tracking_header(out_path: &str) {
     wtr.flush().expect("Could not flush tracking output file.");
 }
 
-pub fn identify_tracked_elements(population: &mut Population, tracking_regions: &Vec<(usize, usize, usize)>) {
+pub fn identify_tracked_elements(population: &mut Population, tracking_regions: &Vec<(String, usize, usize)>, contig_name_to_id: &Vec<String>) {
     for genome in &mut population.pop {
         // determine position of each element in the genome, and write to output file
         let mut current_start = 0;
@@ -28,9 +28,12 @@ pub fn identify_tracked_elements(population: &mut Population, tracking_regions: 
 
             let element_end = current_start + element.seq.len(); 
 
+            // TODO contig_ids don't match, need a map which maps contig names to IDs
             for (contig_id, start, end) in tracking_regions {
                 // make sure there is an overlap between the element and the tracking region, and that they are on the same contig
-                if element.contig_id == *contig_id && current_start <= *end && *start <= element_end {
+                let element_contig_name = &contig_name_to_id[element.contig_id];
+                
+                if element_contig_name == contig_id && current_start <= *end && *start <= element_end {
                     element.tracked = true;
                     break; // stop checking other tracking regions once a match is found
                 }
@@ -165,7 +168,7 @@ mod tests {
         let elements = vec![make_element(0, 100), make_element(0, 100)];
         let mut pop = make_population(elements);
 
-        identify_tracked_elements(&mut pop, &vec![(0, 0, 500)]);
+        identify_tracked_elements(&mut pop, &vec![("0".to_string(), 0, 500)], &vec!["0".to_string()]);
 
         assert!(pop.pop[0].seq[0].tracked);
         assert!(pop.pop[0].seq[1].tracked);
@@ -177,7 +180,7 @@ mod tests {
         let elements = vec![make_element(0, 100), make_element(0, 100)];
         let mut pop = make_population(elements);
 
-        identify_tracked_elements(&mut pop, &vec![(0, 300, 500)]);
+        identify_tracked_elements(&mut pop, &vec![("0".to_string(), 300, 500)], &vec!["0".to_string()]);
 
         assert!(!pop.pop[0].seq[0].tracked);
         assert!(!pop.pop[0].seq[1].tracked);
@@ -189,7 +192,7 @@ mod tests {
         let elements = vec![make_element(0, 100)];
         let mut pop = make_population(elements);
 
-        identify_tracked_elements(&mut pop, &vec![(1, 0, 500)]);
+        identify_tracked_elements(&mut pop, &vec![("1".to_string(), 0, 500)], &vec!["0".to_string()]);
 
         assert!(!pop.pop[0].seq[0].tracked);
     }
@@ -201,7 +204,7 @@ mod tests {
         let elements = vec![make_element(0, 150), make_element(0, 100)];
         let mut pop = make_population(elements);
 
-        identify_tracked_elements(&mut pop, &vec![(0, 200, 500)]);
+        identify_tracked_elements(&mut pop, &vec![("0".to_string(), 200, 500)], &vec!["0".to_string()]);
 
         assert!(!pop.pop[0].seq[0].tracked); // [0,150) — no overlap with [200,500)
         assert!(pop.pop[0].seq[1].tracked);  // [150,250) — overlaps [200,500)
@@ -213,7 +216,7 @@ mod tests {
         let elements = vec![make_element(0, 1000)];
         let mut pop = make_population(elements);
 
-        identify_tracked_elements(&mut pop, &vec![(0, 200, 500)]);
+        identify_tracked_elements(&mut pop, &vec![("0".to_string(), 200, 500)], &vec!["0".to_string()]);
 
         assert!(pop.pop[0].seq[0].tracked);
     }

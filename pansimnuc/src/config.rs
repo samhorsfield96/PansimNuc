@@ -141,10 +141,11 @@ impl Config {
     }
 
     /// Parse tracking regions from [tracking] into a list of (contig, start, end) tuples.
-    pub fn tracking_regions(&self) -> Result<Vec<(usize, usize, usize)>, String> {
-        let contigs: Vec<usize> = self
+    pub fn tracking_regions(&self) -> Result<Vec<(String, usize, usize)>, String> {
+        let contigs: Vec<String> = self
             .get_usize_vec("tracking", "contig")?
             .into_iter()
+            .map(|c| c.to_string())
             .collect();
 
         let starts: Vec<usize> = self.get_usize_vec("tracking", "start")?;
@@ -218,8 +219,8 @@ end=20000,100000
         let config = Config::from_file(&path).unwrap();
         let regions = config.tracking_regions().unwrap();
         assert_eq!(regions, vec![
-            (0, 0, 20000),
-            (0, 60000, 100000),
+            ("0".to_string(), 0, 20000),
+            ("0".to_string(), 60000, 100000),
         ]);
     }
 
