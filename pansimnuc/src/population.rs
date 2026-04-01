@@ -291,7 +291,7 @@ impl Population {
             )
         })?;
 
-        let prefixed_name = format!("{}_{}", prefix, file_name.to_string_lossy());
+        let prefixed_name = format!("{}{}", prefix, file_name.to_string_lossy());
         Ok(path.with_file_name(prefixed_name))
     }
 
