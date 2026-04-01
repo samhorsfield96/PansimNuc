@@ -136,7 +136,7 @@ fn main() {
                             .unwrap_or_else(|_| panic!("Config key '{}' must be an integer", key))
                     };
 
-                    let feature_sections = ["exons", "introns", "intergenic", "TE-CUT", "TE-COPY"];
+                    let feature_sections = ["exons", "introns", "intergenic", "TE-CUT", "TE-COPY", "tracking"];
 
                     // generate distributions to draw mutations from
                     let mut site_mutation_dists: Vec<Distribution> = Vec::new();
@@ -171,8 +171,8 @@ fn main() {
                             Distribution::new_poisson(parse_f64(&inversion_rate_key)).expect("Failed to create inversion distribution"),
                         ]);
 
-						// get multiplier just for TE sections
-						if section.starts_with("TE") {
+						// get multiplier just for TE sections and tracking
+						if section.starts_with("TE") || section == "tracking" {
 							let multiplier_rate_key = format!("{}.multiplier_rate", section);
 							let multiplier_scale_key = format!("{}.multiplier_scale", section);
 							let multiplier_rate = parse_f64(&multiplier_rate_key);
@@ -222,17 +222,13 @@ fn main() {
                         n_generations,
                         &mut rng,
                         verbose,
+                        &contig_name_to_id,
+                        &tracking_regions
                     );
 
                     // add tracking regions to population struct so we can track mutations in these regions over time
                     let mut is_tracking = false;
                     if !tracking_regions.is_empty() {
-                        identify_tracked_elements(&mut population, &tracking_regions, &contig_name_to_id);
-                        if let Some(outdir) = configuration
-                            .get("output.outdir") {
-                            let output_path = format!("{}/tracking.csv", outdir);
-                            write_tracking_header(&output_path);
-                        };
                         is_tracking = true;
                     }
                     println!("Finished initialising population...");

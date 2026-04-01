@@ -3,6 +3,7 @@ use crate::mutation::Distribution as MutationDistribution;
 use crate::mutation::MutationMap;
 use crate::structural::mutate_inter_genome;
 use crate::structural::mutate_intra_genome;
+use crate::tracking::identify_tracked_element;
 use logsumexp::LogSumExp;
 use rand::SeedableRng;
 use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
@@ -382,6 +383,8 @@ impl Population {
         n_generations: usize,
         rng: &mut StdRng,
         verbose: bool,
+        contig_name_to_id: &Vec<String>,
+        tracking_regions: &Vec<(String, usize, usize)>,
     ) -> Self {
         // initialise population
         let mut population: Vec<Genome> = Vec::new();
@@ -396,8 +399,12 @@ impl Population {
         // initialise feature map, maps feature ID to number of genes that should share same ID
         let mut feature_map: HashMap<usize, Vec<usize>> = HashMap::new();
 
+        // determine if tracking enabled
+        let is_tracking = !tracking_regions.is_empty();
+
         // generate starting genome
         for (contig_id, features) in root.iter().enumerate() {
+            let mut current_start = 0;
             for feature in features {
                 let selection_dist_id: usize = match feature.feature_type.as_str() {
                     "exon" => 0,
@@ -435,7 +442,6 @@ impl Population {
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
-
                 // Update feature_map, keeping track of how many features there are
                 if feature.feature_id != 0 {
                     feature_map
@@ -444,7 +450,7 @@ impl Population {
                         .push(element_id);
                 }
 
-                genome.push(NucElement {
+                let mut element = NucElement {
                     contig_id: contig_id,
                     element_id: element_id,
                     feature_id: feature.feature_id,
@@ -462,8 +468,27 @@ impl Population {
                     original_length: feature.seq.len(),
                     frameshift: false,
                     tracked: false,
-                });
+                };
+
+                // determine if element is tracked and if so update mutation map accordingly
+                if is_tracking {
+                    identify_tracked_element(&mut element, current_start, &tracking_regions, &contig_name_to_id);
+                    if element.tracked {
+                        // update selection maps etc
+                        element.mutation_map = MutationMap::new(
+                            5, // new selection dist ID for tracked elements
+                            5, // new mu dist ID for tracked elements
+                            &element.seq,
+                            &selection_dists[5], // new selection distribution for tracked elements
+                            rng,
+                        );
+                        element.multiplier = multiplier_dists[5].sample(rng);
+                    }
+                }
+
+                genome.push(element);
                 element_id += 1;
+                current_start += feature.seq.len();
 
                 // generate homology map for this element, initially just self
                 let mut element_homology_map: Vec<Vec<usize>> = Vec::new();
@@ -966,6 +991,8 @@ mod tests {
             10,
             &mut rng,
             true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking_regions
         );
 
         // Check population was created correctly
@@ -1042,6 +1069,8 @@ mod tests {
             10,
             &mut rng,
             true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking
         );
 
         let temp_path = std::env::temp_dir().join(format!(
@@ -1123,6 +1152,8 @@ mod tests {
             10,
             &mut rng,
             true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking
         );
 
         let temp_path = std::env::temp_dir().join(format!(
@@ -1210,6 +1241,8 @@ mod tests {
             10,
             &mut rng,
             true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking
         );
 
         let original_seq = pop.pop[0].seq[0].seq.clone();
@@ -1292,6 +1325,8 @@ mod tests {
             10,
             &mut rng,
             true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking
         );
 
         let original_identifiers: Vec<String> = pop
@@ -1426,6 +1461,8 @@ mod tests {
             10,
             &mut rng,
             true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking
         )
     }
 

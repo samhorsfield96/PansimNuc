@@ -2,6 +2,7 @@ use crate::demography::MetaPopulation;
 use crate::population::Population;
 use std::fs::OpenOptions;
 use std::path::Path;
+use crate::population::NucElement;
 
 // function to take information about NucElements and write to output file for tracking purposes
 pub fn write_tracking_header(out_path: &str) {
@@ -13,7 +14,26 @@ pub fn write_tracking_header(out_path: &str) {
     wtr.flush().expect("Could not flush tracking output file.");
 }
 
+pub fn identify_tracked_element(element: &mut NucElement, element_start: usize, tracking_regions: &Vec<(String, usize, usize)>, contig_name_to_id: &Vec<String>)
+{
+    let element_end = element_start + element.seq.len(); 
+    for (contig_id, start, end) in tracking_regions {
+        // make sure there is an overlap between the element and the tracking region, and that they are on the same contig
+        let element_contig_name = &contig_name_to_id[element.contig_id];
+        
+        if element_contig_name == contig_id && element_start <= *end && *start <= element_end {
+            
+            // update variables for selection etc
+            element.mutation_map.mu_dist_id = 6;
+
+            element.tracked = true;
+            break; // stop checking other tracking regions once a match is found
+        }
+    }
+}
+
 pub fn identify_tracked_elements(population: &mut Population, tracking_regions: &Vec<(String, usize, usize)>, contig_name_to_id: &Vec<String>) {
+    
     for genome in &mut population.pop {
         // determine position of each element in the genome, and write to output file
         let mut current_start = 0;
@@ -25,21 +45,8 @@ pub fn identify_tracked_elements(population: &mut Population, tracking_regions: 
                 current_start = 0;
                 current_contig_id = element.contig_id;
             }
-
-            let element_end = current_start + element.seq.len(); 
-
-            // TODO contig_ids don't match, need a map which maps contig names to IDs
-            for (contig_id, start, end) in tracking_regions {
-                // make sure there is an overlap between the element and the tracking region, and that they are on the same contig
-                let element_contig_name = &contig_name_to_id[element.contig_id];
-                
-                if element_contig_name == contig_id && current_start <= *end && *start <= element_end {
-                    element.tracked = true;
-                    break; // stop checking other tracking regions once a match is found
-                }
-            }
-
-            current_start = element_end;
+            identify_tracked_element(element, current_start, tracking_regions, contig_name_to_id);
+            current_start += element.seq.len(); 
         }
     }
 }
