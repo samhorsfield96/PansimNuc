@@ -707,12 +707,26 @@ impl Population {
             .enumerate()
             .map(|(i, w)| {
                 let genome_size = self.pop[i].seq_length;
-                let size_penalty = self.genome_size_penalty_per_bp * ((genome_size as isize - self.optimal_genome_size as isize).abs() as f64);
-                (w * size_penalty).max(std::f64::NEG_INFINITY) // ensure weights don't become negative due to penalty
+                // calculate total penalty based on difference from optimal genome size, ensuring that penalty scales with genome size and doesn't become negative
+                let size_penalty = (1.0 - (self.genome_size_penalty_per_bp * ((genome_size as isize - self.optimal_genome_size as isize).abs() as f64))).max(0.0);
+                println!("Genome {} size: {}, size penalty: {}", i, genome_size, size_penalty);
+                (w * size_penalty).max(0.0) // ensure weights don't become negative due to penalty
             })
             .collect();
 
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("Selection post-genome size penalty weights: {:?}", selection_weights);
+        }
+
         let sum_weights: f64 = selection_weights.iter().sum();
+        // account for all values being zero
+        if sum_weights == 0.0 {
+            // if all weights are zero, set all weights to equal probability to prevent issues with sampling, as all genomes are equally likely to be selected
+            selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+        }
+
+        // normalise weights to sum to 1
         selection_weights = selection_weights
             .iter()
             .map(|&w| {
@@ -2073,7 +2087,7 @@ mod tests {
             &vec!["chr1".to_string()],
             &vec![],  // no tracking
             false,
-            1.0, // genome_size_penalty_per_bp
+            0.01, // genome_size_penalty_per_bp
         );
 
         assert_eq!(pop.optimal_genome_size, 4);
@@ -2082,7 +2096,7 @@ mod tests {
         // The penalty multiplies each weight by (penalty_per_bp * |deviation|), so
         // genome 0 (deviation=1000) will have ~10x the weight of genome 1 (deviation=100).
         pop.pop[0].seq_length = pop.optimal_genome_size + 1000;
-        pop.pop[1].seq_length = pop.optimal_genome_size + 100;
+        pop.pop[1].seq_length = pop.optimal_genome_size + 1;
 
         let mut thread_rng = rand::thread_rng();
         let n_rounds = 500;
@@ -2095,7 +2109,7 @@ mod tests {
 
         // Genome 0 has a 10x larger deviation so it should be sampled far more often.
         assert!(
-            counts[0] > counts[1],
+            counts[0] < counts[1],
             "genome with larger size deviation should have higher selection weight; counts = {:?}",
             counts
         );
