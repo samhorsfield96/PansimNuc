@@ -105,6 +105,7 @@ pub fn write_tracking_output(out_path: &str, metapopulation: &MetaPopulation) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::demography::MetaPopulation;
     use crate::mutation::{Distribution, MutationMap};
     use crate::population::{Genome, NucElement, Population};
     use rand::SeedableRng;
@@ -215,5 +216,96 @@ mod tests {
         identify_tracked_elements(&mut pop, &vec![(0, 200, 500)]);
 
         assert!(pop.pop[0].seq[0].tracked);
+    }
+
+    #[test]
+    fn test_write_tracking_output_appends_to_existing_file() {
+        use std::fs;
+        use std::io::Read;
+        use crate::demography::MetaPopulation;
+
+        // Create a temporary file path
+        let temp_path = std::env::temp_dir().join(format!(
+            "pansimnuc_tracking_test_{}.csv",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let temp_path_str = temp_path.to_string_lossy().into_owned();
+
+        // Write header to the file
+        write_tracking_header(&temp_path_str);
+
+        // Create a population with a tracked element
+        let mut elements = vec![make_element(0, 100)];
+        elements[0].tracked = true;
+        let mut pop = make_population(elements);
+        pop.id = 0;
+        pop.generation = 1;
+
+        // Create a metapopulation
+        let metapop = MetaPopulation {
+            populations: vec![pop],
+            population_split_config: crate::config::PopulationSplitConfig {
+                population_splits: vec![1],
+                generation_splits: vec![1],
+                migration_rate: 0.0,
+            },
+            n_generations: 1,
+            recombination_rate: 0.0,
+            recombination_size_mean: 1.0,
+            site_mutation_mus_vals: vec![],
+        };
+
+        // Write tracking output (should append)
+        write_tracking_output(&temp_path_str, &metapop);
+
+        // Read the file and verify contents
+        let mut content = String::new();
+        fs::File::open(&temp_path_str)
+            .expect("Could not open tracking file")
+            .read_to_string(&mut content)
+            .expect("Could not read tracking file");
+
+        // Should have two lines: header and one data row
+        let lines: Vec<&str> = content.lines().collect();
+        assert!(lines.len() >= 2, "Expected at least 2 lines (header + data)");
+        
+        // Verify header line
+        assert!(lines[0].contains("element_id"));
+        assert!(lines[0].contains("generation"));
+        
+        // Verify data line contains expected values
+        assert!(lines[1].contains("0")); // element_id
+        assert!(lines[1].contains("1")); // generation (pop.generation = 1)
+
+        // Clean up
+        let _ = fs::remove_file(&temp_path_str);
+    }
+
+    #[test]
+    #[should_panic(expected = "does not exist")]
+    fn test_write_tracking_output_panics_if_file_not_exists() {
+        use crate::demography::MetaPopulation;
+
+        let nonexistent_path = "/tmp/this_file_should_not_exist_pansimnuc_12345.csv";
+        let elements = vec![make_element(0, 100)];
+        let pop = make_population(elements);
+        let metapop = MetaPopulation {
+            populations: vec![pop],
+            population_split_config: crate::config::PopulationSplitConfig {
+                population_splits: vec![1],
+                generation_splits: vec![1],
+                migration_rate: 0.0,
+            },
+            n_generations: 1,
+            recombination_rate: 0.0,
+            recombination_size_mean: 1.0,
+            site_mutation_mus_vals: vec![],
+        };
+
+        // Should panic because file doesn't exist
+        write_tracking_output(nonexistent_path, &metapop);
     }
 }
