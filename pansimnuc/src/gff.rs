@@ -262,6 +262,20 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
                 }
                 continue;
             }
+            // same for introns on the other side of intergenic regions
+            else if last.feature_type == "intron"
+                && current.feature_type == "intergenic"
+                && last.end >= current.start
+            {
+                last.end = last.end.max(current.end);
+                last.feature_id = 0;
+                last.strand = true;
+                last.feature_type = "intergenic".to_string();
+                if last.start < last.end && last.end <= contig_seq.len() {
+                    last.seq = encode_dna(&contig_seq[last.start..last.end]);
+                }
+                continue;
+            }
         }
 
         normalized.push(current);
