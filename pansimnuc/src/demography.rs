@@ -283,6 +283,7 @@ mod tests {
             max_multiplier_dist: 0,
             n_generations: 1,
             verbose: false,
+            augment_tracking: false,
         }
     }
 

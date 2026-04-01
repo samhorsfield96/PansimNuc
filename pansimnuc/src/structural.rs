@@ -45,6 +45,7 @@ pub fn mutate_intra_genome(
     genome: &mut Genome,
     structural_mu_dists: &Vec<Vec<MutationDistribution>>,
     pos_dist: &MutationDistribution,
+    augment_tracking: bool,
 ) -> (usize, usize, usize, usize, usize, usize, usize) {
     let mut thread_rng = rand::thread_rng();
 
@@ -82,7 +83,7 @@ pub fn mutate_intra_genome(
         };
 
         // override for tracked elements
-        if element.tracked {
+        if element.tracked && augment_tracking {
             mutation_dist = &structural_mu_dists[5];
         }
 
@@ -831,6 +832,7 @@ mod tests {
             max_multiplier_dist: 10,
             n_generations: 10,
             verbose: true,
+            augment_tracking: false,
         }
     }
 
@@ -865,7 +867,7 @@ mod tests {
             homology_map.push(vec![vec![0]]);
         }
 
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
 
         let after_strands: Vec<bool> = genome.seq.iter().map(|e| e.strand).collect();
         assert_ne!(
@@ -893,7 +895,7 @@ mod tests {
         }
 
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
 
         assert!(
             genome.seq.len() < before_len,
@@ -924,7 +926,7 @@ mod tests {
 
         // Use a non-zero offset so duplicates land somewhere other than position 0.
         let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
 
         assert_eq!(
             genome.seq.len(),
@@ -952,7 +954,7 @@ mod tests {
 
         let pos = MutationDistribution::new_uniform(0.0, 0.9).unwrap();
 
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
 
         let contig_ids: Vec<usize> = genome.seq.iter().map(|e| e.contig_id).collect();
         assert!(!contig_ids.is_empty(), "mutated genome should not be empty");
@@ -1216,7 +1218,7 @@ mod tests {
         default_structural_dists[4][0] = MutationDistribution::new_uniform(2.0, 2.1).unwrap();
         let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
         
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
         
         // TE-COPY should result in multiple copies (original + duplicates)
         assert!(
@@ -1250,7 +1252,7 @@ mod tests {
         default_structural_dists[3][1] = MutationDistribution::new_uniform(2.0, 2.1).unwrap();
         let pos = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
         
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
         
         // After cut-and-paste, genome should have same or fewer elements
         // (original deleted, one copy inserted)
@@ -1292,7 +1294,7 @@ mod tests {
         // Use Poisson position distribution for non-TEs
         let pos = MutationDistribution::new_poisson(1.5).unwrap();
         
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
         
         // Should have duplications
         assert!(

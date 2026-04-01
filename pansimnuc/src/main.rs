@@ -38,6 +38,7 @@ fn main() {
     let mut configuration: HashMap<String, String> = HashMap::new();
     let mut population_split_config = PopulationSplitConfig::new();
     let mut tracking_regions: Vec<(String, usize, usize)> = Vec::new(); // vector of (contig_id, start, end) tuples for regions to track
+    let mut augment_tracking = false;
 
     // Load config if provided
     let mut verbose = false;
@@ -73,6 +74,12 @@ fn main() {
                     println!("No tracking regions provided: {err}");
                     Vec::new()
                 });
+
+                if let Some(augment_str) = configuration.get("tracking.augmentation") {
+                    augment_tracking = augment_str
+                        .parse::<bool>()
+                        .expect("Tracking augmentation must be a boolean (true/false).");
+                }
             }
             Err(err) => {
                 eprintln!("Failed to read config file: {err}");
@@ -223,7 +230,8 @@ fn main() {
                         &mut rng,
                         verbose,
                         &contig_name_to_id,
-                        &tracking_regions
+                        &tracking_regions,
+                        augment_tracking,
                     );
 
                     let mut is_tracking = false;

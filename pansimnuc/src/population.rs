@@ -114,6 +114,7 @@ pub struct Population {
     pub max_multiplier_dist: usize,
     pub n_generations: usize,
     pub verbose: bool,
+    pub augment_tracking: bool
 }
 
 impl Population {
@@ -385,6 +386,7 @@ impl Population {
         verbose: bool,
         contig_name_to_id: &Vec<String>,
         tracking_regions: &Vec<(String, usize, usize)>,
+        augment_tracking: bool,
     ) -> Self {
         // initialise population
         let mut population: Vec<Genome> = Vec::new();
@@ -473,7 +475,7 @@ impl Population {
                 // determine if element is tracked and if so update mutation map accordingly
                 if is_tracking {
                     identify_tracked_element(&mut element, current_start, &tracking_regions, &contig_name_to_id);
-                    if element.tracked {
+                    if element.tracked && augment_tracking {
                         // update selection maps etc
                         element.mutation_map = MutationMap::new(
                             5, // new selection dist ID for tracked elements
@@ -551,6 +553,7 @@ impl Population {
             max_multiplier_dist,
             n_generations,
             verbose,
+            augment_tracking,
         }
     }
 
@@ -614,7 +617,7 @@ impl Population {
         let totals = self
             .pop
             .par_iter_mut()
-            .map(|genome| mutate_intra_genome(genome, &self.structural_mu_dists, &pos_dist))
+            .map(|genome| mutate_intra_genome(genome, &self.structural_mu_dists, &pos_dist, self.augment_tracking))
             .reduce(
                 || (0usize, 0usize, 0usize, 0usize, 0usize, 0usize, 0usize),
                 |a, b| (
@@ -993,6 +996,7 @@ mod tests {
             true, // verbose
             &vec!["chr1".to_string()], // contig_name_to_id
             &vec![("chr1".to_string(), 150, 350)], // tracking_regions
+            true, // augment_tracking
         );
 
         // Check population was created correctly
@@ -1071,6 +1075,7 @@ mod tests {
             true, // verbose
             &vec!["chr1".to_string()], // contig_name_to_id
             &vec![("chr1".to_string(), 150, 350)], // tracking
+            true, // augment_tracking
         );
 
         let temp_path = std::env::temp_dir().join(format!(
@@ -1154,6 +1159,7 @@ mod tests {
             true, // verbose
             &vec!["chr1".to_string()], // contig_name_to_id
             &vec![("chr1".to_string(), 150, 350)], // tracking
+            true, // augment_tracking
         );
 
         let temp_path = std::env::temp_dir().join(format!(
@@ -1243,6 +1249,7 @@ mod tests {
             true, // verbose
             &vec!["chr1".to_string()], // contig_name_to_id
             &vec![("chr1".to_string(), 150, 350)], // tracking
+            true, // augment_tracking
         );
 
         let original_seq = pop.pop[0].seq[0].seq.clone();
@@ -1327,6 +1334,7 @@ mod tests {
             true, // verbose
             &vec!["chr1".to_string()], // contig_name_to_id
             &vec![("chr1".to_string(), 150, 350)], // tracking
+            true, // augment_tracking
         );
 
         let original_identifiers: Vec<String> = pop
@@ -1463,6 +1471,7 @@ mod tests {
             true, // verbose
             &vec!["chr1".to_string()], // contig_name_to_id
             &vec![("chr1".to_string(), 150, 350)], // tracking
+            true, // augment_tracking
         )
     }
 
@@ -1903,6 +1912,7 @@ mod tests {
             false,
             &vec!["chr1".to_string()],
             &vec![tracking_region],
+            true
         )
     }
 
