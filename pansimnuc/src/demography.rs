@@ -1,5 +1,6 @@
 use crate::population::Population;
 use crate::config::{self, PopulationSplitConfig};
+use crate::tracking::write_tracking_output;
 use rand::Rng;
 use rand::seq::IteratorRandom;
 use std::collections::HashSet;
@@ -149,7 +150,7 @@ impl MetaPopulation {
         }
     }
 
-    pub fn run_simulation(&mut self) {
+    pub fn run_simulation(&mut self, is_tracking: bool, configuration: &HashMap<String, String>) {
         let verbose = self.populations[0].verbose; // assume all populations have same verbose setting
 
         for generation in 1..=self.n_generations {
@@ -173,7 +174,6 @@ impl MetaPopulation {
                     population.update_mu_dists(&self.site_mutation_mus_vals);
                 }
             });
-            println!("Finished generation {}", generation);
 
             // perform migration between populations
             self.migrate();
@@ -207,7 +207,18 @@ impl MetaPopulation {
                     }
                 }
             }
-        }
+            
+            // print tracking information for this generation if tracking enabled
+            if is_tracking {
+                if let Some(outdir) = configuration
+                    .get("output.outdir") {
+                    let output_path = format!("{}/tracking.csv", outdir);
+                    write_tracking_output(&output_path, &self);
+                };
+            }
+
+            println!("Finished generation {}", generation);
+    }
     }
 
     pub fn write_output(&self, configuration: &HashMap<String, String>) {

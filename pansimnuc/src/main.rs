@@ -228,10 +228,16 @@ fn main() {
                     );
 
                     // add tracking regions to population struct so we can track mutations in these regions over time
+                    let mut is_tracking = false;
                     if !tracking_regions.is_empty() {
                         identify_tracked_elements(&mut population, &tracking_regions);
+                        if let Some(outdir) = configuration
+                            .get("output.outdir") {
+                            let output_path = format!("{}/tracking.csv", outdir);
+                            write_tracking_header(&output_path);
+                        };
+                        is_tracking = true;
                     }
-
                     println!("Finished initialising population...");
 
                     // generate root genome
@@ -257,13 +263,12 @@ fn main() {
                         n_generations, 
                         recombination_rate, 
                         recombination_size_mean, 
-                        site_mutation_mus_vals);
+                        site_mutation_mus_vals,
+                    );
 
                     // run simulation
-                    metapopopulation.run_simulation();
+                    metapopopulation.run_simulation(is_tracking, &configuration);
 
-                    
-                    // TODO update GFF writing with population indexes
                     println!("Writing output...");
                     metapopopulation.write_output(&configuration);
                 }

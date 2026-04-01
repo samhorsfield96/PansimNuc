@@ -1,12 +1,14 @@
 use crate::demography::MetaPopulation;
 use crate::population::Population;
+use std::fs::OpenOptions;
+use std::path::Path;
 
 // function to take information about NucElements and write to output file for tracking purposes
 pub fn write_tracking_header(out_path: &str) {
     let mut wtr = csv::Writer::from_path(out_path).expect("Could not create output file for tracking.");
     
     // write header
-    wtr.write_record(&["element_id", "feature_id", "population_id", "genome_id", "contig_id", "feature_type", "multiplier", "start", "end", "strand", "original_length", "length", "sequence", "log_selection_coefficients"]).expect("Could not write header to tracking output file.");
+    wtr.write_record(&["element_id", "feature_id", "generation", "population_id", "genome_id", "contig_id", "feature_type", "multiplier", "start", "end", "strand", "original_length", "length", "sequence", "log_selection_coefficients"]).expect("Could not write header to tracking output file.");
     
     wtr.flush().expect("Could not flush tracking output file.");
 }
@@ -40,7 +42,18 @@ pub fn identify_tracked_elements(population: &mut Population, tracking_regions: 
 }
 
 pub fn write_tracking_output(out_path: &str, metapopulation: &MetaPopulation) {
-    let mut wtr = csv::Writer::from_path(out_path).expect("Could not create output file for tracking.");
+    // Check if file exists; error if it doesn't
+    if !Path::new(out_path).exists() {
+        panic!("Tracking output file does not exist: {}", out_path);
+    }
+    
+    // Open file in append mode
+    let file = OpenOptions::new()
+        .append(true)
+        .open(out_path)
+        .expect("Could not open tracking output file for appending.");
+    
+    let mut wtr = csv::Writer::from_writer(file);
     
     // write information for each NucElement in the population
     for population in &metapopulation.populations {
@@ -60,11 +73,12 @@ pub fn write_tracking_output(out_path: &str, metapopulation: &MetaPopulation) {
 
                 if element.tracked {
                     let element_seq = element.seq.iter().map(|&base| Population::decode_base(base)).collect::<Vec<u8>>();
-                    let element_selection_coefficients = element.generate_selection_coefficients(); // placeholder function to generate selection coefficients, can be implemented based on specific requirements
+                    let element_selection_coefficients = element.generate_selection_coefficients();
 
                     wtr.write_record(&[
                         element.element_id.to_string(),
                         element.feature_id.to_string(),
+                        population.generation.to_string(),
                         population.id.to_string(),
                         genome.genome_id.to_string(),
                         element.contig_id.to_string(),
@@ -81,7 +95,6 @@ pub fn write_tracking_output(out_path: &str, metapopulation: &MetaPopulation) {
                 }
 
                 current_start = element_end;
-
             }
         }
     }
