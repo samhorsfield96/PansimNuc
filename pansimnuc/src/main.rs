@@ -39,6 +39,7 @@ fn main() {
     let mut population_split_config = PopulationSplitConfig::new();
     let mut tracking_regions: Vec<(String, usize, usize)> = Vec::new(); // vector of (contig_id, start, end) tuples for regions to track
     let mut augment_tracking = false;
+    let mut genome_size_penalty_per_bp = 0.0;
 
     // Load config if provided
     let mut verbose = false;
@@ -79,6 +80,12 @@ fn main() {
                     augment_tracking = augment_str
                         .parse::<bool>()
                         .expect("Tracking augmentation must be a boolean (true/false).");
+                }
+
+                if let Some(genome_size_penalty_str) = configuration.get("population.genome_size_penalty_per_bp") {
+                    genome_size_penalty_per_bp = genome_size_penalty_str
+                        .parse::<f64>()
+                        .expect("Genome size penalty must be a float.");
                 }
             }
             Err(err) => {
@@ -215,6 +222,8 @@ fn main() {
                         .expect("n_generation must be an integer.");
                     
                     println!("Initialising population...");
+                    // genome size penalty is 1 - penalty for multiplication
+                    genome_size_penalty_per_bp = 1.0 - genome_size_penalty_per_bp;
                     let mut population = Population::new(
                         features,
                         n_individuals,
@@ -232,6 +241,7 @@ fn main() {
                         &contig_name_to_id,
                         &tracking_regions,
                         augment_tracking,
+                        genome_size_penalty_per_bp,
                     );
 
                     let mut is_tracking = false;

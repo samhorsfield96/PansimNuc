@@ -114,7 +114,9 @@ pub struct Population {
     pub max_multiplier_dist: usize,
     pub n_generations: usize,
     pub verbose: bool,
-    pub augment_tracking: bool
+    pub augment_tracking: bool,
+    pub genome_size_penalty_per_bp: f64,
+    pub optimal_genome_size: usize,
 }
 
 impl Population {
@@ -387,6 +389,7 @@ impl Population {
         contig_name_to_id: &Vec<String>,
         tracking_regions: &Vec<(String, usize, usize)>,
         augment_tracking: bool,
+        genome_size_penalty_per_bp: f64,
     ) -> Self {
         // initialise population
         let mut population: Vec<Genome> = Vec::new();
@@ -403,6 +406,9 @@ impl Population {
 
         // determine if tracking enabled
         let is_tracking = !tracking_regions.is_empty();
+
+        // track optimal genome size
+        let mut optimal_genome_size = 0;
 
         // generate starting genome
         for (contig_id, features) in root.iter().enumerate() {
@@ -492,6 +498,8 @@ impl Population {
                 element_id += 1;
                 current_start += feature.seq.len();
 
+                optimal_genome_size += feature.seq.len();
+
                 // generate homology map for this element, initially just self
                 let mut element_homology_map: Vec<Vec<usize>> = Vec::new();
                 for _ in 0..n_genomes {
@@ -554,6 +562,8 @@ impl Population {
             n_generations,
             verbose,
             augment_tracking,
+            genome_size_penalty_per_bp,
+            optimal_genome_size,
         }
     }
 
@@ -691,6 +701,17 @@ impl Population {
             eprintln!("Selection post-norm weights: {:?}", selection_weights);
         }
 
+        // update selection weights by genome size penalty
+        selection_weights = selection_weights
+            .into_iter()
+            .enumerate()
+            .map(|(i, w)| {
+                let genome_size = self.pop[i].seq_length;
+                let size_penalty = self.genome_size_penalty_per_bp * ((genome_size as isize - self.optimal_genome_size as isize).abs() as f64);
+                (w * size_penalty).max(std::f64::NEG_INFINITY) // ensure weights don't become negative due to penalty
+            })
+            .collect();
+
         let sum_weights: f64 = selection_weights.iter().sum();
         selection_weights = selection_weights
             .iter()
@@ -702,6 +723,7 @@ impl Population {
                 }
             })
             .collect();
+
 
         // Create a WeightedIndex distribution based on weights
         let sampling_dist = WeightedIndex::new(&selection_weights)
@@ -997,6 +1019,7 @@ mod tests {
             &vec!["chr1".to_string()], // contig_name_to_id
             &vec![("chr1".to_string(), 150, 350)], // tracking_regions
             true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
         );
 
         // Check population was created correctly
@@ -1076,6 +1099,7 @@ mod tests {
             &vec!["chr1".to_string()], // contig_name_to_id
             &vec![("chr1".to_string(), 150, 350)], // tracking
             true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
         );
 
         let temp_path = std::env::temp_dir().join(format!(
@@ -1160,6 +1184,8 @@ mod tests {
             &vec!["chr1".to_string()], // contig_name_to_id
             &vec![("chr1".to_string(), 150, 350)], // tracking
             true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
+
         );
 
         let temp_path = std::env::temp_dir().join(format!(
@@ -1250,6 +1276,7 @@ mod tests {
             &vec!["chr1".to_string()], // contig_name_to_id
             &vec![("chr1".to_string(), 150, 350)], // tracking
             true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
         );
 
         let original_seq = pop.pop[0].seq[0].seq.clone();
@@ -1335,6 +1362,7 @@ mod tests {
             &vec!["chr1".to_string()], // contig_name_to_id
             &vec![("chr1".to_string(), 150, 350)], // tracking
             true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
         );
 
         let original_identifiers: Vec<String> = pop
@@ -1472,6 +1500,7 @@ mod tests {
             &vec!["chr1".to_string()], // contig_name_to_id
             &vec![("chr1".to_string(), 150, 350)], // tracking
             true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
         )
     }
 
@@ -1912,7 +1941,8 @@ mod tests {
             false,
             &vec!["chr1".to_string()],
             &vec![tracking_region],
-            true
+            true,
+            0.01
         )
     }
 

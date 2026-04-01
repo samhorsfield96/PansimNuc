@@ -103,10 +103,12 @@ impl MetaPopulation {
         self.populations.push(merged_population);
     }
 
-    fn migrate(&mut self) {
+    fn migrate(&mut self) -> usize {
         if self.populations.len() < 2 {
-            return; // Need at least two populations to migrate
+            return 0; // Need at least two populations to migrate
         }
+
+        let mut n_migrations = 0;
 
         let migration_rate = self.population_split_config.migration_rate;
 
@@ -128,6 +130,8 @@ impl MetaPopulation {
                             // keep track of updated populations
                             updated_populations.insert(target_pop_idx);
 
+                            n_migrations += 1;
+
                             let target_pop_length = self.populations[target_pop_idx].pop.len();
                             let target_genome_idx = self.populations[target_pop_idx].pop[rng.gen_range(0..target_pop_length)].genome_id;
                             Some((target_pop_idx, target_genome_idx, genome.clone()))
@@ -148,6 +152,8 @@ impl MetaPopulation {
         for population_idx in updated_populations {
             self.populations[population_idx].update_homology_map();
         }
+
+        n_migrations
     }
 
     pub fn run_simulation(&mut self, is_tracking: bool, configuration: &HashMap<String, String>) {
@@ -176,7 +182,11 @@ impl MetaPopulation {
             });
 
             // perform migration between populations
-            self.migrate();
+            let n_migrations = self.migrate();
+
+            if verbose {
+                println!("{} migration events", n_migrations);
+            }
 
             // perform population splits and merges at specified generations
             let current_gen_size = self.populations.len();
@@ -284,6 +294,8 @@ mod tests {
             n_generations: 1,
             verbose: false,
             augment_tracking: false,
+            genome_size_penalty_per_bp: 0.0,
+            optimal_genome_size: 0,
         }
     }
 

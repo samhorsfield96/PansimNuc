@@ -163,6 +163,8 @@ mod tests {
             n_generations: 1,
             verbose: false,
             augment_tracking: false,
+            genome_size_penalty_per_bp: 0.0,
+            optimal_genome_size: 0,
         }
     }
 
