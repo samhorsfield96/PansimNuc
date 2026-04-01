@@ -22,10 +22,6 @@ pub fn identify_tracked_element(element: &mut NucElement, element_start: usize, 
         let element_contig_name = &contig_name_to_id[element.contig_id];
         
         if element_contig_name == contig_id && element_start <= *end && *start <= element_end {
-            
-            // update variables for selection etc
-            element.mutation_map.mu_dist_id = 6;
-
             element.tracked = true;
             break; // stop checking other tracking regions once a match is found
         }

@@ -1840,4 +1840,140 @@ mod tests {
             "Expected e2 contribution to be scaled by TE multiplier"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // Helper shared by the tracking tests below
+    // -----------------------------------------------------------------------
+    fn make_two_exon_population_with_tracking(
+        structural_mu_dists: Vec<Vec<MutationDistribution>>,
+        tracking_region: (String, usize, usize),
+        seq_len: usize,
+    ) -> Population {
+        let root = vec![vec![
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 1,
+                feature_type: "exon".to_string(),
+                start: 0,
+                end: seq_len,
+                strand: true,
+                seq: vec![1u8; seq_len],
+            },
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 2,
+                feature_type: "exon".to_string(),
+                start: seq_len,
+                end: seq_len * 2,
+                strand: true,
+                seq: vec![1u8; seq_len],
+            },
+        ]];
+
+        // 6 selection dists: indices 0-4 for feature types, 5 for tracked elements
+        let selection_dists: Vec<MutationDistribution> = (0..6)
+            .map(|_| MutationDistribution::new_uniform(0.0, 1.0).unwrap())
+            .collect();
+        // 6 mu/indel rates (index 5 accessed for tracked elements)
+        let mu_dist_vals = vec![1.0f64; 6];
+        let indel_dist_vals = vec![1e-6f64; 6];
+        let recombination_dists = vec![
+            MutationDistribution::new_poisson(0.01).unwrap(),
+            MutationDistribution::new_poisson(1.0).unwrap(),
+        ];
+        // 6 multiplier dists (index 5 for tracked elements)
+        let multiplier_dists: Vec<MutationDistribution> = (0..6)
+            .map(|_| MutationDistribution::new_uniform(0.5, 1.5).unwrap())
+            .collect();
+
+        let mut rng = StdRng::seed_from_u64(0);
+        Population::new(
+            root,
+            1,
+            selection_dists,
+            &mu_dist_vals,
+            &indel_dist_vals,
+            recombination_dists,
+            1.0,
+            structural_mu_dists,
+            10,
+            multiplier_dists,
+            1,
+            &mut rng,
+            false,
+            &vec!["chr1".to_string()],
+            &vec![tracking_region],
+        )
+    }
+
+    fn zero_structural_dists() -> Vec<Vec<MutationDistribution>> {
+        let zero = MutationDistribution::new_uniform(0.0, 0.5).unwrap();
+        (0..6)
+            .map(|_| vec![zero.clone(), zero.clone(), zero.clone()])
+            .collect()
+    }
+
+    #[test]
+    fn test_population_new_tracked_exon_uses_dist_id_5_untracked_keeps_type_dist_id() {
+        // Two exon features at [0, 100) and [100, 200).
+        // Tracking region [0, 99] covers only the first exon.
+        // After Population::new the tracked exon should have selection_dist_id=5
+        // and mu_dist_id=5; the untracked exon should keep id=0 (exon default).
+        let pop = make_two_exon_population_with_tracking(
+            zero_structural_dists(),
+            ("chr1".to_string(), 0, 99),
+            100,
+        );
+
+        let exon0 = &pop.pop[0].seq[0]; // first exon — inside tracking region
+        let exon1 = &pop.pop[0].seq[1]; // second exon — outside tracking region
+
+        assert!(exon0.tracked, "first exon inside region should be tracked");
+        assert_eq!(exon0.mutation_map.selection_dist_id, 5,
+            "tracked exon should sample selection coefficients from tracked dist (id=5)");
+        assert_eq!(exon0.mutation_map.mu_dist_id, 5,
+            "tracked exon should use tracked mutation rate dist (id=5)");
+
+        assert!(!exon1.tracked, "second exon outside region should not be tracked");
+        assert_eq!(exon1.mutation_map.selection_dist_id, 0,
+            "untracked exon should keep exon selection dist (id=0)");
+        assert_eq!(exon1.mutation_map.mu_dist_id, 0,
+            "untracked exon should keep exon mutation rate dist (id=0)");
+    }
+
+    #[test]
+    fn test_population_new_tracked_exon_uses_tracked_structural_dist() {
+        // Two exon features at [0, 10) and [10, 20).
+        // Tracking region [0, 9] covers only the first exon so it is tracked.
+        // structural_mu_dists[0] (exon path) guarantees 10 duplications;
+        // structural_mu_dists[5] (tracked path) guarantees 0 duplications.
+        // After structural_intra_genome the genome should contain exactly 1 tracked
+        // copy and 11 untracked copies (original + 10 dups).
+        let zero = MutationDistribution::new_uniform(0.0, 0.5).unwrap(); // → 0 when cast to usize
+        let ten_dups = MutationDistribution::new_uniform(10.0, 10.5).unwrap(); // → 10 when cast to usize
+        let structural_mu_dists = vec![
+            vec![ten_dups, zero.clone(), zero.clone()], // 0: exon — 10 dups, 0 dels, 0 inv
+            vec![zero.clone(), zero.clone(), zero.clone()], // 1: intron
+            vec![zero.clone(), zero.clone(), zero.clone()], // 2: intergenic
+            vec![zero.clone(), zero.clone(), zero.clone()], // 3: TE-CUT
+            vec![zero.clone(), zero.clone(), zero.clone()], // 4: TE-COPY
+            vec![zero.clone(), zero.clone(), zero.clone()], // 5: tracked — 0 dups
+        ];
+
+        let mut pop = make_two_exon_population_with_tracking(
+            structural_mu_dists,
+            ("chr1".to_string(), 0, 9),
+            10,
+        );
+
+        pop.structural_intra_genome();
+
+        let tracked_count = pop.pop[0].seq.iter().filter(|e| e.tracked).count();
+        let untracked_count = pop.pop[0].seq.iter().filter(|e| !e.tracked).count();
+
+        assert_eq!(tracked_count, 1,
+            "tracked exon should not be duplicated (structural_mu_dists[5] has 0 dups)");
+        assert_eq!(untracked_count, 11,
+            "untracked exon should be duplicated 10 times (structural_mu_dists[0] has 10 dups)");
+    }
 }
