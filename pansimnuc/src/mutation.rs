@@ -490,14 +490,13 @@ impl MutationMap {
         }
     }
 
-    fn update_data (&mut self, site: usize, is_insertion: bool) {
+    fn update_data (&mut self, site: usize, is_insertion: bool, sequence_length: usize) {
         // if is_insertion, need to shift all existing keys at this site and above up by 1 to account for new site
         if is_insertion {
             for allele_map in self.data.iter_mut() {
-                let num_sites = allele_map.len();
                 
                 // start at end to correctly handle shifting keys without overwriting existing entries before they are processed
-                for key in (site..num_sites).rev() {
+                for key in (site..sequence_length).rev() {
                     if let Some(value) = allele_map.get(&key) {
                         allele_map.insert(key + 1, *value);
                     }
@@ -506,19 +505,18 @@ impl MutationMap {
         } else {
             // deletion: need to remove any entries for this site and shift down keys above this site
             for allele_map in self.data.iter_mut() {
-                let num_sites = allele_map.len();
                 allele_map.remove(&site);
-                if num_sites == 0 {
+                if allele_map.len() == 0 {
                     continue;
                 }
                 // start at site + 1 to shift down keys above the deleted site
-                for key in site + 1..num_sites {
+                for key in site + 1..sequence_length {
                     if let Some(value) = allele_map.get(&key) {
                         allele_map.insert(key - 1, *value);
                     }
                 }
                 // remove the last key which is now duplicated after shifting down
-                allele_map.remove(&(num_sites - 1));
+                allele_map.remove(&(sequence_length - 1));
             }
         }
     }
@@ -625,7 +623,7 @@ impl MutationMap {
             }
 
             // update data for selection coefficient
-            self.update_data(mutant_site, is_insertion);
+            self.update_data(mutant_site, is_insertion, seq_len);
 
             if is_insertion {
                 // insertion: sample new allele to insert
@@ -1006,7 +1004,7 @@ mod tests {
         map.set_for_test(8, 3, 0.40);
 
         // Inserting at site 1 should shift coefficients at sites 1+ up by one
-        map.update_data(1, true);
+        map.update_data(1, true, 4);
 
         // check insertion correct
         assert_ne!(map.get(1, 1), Some(&0.10)); // site 1 changed
@@ -1067,7 +1065,7 @@ mod tests {
         map.set_for_test(8, 3, 0.40);
 
         // Deleting site 2 should remove its coefficient from the map
-        map.update_data(2, false);
+        map.update_data(2, false, 4);
 
         assert_eq!(map.get(1, 0), Some(&0.10)); // site 0 unchanged
         assert_eq!(map.get(1, 1), Some(&0.20)); // site 1 unchanged
