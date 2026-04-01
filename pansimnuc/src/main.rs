@@ -64,13 +64,13 @@ fn main() {
                 }
 
                 population_split_config = config.population_split_config().unwrap_or_else(|err| {
-                    eprintln!("Failed to generate population split configuration: {err}");
-                    std::process::exit(1);
+                    println!("No population split configuration provided: {err}");
+                    PopulationSplitConfig::new()
                 });
 
                 tracking_regions = config.tracking_regions().unwrap_or_else(|err| {
-                    eprintln!("Failed to generate tracking regions: {err}");
-                    std::process::exit(1);
+                    println!("No tracking regions provided: {err}");
+                    Vec::new()
                 });
             }
             Err(err) => {

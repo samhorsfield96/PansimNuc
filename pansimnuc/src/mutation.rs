@@ -603,16 +603,26 @@ impl MutationMap {
         for _ in 0..n_sites {
             // sample new site to mutate
             let seq_len = seq.len();
-            let mutant_site = thread_rng.gen_range(0..seq_len);
-            let value = seq[mutant_site];
+
+            let mut mutant_site = 0;
+            let mut value = 1;
+            
+            // protect against empty sequence edge case where no deletions can occur
+            if seq_len != 0 {
+                mutant_site = thread_rng.gen_range(0..seq_len);
+                value = seq[mutant_site];
+            }
 
             // N is stored in the map but should not be mutated; skip
             if value == 16 {
                 continue;
             }
 
-            // determine whether will be insertion or deletion
-            let is_insertion = thread_rng.gen_bool(0.5);
+            // determine whether will be insertion or deletion, set to insertion if empty already
+            let mut is_insertion = true;
+            if seq_len != 0 {
+                is_insertion = thread_rng.gen_bool(0.5);
+            }
 
             // update data for selection coefficient
             self.update_data(mutant_site, is_insertion);
