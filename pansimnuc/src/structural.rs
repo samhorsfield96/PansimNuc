@@ -72,7 +72,7 @@ pub fn mutate_intra_genome(
             max_position = current_pos;
         }
 
-        let mutation_dist: &Vec<MutationDistribution> = match element.feature_type.as_str() {
+        let mut mutation_dist: &Vec<MutationDistribution> = match element.feature_type.as_str() {
             "exon" => &structural_mu_dists[0],
             "intron" => &structural_mu_dists[1],
             "intergenic" => &structural_mu_dists[2],
@@ -80,6 +80,11 @@ pub fn mutate_intra_genome(
             "TE-COPY" => &structural_mu_dists[4],
             _ => panic!("Unknown feature type: {}", element.feature_type),
         };
+
+        // override for tracked elements
+        if element.tracked {
+            mutation_dist = &structural_mu_dists[5];
+        }
 
         // get feature type
         let feature_type = &element.feature_type;
