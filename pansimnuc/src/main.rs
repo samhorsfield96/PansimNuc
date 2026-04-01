@@ -14,7 +14,7 @@ use rayon::prelude::*;
 use crate::config::PopulationSplitConfig;
 use crate::demography::MetaPopulation;
 use crate::mutation::Distribution;
-use crate::tracking::{identify_tracked_elements, write_tracking_header};
+use crate::tracking::write_tracking_header;
 use clap::Parser;
 use config::Config;
 use gff::read_gff_lines;
@@ -226,13 +226,7 @@ fn main() {
                         &tracking_regions
                     );
 
-                    // add tracking regions to population struct so we can track mutations in these regions over time
                     let mut is_tracking = false;
-                    if !tracking_regions.is_empty() {
-                        is_tracking = true;
-                    }
-                    println!("Finished initialising population...");
-
                     // generate root genome
                     if let Some(outdir) = configuration
                         .get("output.outdir") {
@@ -240,13 +234,18 @@ fn main() {
                         population.write_gff(&gff_path, true).unwrap_or_else(|err| {
                             panic!("Failed to write root genome GFF file: {err}");
                         });
-                    }
-                    if let Some(outdir) = configuration
-                        .get("output.outdir") {
                         let fasta_path = format!("{}/.fasta", outdir);
                         population.write_fasta(&fasta_path, true).unwrap_or_else(|err| {
                             panic!("Failed to write root genome FASTA file: {err}");
                         });
+
+                        // add tracking regions to population struct so we can track mutations in these regions over time
+
+                        if !tracking_regions.is_empty() {
+                            is_tracking = true;
+                            let tracking_out_path = format!("{}/tracking.csv", outdir);
+                            write_tracking_header(&tracking_out_path);
+                        }
                     }
 
                     // generate metapopulation with different mutation distributions
@@ -258,6 +257,8 @@ fn main() {
                         recombination_size_mean, 
                         site_mutation_mus_vals,
                     );
+
+                    println!("Finished initialising population...");
 
                     // run simulation
                     metapopopulation.run_simulation(is_tracking, &configuration);
