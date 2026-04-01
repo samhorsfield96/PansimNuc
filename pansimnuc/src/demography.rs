@@ -212,21 +212,18 @@ impl MetaPopulation {
 
     pub fn write_output(&self, configuration: &HashMap<String, String>) {
         for population in &self.populations {
-            let output_fasta = configuration
-                .get("output.fasta_file")
-                .cloned()
-                .unwrap_or_else(|| "final_population.fasta".to_string());
-
-            if let Some(output_gff) = configuration.get("output.gff_file") {
-                if let Err(err) = population.write_gff(output_gff, false) {
+            if let Some(outdir) = configuration.get("output.outdir") {
+                let gff_path = format!("{}/.gff", outdir);
+                if let Err(err) = population.write_gff(&gff_path, false) {
                     eprintln!("Failed to write final population GFF files: {err}");
                     std::process::exit(1);
                 }
-            }
 
-            if let Err(err) = population.write_fasta(&output_fasta, false) {
-                eprintln!("Failed to write final population FASTA files: {err}");
-                std::process::exit(1);
+                let fasta_path = format!("{}/.fasta", outdir);
+                if let Err(err) = population.write_fasta(&fasta_path, false) {
+                    eprintln!("Failed to write final population FASTA files: {err}");
+                    std::process::exit(1);
+                }
             }
         }
     }

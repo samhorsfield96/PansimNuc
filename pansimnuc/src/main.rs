@@ -13,6 +13,7 @@ use rayon::prelude::*;
 use crate::config::PopulationSplitConfig;
 use crate::demography::MetaPopulation;
 use crate::mutation::Distribution;
+use crate::tracking::{identify_tracked_elements, write_tracking_header, write_tracking_output};
 use clap::Parser;
 use config::Config;
 use gff::read_gff_lines;
@@ -35,6 +36,7 @@ fn main() {
 
     let mut configuration: HashMap<String, String> = HashMap::new();
     let mut population_split_config = PopulationSplitConfig::new();
+    let mut tracking_regions: Vec<(usize, usize, usize)> = Vec::new(); // vector of (contig_id, start, end) tuples for regions to track
 
     // Load config if provided
     let mut verbose = false;
@@ -63,6 +65,11 @@ fn main() {
 
                 population_split_config = config.population_split_config().unwrap_or_else(|err| {
                     eprintln!("Failed to generate population split configuration: {err}");
+                    std::process::exit(1);
+                });
+
+                tracking_regions = config.tracking_regions().unwrap_or_else(|err| {
+                    eprintln!("Failed to generate tracking regions: {err}");
                     std::process::exit(1);
                 });
             }
@@ -219,18 +226,26 @@ fn main() {
                         &mut rng,
                         verbose,
                     );
+
+                    // add tracking regions to population struct so we can track mutations in these regions over time
+                    if !tracking_regions.is_empty() {
+                        identify_tracked_elements(&mut population, &tracking_regions);
+                    }
+
                     println!("Finished initialising population...");
 
                     // generate root genome
-                    if let Some(root_gff_path) = configuration
-                        .get("output.gff_file") {
-                        population.write_gff(root_gff_path, true).unwrap_or_else(|err| {
+                    if let Some(outdir) = configuration
+                        .get("output.outdir") {
+                        let gff_path = format!("{}/.gff", outdir);
+                        population.write_gff(&gff_path, true).unwrap_or_else(|err| {
                             panic!("Failed to write root genome GFF file: {err}");
                         });
                     }
-                    if let Some(root_fasta_path) = configuration
-                        .get("output.fasta_file") {
-                        population.write_fasta(root_fasta_path, true).unwrap_or_else(|err| {
+                    if let Some(outdir) = configuration
+                        .get("output.outdir") {
+                        let fasta_path = format!("{}/.fasta", outdir);
+                        population.write_fasta(&fasta_path, true).unwrap_or_else(|err| {
                             panic!("Failed to write root genome FASTA file: {err}");
                         });
                     }
@@ -251,7 +266,6 @@ fn main() {
                     // TODO update GFF writing with population indexes
                     println!("Writing output...");
                     metapopopulation.write_output(&configuration);
-
                 }
             }
             Err(err) => {
