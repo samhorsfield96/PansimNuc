@@ -2016,4 +2016,88 @@ mod tests {
         assert_eq!(untracked_count, 11,
             "untracked exon should be duplicated 10 times (structural_mu_dists[0] has 10 dups)");
     }
+
+    #[test]
+    fn test_genome_size_penalty_impacts_selection_weights() {
+        let mut root = Vec::new();
+        root.push(vec![FeaturePos {
+            contig_id: 0,
+            feature_id: 0,
+            feature_type: "intergenic".to_string(),
+            start: 0,
+            end: 4,
+            strand: true,
+            seq: vec![1, 2, 4, 8], // 4 bp
+        }]);
+
+        let selection_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create selection dist");
+        let site_mutation_dists = vec![
+            selection_dist.clone(), // exon
+            selection_dist.clone(), // intron
+            selection_dist,         // intergenic
+        ];
+        let mu_vals = vec![1e-12, 1e-12, 1e-12]; // effectively no mutations
+
+        let recomb_prob = MutationDistribution::new_poisson(1.0)
+            .expect("failed to create recombination prob dist");
+        let recomb_len = MutationDistribution::new_poisson(1.0)
+            .expect("failed to create recombination len dist");
+        let recombination_dists = vec![recomb_prob, recomb_len];
+
+        let multiplier_dist = MutationDistribution::new_uniform(0.5, 1.5)
+            .expect("failed to create multiplier dist");
+        let multiplier_dists = vec![
+            multiplier_dist.clone(),
+            multiplier_dist.clone(),
+            multiplier_dist.clone(),
+            multiplier_dist.clone(),
+            multiplier_dist,
+        ];
+
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut pop = Population::new(
+            root,
+            2,
+            site_mutation_dists,
+            &mu_vals,
+            &mu_vals,
+            recombination_dists,
+            1.0,
+            default_structural_dists(),
+            10,
+            multiplier_dists,
+            10,
+            &mut rng,
+            false,
+            &vec!["chr1".to_string()],
+            &vec![],  // no tracking
+            false,
+            1.0, // genome_size_penalty_per_bp
+        );
+
+        assert_eq!(pop.optimal_genome_size, 4);
+
+        // Give genome 0 a large deviation and genome 1 a small deviation.
+        // The penalty multiplies each weight by (penalty_per_bp * |deviation|), so
+        // genome 0 (deviation=1000) will have ~10x the weight of genome 1 (deviation=100).
+        pop.pop[0].seq_length = pop.optimal_genome_size + 1000;
+        pop.pop[1].seq_length = pop.optimal_genome_size + 100;
+
+        let mut thread_rng = rand::thread_rng();
+        let n_rounds = 500;
+        let mut counts = [0usize; 2];
+        for _ in 0..n_rounds {
+            for idx in pop.sample_individuals(&mut thread_rng) {
+                counts[idx] += 1;
+            }
+        }
+
+        // Genome 0 has a 10x larger deviation so it should be sampled far more often.
+        assert!(
+            counts[0] > counts[1],
+            "genome with larger size deviation should have higher selection weight; counts = {:?}",
+            counts
+        );
+    }
 }
