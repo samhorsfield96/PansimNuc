@@ -719,11 +719,12 @@ impl Population {
             eprintln!("Selection post-genome size penalty weights: {:?}", selection_weights);
         }
 
-        let sum_weights: f64 = selection_weights.iter().sum();
+        let mut sum_weights: f64 = selection_weights.iter().sum();
         // account for all values being zero
         if sum_weights == 0.0 {
             // if all weights are zero, set all weights to equal probability to prevent issues with sampling, as all genomes are equally likely to be selected
             selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+            sum_weights = 1.0; // update sum_weights to reflect the new equal probabilities
         }
 
         // normalise weights to sum to 1
