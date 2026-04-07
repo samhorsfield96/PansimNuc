@@ -1,6 +1,7 @@
 library(dplyr)
 library(ggplot2)
 library(tidyr)
+library(ggsci)
 
 # Usage:
 #   Rscript plot_allele_frequencies.R [tracking.csv] [output.pdf]
@@ -9,6 +10,10 @@ library(tidyr)
 args          <- commandArgs(trailingOnly = TRUE)
 tracking_file <- if (length(args) >= 1) args[1] else "tracking.csv"
 output_file   <- if (length(args) >= 2) args[2] else "allele_freq_plot.pdf"
+top_n_val <- if (length(args) >= 3) as.numeric(args[3]) else 3
+
+# tracking_file <- "baseline_tracking.csv"
+# output_file <- "baseline_allele_freq_plot.pdf"
 
 if (!file.exists(tracking_file)) {
   stop("Cannot find tracking file: ", tracking_file)
@@ -25,22 +30,31 @@ if (length(missing) > 0) {
 }
 
 # For each group (element_id x generation x population_id), split all genome
-# sequences into a position matrix and compute nucleotide frequencies.
-compute_position_freqs <- function(seqs) {
-  seqs <- seqs[nchar(seqs) > 0]
+# sequences into a position matrix and compute nucleotide frequencies and
+# mean selection coefficients per nucleotide per position.
+compute_position_freqs <- function(seqs, coefficients) {
+  seqs         <- seqs[nchar(seqs) > 0]
+  coefficients <- coefficients[nchar(coefficients) > 0]
   if (length(seqs) == 0) return(NULL)
-  seq_chars <- strsplit(seqs, "")
-  len       <- min(lengths(seq_chars))
-  seq_mat   <- do.call(rbind, lapply(seq_chars, `[`, seq_len(len)))
-  n         <- nrow(seq_mat)
-  per_pos   <- lapply(seq_len(len), function(p) {
-    tbl <- table(factor(toupper(seq_mat[, p]), levels = c("A", "C", "G", "T")))
-    data.frame(
-      position   = p,
-      nucleotide = names(tbl),
-      freq       = as.numeric(tbl) / n,
-      stringsAsFactors = FALSE
-    )
+  seq_chars   <- strsplit(seqs, "")
+  coeff_chars <- strsplit(coefficients, ";")
+  len         <- min(lengths(seq_chars), lengths(coeff_chars))
+  seq_mat     <- do.call(rbind, lapply(seq_chars,   `[`, seq_len(len)))
+  coeff_mat   <- do.call(rbind, lapply(coeff_chars, `[`, seq_len(len)))
+  n           <- nrow(seq_mat)
+  per_pos <- lapply(seq_len(len), function(p) {
+    nucs   <- toupper(seq_mat[, p])
+    coeffs <- suppressWarnings(as.numeric(coeff_mat[, p]))
+    do.call(rbind, lapply(c("A", "C", "G", "T"), function(nt) {
+      idx <- nucs == nt
+      data.frame(
+        position         = p,
+        nucleotide       = nt,
+        freq             = sum(idx) / n,
+        mean_coefficient = if (any(idx)) mean(coeffs[idx], na.rm = TRUE) else NA_real_,
+        stringsAsFactors = FALSE
+      )
+    }))
   })
   bind_rows(per_pos)
 }
@@ -49,19 +63,38 @@ message("Computing per-position nucleotide frequencies...")
 freq_data <- df %>%
   group_by(element_id, feature_type, generation, population_id) %>%
   summarise(
-    pos_freqs = list(compute_position_freqs(sequence)),
+    pos_freqs = list(compute_position_freqs(sequence, log_selection_coefficients)),
     .groups   = "drop"
   ) %>%
   filter(!sapply(pos_freqs, is.null)) %>%
   unnest(pos_freqs)
 
-# Minor allele frequency: 1 - frequency of the most common nucleotide
+# determine positions with the greatest variation over time
+# ── Select top N positions by the non-start allele that changes the most ─────
+# Start allele = most frequent nucleotide at the earliest generation per position
+start_alleles <- freq_data %>%
+  group_by(element_id, population_id, position) %>%
+  filter(generation == min(generation)) %>%
+  slice_max(freq, n = 1, with_ties = FALSE) %>%
+  select(element_id, population_id, position, start_nucleotide = nucleotide) %>%
+  ungroup()
+
+# For every non-start allele compute cumulative absolute frequency change
+top_alleles <- freq_data %>%
+  inner_join(start_alleles, by = c("element_id", "population_id", "position")) %>%
+  filter(nucleotide != start_nucleotide) %>%
+  arrange(element_id, population_id, position, nucleotide, generation) %>%
+  group_by(element_id, population_id, position, nucleotide) %>%
+  summarise(total_change = sum(abs(diff(freq))), .groups = "drop") %>%
+  slice_max(total_change, n = top_n_val, with_ties = FALSE)
+
+message(sprintf("Retaining top %d non-start allele(s) by cumulative frequency change.", top_n_val))
+
+# Filter freq_data to only those positions
 maf_data <- freq_data %>%
-  group_by(element_id, feature_type, generation, population_id, position) %>%
-  summarise(
-    minor_freq = 1 - max(freq),
-    .groups    = "drop"
-  )
+  semi_join(top_alleles, by = c("element_id", "population_id", "position", "nucleotide"))
+
+maf_data$Allele <- paste0("Pos: ", maf_data$position, ", Base: ", maf_data$nucleotide)
 
 n_elements   <- length(unique(maf_data$element_id))
 n_pops       <- length(unique(maf_data$population_id))
@@ -73,26 +106,23 @@ message("Plotting minor allele frequency heatmap...")
 make_label <- function(x) paste0("element_id: ", x)
 
 p_heatmap <- ggplot(maf_data,
-                    aes(x = position, y = factor(generation), fill = minor_freq)) +
-  geom_tile() +
-  scale_fill_gradient(
-    low  = "white",
-    high = "#D7191C",
-    name = "Minor\nAllele\nFreq",
-    limits = c(0, 1)
-  ) +
+                    aes(x = generation, y = freq, colour = factor(Allele))) +
+  geom_line() +
   labs(
-    title    = "Minor Allele Frequency per Position across Generations",
-    subtitle = "Each tile is one genomic position; colour = frequency of the non-major allele",
-    x        = "Position in Feature (bp)",
-    y        = "Generation"
+    x        = "Generation",
+    y        = "Allele frequency",
+    colour = "Allele"
   ) +
-  theme_minimal(base_size = 11) +
+  scale_y_continuous(limits=c(0,1.0)) +
+  scale_colour_npg() +
+  theme_light(base_size = 11) +
   theme(
     panel.grid   = element_blank(),
     axis.text.y  = element_text(size = 7),
     strip.text   = element_text(face = "bold")
   )
+
+p_heatmap
 
 if (has_multi_pop) {
   p_heatmap <- p_heatmap +
@@ -151,6 +181,8 @@ if (nrow(polymorphic_positions) > 0) {
   plots <- c(plots, list(p_poly))
 }
 
+# plot 3 plot selection coefficient vs. frequency vs generation
+
 # ── Save to PDF (one page per plot) ──────────────────────────────────────────
 n_positions <- max(maf_data$position, na.rm = TRUE)
 heatmap_width  <- max(10, n_positions / 50)
@@ -162,3 +194,4 @@ for (pl in plots) print(pl)
 dev.off()
 
 message("Done.")
+
