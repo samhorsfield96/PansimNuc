@@ -709,7 +709,7 @@ impl Population {
                 let genome_size = self.pop[i].seq_length;
                 // calculate total penalty based on difference from optimal genome size, ensuring that penalty scales with genome size and doesn't become negative
                 let size_penalty = (1.0 - (self.genome_size_penalty_per_bp * ((genome_size as isize - self.optimal_genome_size as isize).abs() as f64))).max(0.0);
-                println!("Genome {} size: {}, size penalty: {}", i, genome_size, size_penalty);
+                //println!("Genome {} size: {}, size penalty: {}", i, genome_size, size_penalty);
                 (w * size_penalty).max(0.0) // ensure weights don't become negative due to penalty
             })
             .collect();
