@@ -12,8 +12,8 @@ tracking_file <- if (length(args) >= 1) args[1] else "tracking.csv"
 output_file   <- if (length(args) >= 2) args[2] else "allele_freq_plot.pdf"
 top_n_val <- if (length(args) >= 3) as.numeric(args[3]) else 3
 
-# tracking_file <- "baseline_tracking.csv"
-# output_file <- "baseline_allele_freq_plot.pdf"
+tracking_file <- "/Users/samhorsfield/Software/PansimNuc/parameter_sweep/baseline/tracking.csv"
+output_file <- "/Users/samhorsfield/Software/PansimNuc/parameter_sweep/baseline/tracking_plot.pdf"
 
 if (!file.exists(tracking_file)) {
   stop("Cannot find tracking file: ", tracking_file)
@@ -92,7 +92,7 @@ message(sprintf("Retaining top %d non-start allele(s) by cumulative frequency ch
 
 # Filter freq_data to only those positions
 maf_data <- freq_data %>%
-  semi_join(top_alleles, by = c("element_id", "population_id", "position", "nucleotide"))
+  semi_join(top_alleles, by = c("element_id", "population_id", "position"))
 
 maf_data$Allele <- paste0("Pos: ", maf_data$position, ", Base: ", maf_data$nucleotide)
 
@@ -106,12 +106,16 @@ message("Plotting minor allele frequency heatmap...")
 make_label <- function(x) paste0("element_id: ", x)
 
 p_heatmap <- ggplot(maf_data,
-                    aes(x = generation, y = freq, colour = factor(Allele))) +
+                    aes(x = generation, y = freq,
+                        colour   = factor(position),
+                        linetype = nucleotide,
+                        group    = interaction(position, nucleotide))) +
   geom_line() +
   labs(
     x        = "Generation",
     y        = "Allele frequency",
-    colour = "Allele"
+    colour   = "Position",
+    linetype = "Nucleotide"
   ) +
   scale_y_continuous(limits=c(0,1.0)) +
   scale_colour_npg() +
