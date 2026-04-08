@@ -1,3 +1,7 @@
+// TODO each element mutation map needs to be shared globally, 
+//at the moment it is only found in a specific individual and so if a mutation goes
+// extinct, we lose tracking of that allele, effect should be maintained globally
+
 use rand::Rng;
 use rand::rngs::{StdRng, ThreadRng};
 use rand::seq::IteratorRandom;
