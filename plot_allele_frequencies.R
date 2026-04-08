@@ -8,6 +8,8 @@ library(ggsci)
 # Defaults to tracking.csv in the current directory and allele_freq_plot
 
 args          <- commandArgs(trailingOnly = TRUE)
+# Filter out R's own flags (e.g. --no-save, --no-restore) that leak through
+args          <- args[!grepl("^--", args)]
 tracking_file <- if (length(args) >= 1) args[1] else "tracking.csv"
 outpref   <- if (length(args) >= 2) args[2] else "allele_freq_plot"
 top_n_val <- if (length(args) >= 3) as.numeric(args[3]) else 3
