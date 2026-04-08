@@ -10,7 +10,7 @@ library(ggsci)
 args          <- commandArgs(trailingOnly = TRUE)
 tracking_file <- if (length(args) >= 1) args[1] else "tracking.csv"
 output_file   <- if (length(args) >= 2) args[2] else "allele_freq_plot.pdf"
-top_n_val <- if (length(args) >= 3) as.numeric(args[3]) else 3
+top_n_val <- if (length(args) >= 3) as.numeric(args[3]) else 1
 
 tracking_file <- "/Users/samhorsfield/Software/PansimNuc/parameter_sweep/baseline/tracking.csv"
 output_file <- "/Users/samhorsfield/Software/PansimNuc/parameter_sweep/baseline/tracking_plot.pdf"
@@ -69,6 +69,11 @@ freq_data <- df %>%
   filter(!sapply(pos_freqs, is.null)) %>%
   unnest(pos_freqs)
 
+selection_coeff_data <- freq_data %>%
+  group_by(element_id, feature_type, position, nucleotide, population_id) %>%
+  summarise(mean_coeff = mean(mean_coefficient, na.rm = TRUE),
+            std_dev_coeff = sd(mean_coefficient, na.rm = TRUE))
+
 # determine positions with the greatest variation over time
 # ── Select top N positions by the non-start allele that changes the most ─────
 # Start allele = most frequent nucleotide at the earliest generation per position
@@ -94,6 +99,11 @@ message(sprintf("Retaining top %d non-start allele(s) by cumulative frequency ch
 maf_data <- freq_data %>%
   semi_join(top_alleles, by = c("element_id", "population_id", "position"))
 
+maf_data <- maf_data %>%
+  inner_join(selection_coeff_data, by = c("element_id", "feature_type", "population_id", "position", "nucleotide"))
+
+maf_data <- subset(maf_data, select=-c(mean_coefficient))
+
 maf_data$Allele <- paste0("Pos: ", maf_data$position, ", Base: ", maf_data$nucleotide)
 
 n_elements   <- length(unique(maf_data$element_id))
@@ -105,7 +115,7 @@ message("Plotting minor allele frequency heatmap...")
 
 make_label <- function(x) paste0("element_id: ", x)
 
-p_heatmap <- ggplot(maf_data,
+p_allele_freq <- ggplot(maf_data,
                     aes(x = generation, y = freq,
                         colour   = factor(position),
                         linetype = nucleotide,
@@ -126,19 +136,45 @@ p_heatmap <- ggplot(maf_data,
     strip.text   = element_text(face = "bold")
   )
 
-p_heatmap
+p_allele_freq
 
 if (has_multi_pop) {
-  p_heatmap <- p_heatmap +
+  p_allele_freq <- p_allele_freq +
     facet_grid(
       rows = vars(population_id),
       cols = vars(element_id),
       labeller = label_both
     )
 } else {
-  p_heatmap <- p_heatmap +
+  p_allele_freq <- p_allele_freq +
     facet_wrap(~ element_id, labeller = as_labeller(make_label), ncol = 1)
 }
+
+## plot 1b selection coefficient vs. frequency
+# plot only for the top alleles
+maf_data_top_alleles <- maf_data %>%
+  semi_join(top_alleles, by = c("element_id", "population_id", "position", "nucleotide"))
+
+p_selection <- ggplot(maf_data_top_alleles,
+                 aes(x = generation, y = freq,
+                     colour   = mean_coeff,
+                     group    = nucleotide)) +
+  facet_grid(. ~ position) +
+  geom_line() +
+  labs(
+    x        = "Generation",
+    y        = "Allele frequency",
+    colour   = "Selection coefficient",
+  ) +
+  scale_y_continuous(limits=c(0,1.0)) +
+  theme_light(base_size = 11) +
+  theme(
+    panel.grid   = element_blank(),
+    axis.text.y  = element_text(size = 7),
+    strip.text   = element_text(face = "bold")
+  )
+
+p_selection
 
 # ── Plot 2: per-nucleotide frequency for polymorphic positions ────────────────
 # Identify positions that are ever polymorphic (MAF > 0)
@@ -149,7 +185,7 @@ polymorphic_positions <- maf_data %>%
 
 message(sprintf("Found %d polymorphic position(s).", nrow(polymorphic_positions)))
 
-plots <- list(p_heatmap)
+plots <- list(p_allele_freq)
 
 if (nrow(polymorphic_positions) > 0) {
   poly_freq <- freq_data %>%
