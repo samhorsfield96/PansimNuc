@@ -5,15 +5,17 @@ library(ggsci)
 
 # Usage:
 #   Rscript plot_allele_frequencies.R [tracking.csv] [output.pdf]
-# Defaults to tracking.csv in the current directory and allele_freq_plot.pdf
+# Defaults to tracking.csv in the current directory and allele_freq_plot
 
 args          <- commandArgs(trailingOnly = TRUE)
 tracking_file <- if (length(args) >= 1) args[1] else "tracking.csv"
-output_file   <- if (length(args) >= 2) args[2] else "allele_freq_plot.pdf"
-top_n_val <- if (length(args) >= 3) as.numeric(args[3]) else 1
+outpref   <- if (length(args) >= 2) args[2] else "allele_freq_plot"
+top_n_val <- if (length(args) >= 3) as.numeric(args[3]) else 3
 
-tracking_file <- "/Users/samhorsfield/Software/PansimNuc/parameter_sweep/baseline/tracking.csv"
-output_file <- "/Users/samhorsfield/Software/PansimNuc/parameter_sweep/baseline/tracking_plot.pdf"
+#tracking_file <- "/Users/samhorsfield/Software/PansimNuc/parameter_sweep/baseline/tracking.csv"
+#outpref <- "/Users/samhorsfield/Software/PansimNuc/parameter_sweep/baseline/plot"
+#tracking_file <- "/Users/samhorsfield/Software/PansimNuc/parameter_sweep/exon_mu_high_recombination_none/tracking.csv"
+#outpref <- "/Users/samhorsfield/Software/PansimNuc/parameter_sweep/exon_mu_high_recombination_none/plot"
 
 if (!file.exists(tracking_file)) {
   stop("Cannot find tracking file: ", tracking_file)
@@ -68,6 +70,9 @@ freq_data <- df %>%
   ) %>%
   filter(!sapply(pos_freqs, is.null)) %>%
   unnest(pos_freqs)
+
+# testing
+subset.freq_data <- subset(freq_data, position == 1 & nucleotide == "T")
 
 selection_coeff_data <- freq_data %>%
   group_by(element_id, feature_type, position, nucleotide, population_id) %>%
@@ -150,6 +155,8 @@ if (has_multi_pop) {
     facet_wrap(~ element_id, labeller = as_labeller(make_label), ncol = 1)
 }
 
+ggsave(paste0(outpref, "_allele_freq_top_", top_n_val, ".pdf"), plot=p_allele_freq, width=8, height=8)
+
 ## plot 1b selection coefficient vs. frequency
 # plot only for the top alleles
 maf_data_top_alleles <- maf_data %>%
@@ -176,62 +183,7 @@ p_selection <- ggplot(maf_data_top_alleles,
 
 p_selection
 
-# ── Plot 2: per-nucleotide frequency for polymorphic positions ────────────────
-# Identify positions that are ever polymorphic (MAF > 0)
-polymorphic_positions <- maf_data %>%
-  group_by(element_id, population_id, position) %>%
-  summarise(max_maf = max(minor_freq), .groups = "drop") %>%
-  filter(max_maf > 0)
+ggsave(paste0(outpref, "_allelic_selection_top_", top_n_val, ".pdf"), plot=p_selection, width=3*top_n_val, height=8)
 
-message(sprintf("Found %d polymorphic position(s).", nrow(polymorphic_positions)))
 
-plots <- list(p_allele_freq)
-
-if (nrow(polymorphic_positions) > 0) {
-  poly_freq <- freq_data %>%
-    semi_join(polymorphic_positions,
-              by = c("element_id", "population_id", "position")) %>%
-    mutate(pos_label = paste0("pos ", position))
-
-  p_poly <- ggplot(poly_freq,
-                   aes(x = generation, y = freq,
-                       colour = nucleotide, group = nucleotide)) +
-    geom_line(linewidth = 0.7) +
-    geom_point(size = 1.2) +
-    scale_colour_manual(
-      values = c(A = "#2166AC", C = "#4DAC26", G = "#D6604D", T = "#762A83"),
-      name   = "Nucleotide"
-    ) +
-    scale_y_continuous(limits = c(0, 1), name = "Frequency") +
-    scale_x_continuous(name = "Generation") +
-    labs(
-      title    = "Nucleotide Frequencies at Polymorphic Positions",
-      subtitle = "Only positions with MAF > 0 in at least one generation are shown"
-    ) +
-    theme_minimal(base_size = 10) +
-    theme(
-      panel.grid.minor = element_blank(),
-      strip.text       = element_text(size = 7, face = "bold")
-    )
-
-  facet_vars <- c("element_id", "pos_label")
-  if (has_multi_pop) facet_vars <- c("population_id", facet_vars)
-  p_poly <- p_poly + facet_wrap(facet_vars, ncol = 5)
-
-  plots <- c(plots, list(p_poly))
-}
-
-# plot 3 plot selection coefficient vs. frequency vs generation
-
-# ── Save to PDF (one page per plot) ──────────────────────────────────────────
-n_positions <- max(maf_data$position, na.rm = TRUE)
-heatmap_width  <- max(10, n_positions / 50)
-heatmap_height <- max(6,  length(unique(maf_data$generation)) / 5) * n_elements
-
-message("Saving plots to ", output_file)
-pdf(output_file, width = heatmap_width, height = heatmap_height)
-for (pl in plots) print(pl)
-dev.off()
-
-message("Done.")
 
