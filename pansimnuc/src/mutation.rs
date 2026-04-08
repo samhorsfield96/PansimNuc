@@ -567,19 +567,18 @@ impl MutationMap {
 
             // sample new allele
             let new_allele = values.iter().choose_multiple(thread_rng, 1)[0];
-            let mut selection_coefficient: f64 = 0.0;
 
             // generate new selection coefficient for this mutation if necessary, otherwise retrieve existing one
-            if let Some(coeff) = self.get(*new_allele, mutant_site) {
+            if let Some(_) = self.get(*new_allele, mutant_site) {
                 // value exists
-                selection_coefficient = *coeff;
+                continue;
             } else {
-                selection_coefficient = selection_dist.sample(thread_rng);
+                let selection_coefficient = selection_dist.sample(thread_rng);
+                self.insert(*new_allele, mutant_site, selection_coefficient);
             }
 
             // set value in place
             seq[mutant_site] = *new_allele;
-            self.insert(*new_allele, mutant_site, selection_coefficient);
         }
         n_sites
 
@@ -951,6 +950,39 @@ mod tests {
 
         let post_n_sites: Vec<u8> = seq.iter().copied().filter(|&x| x == 16).collect();
         assert_eq!(original_n_sites, post_n_sites);
+    }
+
+    #[test]
+    // test that map is updated many times, and that selection cofficients generated remain same after many mutations
+    fn test_mutation_map_consistency_after_mutations() {
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let selection_dist =
+            Distribution::new_uniform(1e-10, 1e10).expect("failed to create selection distribution");
+        let mu_dist =
+            Distribution::new_poisson(1e3).expect("failed to create mutation-rate distribution");
+        let indel_dist =
+            Distribution::new_poisson(1e-30).expect("failed to create mutation-rate distribution");
+        let core_vec: Vec<Vec<u8>> =
+            vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
+
+        let mut seq = vec![1, 1, 4, 8, 2, 1, 2, 4];
+        let original_length = seq.len();
+
+        let mut map = MutationMap::new(0, 0, &seq, &selection_dist, &mut rng);
+        let original_map_state = map.data.clone();
+
+        // mutate many times with very low mutation rates to ensure map is updated but sequence does not change
+        for _ in 0..100 {
+            map.mutate(&core_vec, &mut seq, original_length, &mut false, &selection_dist, &mu_dist, &indel_dist);
+            assert_eq!(seq.len(), original_length);
+            assert_eq!(map.data.len(), original_map_state.len());
+            for (allele_map, original_allele_map) in map.data.iter().zip(original_map_state.iter()) {
+                // for each entry in original allele map, check that same key exists in mutated map and has same value; also check no new keys were added
+                for (key, value) in original_allele_map.iter() {
+                    assert_eq!(allele_map.get(key), Some(value));
+                }
+            }
+        }
     }
 
     #[test]
