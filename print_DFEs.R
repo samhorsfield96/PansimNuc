@@ -13,9 +13,6 @@ args          <- args[!grepl("^--", args)]
 infile <- if (length(args) >= 1) args[1] else "selection_samples.csv"
 outpref <- if (length(args) >= 2) args[2] else "DFE_plot"
 
-infile <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/exon_mu_low_selection_pos_low_neg_high_proppos_equal/selection_samples.csv"
-outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/exon_mu_low_selection_pos_low_neg_high_proppos_equal/DFE_plot"
-
 if (!file.exists(infile)) {
   stop("Cannot find tracking file: ", infile)
 }
