@@ -172,20 +172,21 @@ impl DoubleExponential {
 
     pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
         let weight = self.weight_rng.sample(rng);
-        let mut selection_coefficient = 0.0;
 
         if weight <= self.cutoff {
             // Higher selected gene
-            selection_coefficient = self.exp2.sample(rng);
+            return self.exp2.sample(rng);
         } else {
             // lower selected gene
-            // keep sampling until below 1, mimicking selection coefficient sampling
-            while selection_coefficient >= 1.0 {
+            // keep sampling until <= 1, mimicking selection coefficient sampling
+            let mut selection_coefficient = 2.0;
+
+            while selection_coefficient > 1.0 {
                 selection_coefficient = self.exp1.sample(rng);
             }
+            selection_coefficient *= -1.0; // make negative for deleterious mutations
+            return selection_coefficient;
         }
-
-        selection_coefficient
     }
 }
 
@@ -753,6 +754,20 @@ mod tests {
 
         let dist4 = Distribution::new_double_exp(0.5, 2.0, -0.1);
         assert!(dist4.is_err());
+    }
+
+    #[test]
+    fn test_double_exp_distribution_generates_negative_weights() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let dist = Distribution::new_double_exp(0.5, 0.5, 0.0).unwrap();
+
+        // Generate a large number of samples to ensure we get some from the exp1 distribution
+        let samples: Vec<f64> = (0..20).map(|_| dist.sample(&mut rng)).collect();
+
+        println!("Sampled values: {:?}", &samples[0..20]); // Print first 20 samples for inspection
+
+        // Check that we have some negative values, which would indicate sampling from exp1
+        assert!(samples.iter().all(|&x| x < 0.0));
     }
 
     #[test]
