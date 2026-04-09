@@ -23,6 +23,8 @@ use population::Population;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 
 #[derive(Parser, Debug)]
 #[command(name = "pansimnuc")]
@@ -40,6 +42,7 @@ fn main() {
     let mut tracking_regions: Vec<(String, usize, usize)> = Vec::new(); // vector of (contig_id, start, end) tuples for regions to track
     let mut augment_tracking = false;
     let mut genome_size_penalty_per_bp = 0.0;
+    let mut print_dfe = false;
 
     // Load config if provided
     let mut verbose = false;
@@ -86,6 +89,12 @@ fn main() {
                     genome_size_penalty_per_bp = genome_size_penalty_str
                         .parse::<f64>()
                         .expect("Genome size penalty must be a float.");
+                }
+
+                if let Some(print_dfe_str) = configuration.get("misc.print_DFE") {
+                    print_dfe = print_dfe_str
+                        .parse::<bool>()
+                        .expect("print_DFE must be a boolean (true/false).");
                 }
             }
             Err(err) => {
@@ -153,7 +162,7 @@ fn main() {
                     let feature_sections = ["exons", "introns", "intergenic", "TE-CUT", "TE-COPY", "tracking"];
 
                     // generate distributions to draw mutations from
-                    let mut site_mutation_dists: Vec<Distribution> = Vec::new();
+                    let mut site_selection_dists: Vec<Distribution> = Vec::new();
                     let mut site_mutation_mus_vals: Vec<f64> = Vec::new();
                     let mut site_indel_mus_vals: Vec<f64> = Vec::new();
                     let mut structural_dists: Vec<Vec<Distribution>> = Vec::new();
@@ -166,7 +175,7 @@ fn main() {
                         let inversion_rate_key = format!("{}.inversion_rate", section);
                         let indel_rate_key = format!("{}.indel_rate", section);
 
-                        site_mutation_dists.push(
+                        site_selection_dists.push(
 							Distribution::from_selection_config(&configuration, section).unwrap_or_else(|err| {
 								panic!(
 									"Failed to create selection distribution for section '{}': {}",
@@ -198,6 +207,44 @@ fn main() {
 						}
                     }
 
+                    // print samples from selection distributions for debugging
+                    if print_dfe {
+
+                        let mut site_selection_samples: Vec<Vec<f64>> = vec![vec![0.0; 1000]; site_selection_dists.len()];
+                        println!("Sampling from selection distributions:");
+                        for (i, dist) in site_selection_dists.iter().enumerate() {
+                            for j in 0..1000 {
+                                // store samples in 2D vector where rows are distributions and columns are samples
+                                site_selection_samples[i][j] = dist.sample(&mut rng);
+                            }
+                        }
+
+                        // print samples to file for plotting
+                        if let Some(outdir) = configuration.get("output.outdir") {
+                            
+                            let selection_samples_path = format!("{}/selection_samples.csv", outdir);
+                            let file = File::create(&selection_samples_path).unwrap_or_else(|err| {
+                                panic!("Failed to create selection samples output file: {err}");
+                            });
+
+                            let mut writer = BufWriter::new(file);
+
+                            // write header, based on names in feature_sections
+                            let header = feature_sections.iter().map(|s| format!("{}", s)).join(",");
+                            writeln!(writer, "{}", header).unwrap_or_else(|err| {
+                                panic!("Failed to write header to selection samples output file: {err}");
+                            });
+
+                            // write samples, one row per sample, with columns for each distribution
+                            for i in 0..1000 {
+                                let row = site_selection_samples.iter().map(|samples| samples[i].to_string()).join(",");
+                                writeln!(writer, "{}", row).unwrap_or_else(|err| {
+                                    panic!("Failed to write row to selection samples output file: {err}");
+                                });
+                            }
+                        }
+                    }
+
                     // recombination distributions
                     let recombination_rate = parse_f64("population.recombination_rate");
                     let recombination_size_mean = parse_f64("population.recombination_size_mean");
@@ -227,7 +274,7 @@ fn main() {
                     let mut population = Population::new(
                         features,
                         n_individuals,
-                        site_mutation_dists,
+                        site_selection_dists,
                         &site_mutation_mus_vals,
                         &site_indel_mus_vals,
                         recombination_dists,

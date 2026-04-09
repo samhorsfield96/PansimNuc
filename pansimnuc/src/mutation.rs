@@ -542,7 +542,7 @@ impl MutationMap {
         self.insert(level, key, value);
     }
 
-    fn mutate_SNPs (
+    fn mutate_snps (
         &mut self,
         core_vec: &Vec<Vec<u8>>,
         seq: &mut Vec<u8>,
@@ -658,7 +658,7 @@ impl MutationMap {
         let mut thread_rng = rand::thread_rng();
 
         // mutate SNPs
-        let n_snps = self.mutate_SNPs(core_vec, seq, selection_dist, mu_dist, &mut thread_rng);
+        let n_snps = self.mutate_snps(core_vec, seq, selection_dist, mu_dist, &mut thread_rng);
         let n_indels = self.mutate_indels(core_vec, seq, selection_dist, indel_dist, &mut thread_rng);
 
         // update frameshift status
