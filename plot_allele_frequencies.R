@@ -143,8 +143,6 @@ p_allele_freq <- ggplot(maf_data,
     strip.text   = element_text(face = "bold")
   )
 
-p_allele_freq
-
 if (has_multi_pop) {
   p_allele_freq <- p_allele_freq +
     facet_grid(
@@ -182,8 +180,6 @@ p_selection <- ggplot(maf_data_top_alleles,
     axis.text.y  = element_text(size = 7),
     strip.text   = element_text(face = "bold")
   )
-
-p_selection
 
 ggsave(paste0(outpref, "_allelic_selection_top_", top_n_val, ".pdf"), plot=p_selection, width=3*top_n_val, height=8)
 
