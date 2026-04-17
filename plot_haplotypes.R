@@ -13,6 +13,8 @@ args          <- args[!grepl("^--", args)]
 tracking_file <- if (length(args) >= 1) args[1] else "tracking.csv"
 outpref       <- if (length(args) >= 2) args[2] else "haplotype_plot"
 
+tracking_file <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/baseline/tracking.csv"
+
 if (!file.exists(tracking_file)) {
   stop("Cannot find tracking file: ", tracking_file)
 }
@@ -99,6 +101,7 @@ classify_haplotypes <- function(group_df) {
 
   rows <- list()
 
+  gen <- 1
   for (gen in generations) {
     seqs    <- group_df$sequence[group_df$generation == gen]
     seqs    <- seqs[nchar(seqs) > 0]
@@ -120,15 +123,26 @@ classify_haplotypes <- function(group_df) {
         known_haps[[sig]] <- htype
         hap_labels[[sig]] <- new_label(prefix)
       }
+      
+      if (sig == "") {
+        haplotype_id = ""
+        type = ""
+      } else {
+        haplotype_id = hap_labels[[sig]]
+        type         = known_haps[[sig]]
+      }
 
-      rows[[length(rows) + 1]] <- data.frame(
+      df_tmp <- data.frame(
         generation   = gen,
-        haplotype_id = hap_labels[[sig]],
+        haplotype_id = haplotype_id,
         mutation_sig = sig,
         freq         = freq,
-        type         = known_haps[[sig]],
+        type         = type,
         stringsAsFactors = FALSE
       )
+      
+      rows[[length(rows) + 1]] <- df_tmp
+      
     }
   }
 
@@ -137,6 +151,8 @@ classify_haplotypes <- function(group_df) {
 
 # ── Run classification across all groups ─────────────────────────────────────
 message("Tracking haplotype frequencies...")
+
+group_df <- subset(df, element_id == "402" & population_id == 0)
 
 hap_data <- df %>%
   group_by(element_id, feature_type, population_id) %>%
