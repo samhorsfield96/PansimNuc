@@ -11,6 +11,9 @@ args       <- args[!grepl("^--", args)]
 output_dir <- if (length(args) >= 1) args[1] else "."
 outpref    <- if (length(args) >= 2) args[2] else "te_copy_numbers"
 
+output_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/baseline"
+outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/baseline/TE_analysis"
+
 if (!dir.exists(output_dir)) {
   stop("Output directory does not exist: ", output_dir)
 }
@@ -58,6 +61,9 @@ parse_gff <- function(path) {
 
     attrs <- parse_attributes(fields[9])
     element_id <- attrs["element_id"]
+    log_genome_selection_coefficient = attrs["log_genome_selection_coefficient"]
+    log_element_selection_coefficient = attrs["log_element_selection_coefficient"]
+    multiplier = attrs["multiplier"]
 
     data.frame(
       pop_id     = pop_id,
@@ -65,7 +71,11 @@ parse_gff <- function(path) {
       genome_id  = genome_id,
       feature_type = feature_type,
       element_id = element_id,
-      stringsAsFactors = FALSE
+      log_genome_selection_coefficient = as.numeric(log_genome_selection_coefficient),
+      log_element_selection_coefficient = as.numeric(log_element_selection_coefficient),
+      multiplier = as.numeric(multiplier),
+      stringsAsFactors = FALSE,
+      row.names = NULL
     )
   })
 
@@ -89,7 +99,11 @@ all_data$element_id <- as.integer(all_data$element_id)
 
 copy_counts <- all_data %>%
   group_by(pop_id, generation, genome_id, feature_type, element_id) %>%
-  summarise(copies = n(), .groups = "drop")
+  summarise(copies = n(), 
+            log_genome_selection_coefficient = mean(log_genome_selection_coefficient),
+            log_element_selection_coefficient = mean(log_element_selection_coefficient),
+            multiplier = mean(multiplier),
+            .groups = "drop")
 
 # ── Distribution of copy numbers across genomes, by generation & population ───
 
@@ -119,10 +133,10 @@ total_load_summary <- total_load %>%
 
 # ── Write tables ──────────────────────────────────────────────────────────────
 
-write.csv(copy_counts,        file.path(output_dir, paste0(outpref, "_per_genome.csv")),   row.names = FALSE)
-write.csv(copy_dist,          file.path(output_dir, paste0(outpref, "_distribution.csv")), row.names = FALSE)
-write.csv(mean_copies,        file.path(output_dir, paste0(outpref, "_mean_per_element.csv")), row.names = FALSE)
-write.csv(total_load_summary, file.path(output_dir, paste0(outpref, "_total_load.csv")),   row.names = FALSE)
+write.csv(copy_counts,        file.path(paste0(outpref, "_per_genome.csv")),   row.names = FALSE)
+write.csv(copy_dist,          file.path(paste0(outpref, "_distribution.csv")), row.names = FALSE)
+write.csv(mean_copies,        file.path(paste0(outpref, "_mean_per_element.csv")), row.names = FALSE)
+write.csv(total_load_summary, file.path(paste0(outpref, "_total_load.csv")),   row.names = FALSE)
 
 message("Tables written.")
 
@@ -132,59 +146,19 @@ generations <- sort(unique(all_data$generation))
 populations <- sort(unique(all_data$pop_id))
 
 # 1. Total TE load over generations, faceted by population
-p_load <- ggplot(total_load_summary,
-                 aes(x = factor(generation), y = mean_load,
+
+p_dist <- ggplot(mean_copies,
+                 aes(y = mean_copies,
                      colour = feature_type, group = feature_type)) +
-  geom_line() +
-  geom_point() +
-  geom_errorbar(aes(ymin = mean_load - sd_load,
-                    ymax = mean_load + sd_load), width = 0.2) +
-  facet_wrap(~pop_id, labeller = label_both) +
+  geom_histogram() +
+  facet_grid(generation ~ pop_id, labeller = label_both) +
   labs(title = "Mean total TE copy number per genome over generations",
        x = "Generation", y = "Mean copy number", colour = "TE type") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-ggsave(file.path(output_dir, paste0(outpref, "_total_load.pdf")),
+p_dist
+ggsave(file.path(paste0(outpref, "_total_load.pdf")),
        p_load, width = 10, height = 6)
-
-# 2. Copy number distribution (histogram) faceted by generation and feature type
-# For readability, one plot per population
-for (pop in populations) {
-  df_pop <- copy_dist %>% filter(pop_id == pop)
-  if (nrow(df_pop) == 0) next
-
-  p_dist <- ggplot(df_pop,
-                   aes(x = copies, y = n_genomes, fill = feature_type)) +
-    geom_col(position = "dodge") +
-    facet_wrap(~generation, labeller = label_both, scales = "free_y") +
-    labs(title = paste0("TE copy-number distribution — population ", pop),
-         x = "Copies per genome", y = "Number of genomes", fill = "TE type") +
-    theme_bw()
-
-  ggsave(file.path(output_dir,
-                   paste0(outpref, "_dist_pop", pop, ".pdf")),
-         p_dist, width = 12, height = 8)
-}
-
-# 3. Violin / boxplot of per-genome total TE load by generation, one per population
-for (pop in populations) {
-  df_pop <- total_load %>% filter(pop_id == pop)
-  if (nrow(df_pop) == 0) next
-
-  p_violin <- ggplot(df_pop,
-                     aes(x = factor(generation), y = total_copies,
-                         fill = feature_type)) +
-    geom_violin(position = position_dodge(0.8), scale = "width", alpha = 0.6) +
-    geom_boxplot(position = position_dodge(0.8), width = 0.15, outlier.size = 0.5) +
-    labs(title = paste0("TE copy-number distribution — population ", pop),
-         x = "Generation", y = "Total copies per genome", fill = "TE type") +
-    theme_bw() +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-  ggsave(file.path(output_dir,
-                   paste0(outpref, "_violin_pop", pop, ".pdf")),
-         p_violin, width = 10, height = 6)
-}
 
 message("Done. Output written to: ", output_dir)
