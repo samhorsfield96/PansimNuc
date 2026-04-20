@@ -1,6 +1,7 @@
 library(dplyr)
 library(ggplot2)
 library(tidyr)
+library(ggsci)
 
 # Usage:
 #   Rscript plot_te_copy_numbers.R [output_dir] [output_prefix]
@@ -11,8 +12,8 @@ args       <- args[!grepl("^--", args)]
 output_dir <- if (length(args) >= 1) args[1] else "."
 outpref    <- if (length(args) >= 2) args[2] else "te_copy_numbers"
 
-output_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/baseline"
-outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/baseline/TE_analysis"
+output_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/TE-COPY_test"
+outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/TE-COPY_test/TE_analysis"
 
 if (!dir.exists(output_dir)) {
   stop("Output directory does not exist: ", output_dir)
@@ -147,18 +148,23 @@ populations <- sort(unique(all_data$pop_id))
 
 # 1. Total TE load over generations, faceted by population
 
-p_dist <- ggplot(mean_copies,
-                 aes(y = mean_copies,
-                     colour = feature_type, group = feature_type)) +
-  geom_histogram() +
-  facet_grid(generation ~ pop_id, labeller = label_both) +
-  labs(title = "Mean total TE copy number per genome over generations",
-       x = "Generation", y = "Mean copy number", colour = "TE type") +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+TE_types <- c("TE-COPY", "TE-CUT")
+for (TE_type in TE_types)
+{
+  mean_copies_subset = subset(mean_copies, feature_type == TE_type)
+  p_dist <- ggplot(mean_copies_subset, 
+                   aes(x = mean_copies, fill = feature_type, group = feature_type)) +
+    geom_histogram(aes(y = after_stat(density * nrow(mean_copies))), bins = 30) +
+    geom_density(aes(y = after_stat(density * nrow(mean_copies))), alpha = 0.25) +
+    scale_fill_npg() +
+    facet_grid(. ~ pop_id, labeller = label_both) +
+    labs(
+      x = "Mean copy number", y = "Count", fill = "TE type") +
+    theme_light() +
+    theme(legend.position = "none")
+  
+  p_dist
+  ggsave(file.path(paste0(outpref, "_", TE_type, "_TE_copy_dist.pdf")),
+         p_dist, width = 10, height = 6)
+}
 
-p_dist
-ggsave(file.path(paste0(outpref, "_total_load.pdf")),
-       p_load, width = 10, height = 6)
-
-message("Done. Output written to: ", output_dir)
