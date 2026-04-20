@@ -12,6 +12,7 @@ args          <- commandArgs(trailingOnly = TRUE)
 args          <- args[!grepl("^--", args)]
 tracking_file <- if (length(args) >= 1) args[1] else "tracking.csv"
 outpref       <- if (length(args) >= 2) args[2] else "haplotype_plot"
+top_n         <- if (length(args) >= 3) as.integer(args[3]) else 5L  # 0 = keep all
 
 tracking_file <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/baseline/tracking.csv"
 
@@ -80,6 +81,20 @@ is_recombinant <- function(sig_h, known_sigs) {
   FALSE
 }
 
+# Compute the mean selection coefficient for a set of semicolon-separated
+# log-coefficient strings (one string per genome).
+# Per genome: sum the per-site log coefficients, then exponentiate.
+# Returns the mean of those per-genome values, or NA if unavailable.
+hap_sel_coeff <- function(coeff_strs) {
+  coeff_strs <- coeff_strs[!is.na(coeff_strs) & nchar(coeff_strs) > 0]
+  if (length(coeff_strs) == 0) return(NA_real_)
+  per_genome <- sapply(coeff_strs, function(s) {
+    vals <- suppressWarnings(as.numeric(strsplit(s, ";")[[1]]))
+    exp(sum(vals, na.rm = TRUE))
+  })
+  mean(per_genome, na.rm = TRUE)
+}
+
 # ── Per-group haplotype classification ───────────────────────────────────────
 #
 # For a single (element_id, feature_type, population_id) group:
@@ -87,10 +102,12 @@ is_recombinant <- function(sig_h, known_sigs) {
 #   - For each subsequent generation, any new sequence is classified as:
 #       "recombinant" if its mutation set = union of two prior haplotypes, or
 #       "mutant"      otherwise.
-#   - Returns a tidy data frame: generation, haplotype_id, mutation_sig, freq, type.
+#   - Returns a tidy data frame: generation, haplotype_id, mutation_sig, freq,
+#     type, sel_coeff
 classify_haplotypes <- function(group_df) {
-  generations <- sort(unique(group_df$generation))
-  first_gen   <- generations[1]
+  generations   <- sort(unique(group_df$generation))
+  first_gen     <- generations[1]
+  has_sel_coeff <- "log_selection_coefficients" %in% colnames(group_df)
 
   reference <- build_reference(group_df$sequence[group_df$generation == first_gen])
 
@@ -112,11 +129,24 @@ classify_haplotypes <- function(group_df) {
     n_total <- length(seqs)
     if (n_total == 0) next
 
+    gen_mask <- group_df$generation == gen & nchar(group_df$sequence) > 0
+    sel_all  <- if (has_sel_coeff) group_df$log_selection_coefficients[gen_mask] else NULL
+    seqs_all <- group_df$sequence[gen_mask]
+
     seq_counter <- 0
+    seq <- seqs[1]
     for (seq in unique(seqs)) {
       seq_counter <- seq_counter + 1
       sig  <- get_mutation_sig(seq, reference)
       freq <- sum(seqs == seq) / n_total
+
+      # Mean selection coefficient for genomes carrying this haplotype
+      if (has_sel_coeff) {
+        coeff_strs <- sel_all[seqs_all == seq]
+        sel_coeff   <- hap_sel_coeff(coeff_strs)
+      } else {
+        sel_coeff <- NA_real_
+      }
 
       if (!sig %in% names(known_haps)) {
         if (gen == first_gen) {
@@ -139,11 +169,12 @@ classify_haplotypes <- function(group_df) {
       }
 
       df_tmp <- data.frame(
-        generation   = gen,
-        haplotype_id = haplotype_id,
-        mutation_sig = sig,
-        freq         = freq,
-        type         = htype,
+        generation     = gen,
+        haplotype_id   = haplotype_id,
+        mutation_sig   = sig,
+        freq           = freq,
+        type           = htype,
+        sel_coeff = sel_coeff,
         stringsAsFactors = FALSE
       )
       
@@ -176,8 +207,23 @@ hap_data <- hap_data %>%
     fill         = list(freq = 0)
   ) %>%
   group_by(element_id, feature_type, population_id, haplotype_id) %>%
-  fill(type, mutation_sig, .direction = "downup") %>%
+  fill(type, mutation_sig, sel_coeff, .direction = "downup") %>%
   ungroup()
+
+# ── Filter to top N haplotypes per type (0 = keep all) ───────────────────────
+if (top_n > 0L) {
+  message(sprintf("Retaining top %d haplotype(s) per type by cumulative frequency change.", top_n))
+  top_haps <- hap_data %>%
+    arrange(element_id, feature_type, population_id, haplotype_id, generation) %>%
+    group_by(element_id, feature_type, population_id, haplotype_id, type) %>%
+    summarise(total_change = sum(abs(diff(freq))), .groups = "drop") %>%
+    group_by(element_id, feature_type, population_id, type) %>%
+    slice_max(total_change, n = top_n, with_ties = FALSE) %>%
+    ungroup()
+
+  hap_data <- hap_data %>%
+    semi_join(top_haps, by = c("element_id", "feature_type", "population_id", "haplotype_id"))
+}
 
 # ── Plotting helpers ──────────────────────────────────────────────────────────
 n_pops        <- length(unique(hap_data$population_id))
@@ -262,6 +308,7 @@ hap_summary <- hap_data %>%
   summarise(
     first_generation = min(generation[freq > 0]),
     peak_freq        = max(freq),
+    mean_sel_coeff   = mean(sel_coeff, na.rm = TRUE),
     .groups          = "drop"
   ) %>%
   arrange(element_id, population_id, first_generation)
@@ -281,3 +328,4 @@ message("Output files:")
 message("  ", outpref, "_haplotype_freq.pdf")
 message("  ", outpref, "_haplotype_composition.pdf")
 message("  ", outpref, "_haplotype_summary.csv")
+
