@@ -101,14 +101,20 @@ classify_haplotypes <- function(group_df) {
 
   rows <- list()
 
+  gen_counter <- 0
   gen <- 1
+  pb <- txtProgressBar(min = min(generations), max = max(generations), style = 3)
+  message(paste0("Parsing generations: ", max(generations)))
   for (gen in generations) {
+    gen_counter <- gen_counter + 1
     seqs    <- group_df$sequence[group_df$generation == gen]
     seqs    <- seqs[nchar(seqs) > 0]
     n_total <- length(seqs)
     if (n_total == 0) next
 
+    seq_counter <- 0
     for (seq in unique(seqs)) {
+      seq_counter <- seq_counter + 1
       sig  <- get_mutation_sig(seq, reference)
       freq <- sum(seqs == seq) / n_total
 
@@ -125,11 +131,11 @@ classify_haplotypes <- function(group_df) {
       }
       
       if (sig == "") {
-        haplotype_id = ""
-        type = ""
+        haplotype_id = "R"
+        htype = "reference"
       } else {
         haplotype_id = hap_labels[[sig]]
-        type         = known_haps[[sig]]
+        htype         = known_haps[[sig]]
       }
 
       df_tmp <- data.frame(
@@ -137,14 +143,15 @@ classify_haplotypes <- function(group_df) {
         haplotype_id = haplotype_id,
         mutation_sig = sig,
         freq         = freq,
-        type         = type,
+        type         = htype,
         stringsAsFactors = FALSE
       )
       
       rows[[length(rows) + 1]] <- df_tmp
-      
     }
+    setTxtProgressBar(pb, gen)
   }
+  close(pb)
 
   bind_rows(rows)
 }
