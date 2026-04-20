@@ -12,11 +12,8 @@ args          <- commandArgs(trailingOnly = TRUE)
 # Filter out R's own flags (e.g. --no-save, --no-restore) that leak through
 args          <- args[!grepl("^--", args)]
 tracking_file <- if (length(args) >= 1) args[1] else "tracking.csv"
-outpref       <- if (length(args) >= 2) args[2] else "haplotype_plot"
+outpref       <- if (length(args) >= 2) args[2] else "haplotype_analysis"
 top_n         <- if (length(args) >= 3) as.integer(args[3]) else 5L  # 0 = keep all
-
-tracking_file <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/exon_mu_low_recombination_high_selection_pos_high_neg_high_proppos_equal/tracking.csv"
-outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/exon_mu_low_recombination_high_selection_pos_high_neg_high_proppos_equal/haplotype_analysis"
 
 if (!file.exists(tracking_file)) {
   stop("Cannot find tracking file: ", tracking_file)
@@ -61,23 +58,29 @@ get_mutation_sig <- function(seq, reference) {
 # Parse a mutation signature string into a character vector of "pos:base" tokens.
 parse_sig <- function(s) if (nchar(s) == 0) character(0) else strsplit(s, ";")[[1]]
 
-# Determine whether sig_h is a recombinant of any two signatures in known_sigs.
+# Determine whether h_muts (a parsed mutation vector) is a recombinant of any
+# two entries in known_muts_list (a list of pre-parsed mutation vectors).
 # A haplotype H is a recombinant of A and B when its mutation set equals exactly
 # the union of A's and B's mutation sets, and each parent contributes at least
 # one exclusive mutation (neither is a subset of the other).
-is_recombinant <- function(sig_h, known_sigs) {
-  h_muts <- parse_sig(sig_h)
-  # A reference-identical haplotype or fewer than two known haplotypes: skip.
-  if (length(h_muts) == 0 || length(known_sigs) < 2) return(FALSE)
-  known_muts <- lapply(known_sigs, parse_sig)
-  n <- length(known_muts)
+is_recombinant <- function(h_muts, known_muts_list) {
+  if (length(h_muts) == 0 || length(known_muts_list) < 2) return(FALSE)
+  h_len <- length(h_muts)
+  # Pre-filter: a valid parent must be a non-empty strict subset of h_muts
+  candidates <- Filter(
+    function(a) length(a) > 0 && length(a) < h_len && all(a %in% h_muts),
+    known_muts_list
+  )
+  if (length(candidates) < 2) return(FALSE)
+  n <- length(candidates)
   for (i in seq_len(n - 1)) {
+    a <- candidates[[i]]
     for (j in seq(i + 1, n)) {
-      a <- known_muts[[i]]
-      b <- known_muts[[j]]
+      b <- candidates[[j]]
       # Both parents must each contribute at least one mutation the other lacks.
-      if (length(setdiff(a, b)) == 0 || length(setdiff(b, a)) == 0) next
-      if (setequal(h_muts, union(a, b))) return(TRUE)
+      if (!any(!a %in% b) || !any(!b %in% a)) next
+      ab <- union(a, b)
+      if (length(ab) == h_len && setequal(ab, h_muts)) return(TRUE)
     }
   }
   FALSE
@@ -113,8 +116,9 @@ classify_haplotypes <- function(group_df) {
 
   reference <- build_reference(group_df$sequence[group_df$generation == first_gen])
 
-  known_haps <- list()  # mutation_sig -> "founder" | "mutant" | "recombinant"
-  hap_labels <- list()  # mutation_sig -> short label e.g. "F1", "M2", "R1"
+  known_haps  <- list()  # mutation_sig -> "founder" | "mutant" | "recombinant"
+  hap_labels  <- list()  # mutation_sig -> short label e.g. "F1", "M2", "R1"
+  known_muts  <- list()  # mutation_sig -> pre-parsed mutation vector (cache)
   counter    <- 0L
   new_label  <- function(prefix) { counter <<- counter + 1L; paste0(prefix, counter) }
 
@@ -126,41 +130,46 @@ classify_haplotypes <- function(group_df) {
   message(paste0("Parsing generations: ", max(generations)))
   for (gen in generations) {
     gen_counter <- gen_counter + 1
-    seqs    <- group_df$sequence[group_df$generation == gen]
-    seqs    <- seqs[nchar(seqs) > 0]
-    n_total <- length(seqs)
+
+    gen_mask  <- group_df$generation == gen & nchar(group_df$sequence) > 0
+    sel_all   <- if (has_sel_coeff) group_df$log_selection_coefficients[gen_mask] else NULL
+    seqs_all  <- group_df$sequence[gen_mask]
+    n_total   <- length(seqs_all)
     if (n_total == 0) next
 
-    gen_mask <- group_df$generation == gen & nchar(group_df$sequence) > 0
-    sel_all  <- if (has_sel_coeff) group_df$log_selection_coefficients[gen_mask] else NULL
-    seqs_all <- group_df$sequence[gen_mask]
+    # Pre-build frequency table and per-sequence coefficient lookup once per gen
+    seq_tbl    <- table(seqs_all)
+    sel_by_seq <- if (has_sel_coeff) split(sel_all, seqs_all) else NULL
 
-    seq_counter <- 0
-    seq <- seqs[1]
-    for (seq in unique(seqs)) {
-      seq_counter <- seq_counter + 1
-      sig  <- get_mutation_sig(seq, reference)
-      freq <- sum(seqs == seq) / n_total
+    for (seq in names(seq_tbl)) {
+      sig       <- get_mutation_sig(seq, reference)
+      sig_muts  <- parse_sig(sig)
+      freq      <- seq_tbl[[seq]] / n_total
 
       # Mean selection coefficient for genomes carrying this haplotype
       if (has_sel_coeff) {
-        coeff_strs <- sel_all[seqs_all == seq]
-        sel_coeff   <- hap_sel_coeff(coeff_strs)
+        sel_coeff <- hap_sel_coeff(sel_by_seq[[seq]])
       } else {
         sel_coeff <- NA_real_
       }
-
+      
+      # start.time <- Sys.time()
       if (!sig %in% names(known_haps)) {
         if (gen == first_gen) {
           htype <- "founder";     prefix <- "F"
-        } else if (is_recombinant(sig, names(known_haps))) {
+        } else if (is_recombinant(sig_muts, known_muts)) {
           htype <- "recombinant"; prefix <- "R"
         } else {
           htype <- "mutant";      prefix <- "M"
         }
         known_haps[[sig]] <- htype
         hap_labels[[sig]] <- new_label(prefix)
+        known_muts[[sig]] <- sig_muts  # cache parsed form
       }
+      # end.time <- Sys.time()
+      # time.taken <- end.time - start.time
+      # time.taken
+      # message(paste0("Time taken: ", time.taken))
       
       if (sig == "") {
         haplotype_id = "R"
@@ -286,7 +295,7 @@ p_lines <- ggplot(
   )
 ) +
   geom_line(alpha = 0.8) +
-  labs(x = "Generation", y = "Haplotype frequency") +
+  labs(x = "Generation", y = "Haplotype frequency", colour = "Haplotype") +
   scale_y_continuous(limits = c(0, 1)) +
   type_colour_scale +
   base_theme
@@ -308,7 +317,7 @@ p_area <- ggplot(
   )
 ) +
   geom_area(position = "stack", colour = NA, alpha = 0.8) +
-  labs(x = "Generation", y = "Cumulative haplotype frequency") +
+  labs(x = "Generation", y = "Cumulative haplotype frequency", fill = "Haplotype") +
   scale_y_continuous(limits = c(0, 1)) +
   type_fill_scale +
   base_theme
@@ -330,7 +339,7 @@ p_area <- ggplot(
   )
 ) +
   geom_area(position = "stack", colour = NA, alpha = 0.8) +
-  labs(x = "Generation", y = "Cumulative haplotype frequency") +
+  labs(x = "Generation", y = "Cumulative haplotype frequency", fill = "Haplotype ID") +
   scale_y_continuous(limits = c(0, 1)) +
   base_theme
 
@@ -379,13 +388,6 @@ p_sel <- ggplot(
     ),
     name = "Haplotype type"
   ) +
-  # scale_fill_gradient2(
-  #   low      = "#3B4992",
-  #   mid      = "white",
-  #   high     = "#EE0000",
-  #   midpoint = 1,
-  #   name     = "Selection\ncoefficient"
-  # ) +
   labs(x = "Generation", y = "Cumulative haplotype frequency", fill = "Selection coefficient") +
   scale_y_continuous(limits = c(0, 1)) +
   base_theme
