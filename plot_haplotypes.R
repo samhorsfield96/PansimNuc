@@ -2,6 +2,7 @@ library(dplyr)
 library(ggplot2)
 library(tidyr)
 library(ggsci)
+library(ggpattern)
 
 # Usage:
 #   Rscript plot_haplotypes.R [tracking.csv] [output_prefix]
@@ -14,7 +15,8 @@ tracking_file <- if (length(args) >= 1) args[1] else "tracking.csv"
 outpref       <- if (length(args) >= 2) args[2] else "haplotype_plot"
 top_n         <- if (length(args) >= 3) as.integer(args[3]) else 5L  # 0 = keep all
 
-tracking_file <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/baseline/tracking.csv"
+tracking_file <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/exon_mu_low_recombination_high_selection_pos_high_neg_high_proppos_equal/tracking.csv"
+outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/exon_mu_low_recombination_high_selection_pos_high_neg_high_proppos_equal/haplotype_analysis"
 
 if (!file.exists(tracking_file)) {
   stop("Cannot find tracking file: ", tracking_file)
@@ -190,8 +192,6 @@ classify_haplotypes <- function(group_df) {
 # ── Run classification across all groups ─────────────────────────────────────
 message("Tracking haplotype frequencies...")
 
-group_df <- subset(df, element_id == "402" & population_id == 0)
-
 hap_data <- df %>%
   group_by(element_id, feature_type, population_id) %>%
   group_modify(~ classify_haplotypes(.x)) %>%
@@ -209,6 +209,21 @@ hap_data <- hap_data %>%
   group_by(element_id, feature_type, population_id, haplotype_id) %>%
   fill(type, mutation_sig, sel_coeff, .direction = "downup") %>%
   ungroup()
+
+# ── Summary table ─────────────────────────────────────────────────────────────
+hap_summary <- hap_data %>%
+  group_by(element_id, feature_type, population_id, haplotype_id, type, mutation_sig) %>%
+  summarise(
+    first_generation = min(generation[freq > 0]),
+    peak_freq        = max(freq),
+    mean_sel_coeff   = mean(sel_coeff, na.rm = TRUE),
+    .groups          = "drop"
+  ) %>%
+  arrange(element_id, population_id, first_generation)
+
+write.csv(hap_summary,
+          file      = paste0(outpref, "_haplotype_summary.csv"),
+          row.names = FALSE)
 
 # ── Filter to top N haplotypes per type (0 = keep all) ───────────────────────
 if (top_n > 0L) {
@@ -302,20 +317,82 @@ p_area <- add_facets(p_area)
 p_area
 ggsave(paste0(outpref, "_haplotype_composition.pdf"), plot = p_area, width = 8, height = 6)
 
-# ── Summary table ─────────────────────────────────────────────────────────────
-hap_summary <- hap_data %>%
-  group_by(element_id, feature_type, population_id, haplotype_id, type, mutation_sig) %>%
-  summarise(
-    first_generation = min(generation[freq > 0]),
-    peak_freq        = max(freq),
-    mean_sel_coeff   = mean(sel_coeff, na.rm = TRUE),
-    .groups          = "drop"
-  ) %>%
-  arrange(element_id, population_id, first_generation)
+# ── Plot 3: stacked area chart of top changing haplotype composition ──────────────────────
+message("Plotting haplotype composition stacked areas...")
 
-write.csv(hap_summary,
-          file      = paste0(outpref, "_haplotype_summary.csv"),
-          row.names = FALSE)
+p_area <- ggplot(
+  hap_data,
+  aes(
+    x    = generation,
+    y    = freq,
+    fill = haplotype_id,
+    group = haplotype_id
+  )
+) +
+  geom_area(position = "stack", colour = NA, alpha = 0.8) +
+  labs(x = "Generation", y = "Cumulative haplotype frequency") +
+  scale_y_continuous(limits = c(0, 1)) +
+  base_theme
+
+p_area <- add_facets(p_area)
+p_area
+ggsave(paste0(outpref, "_per_haplotype_composition.pdf"), plot = p_area, width = 8, height = 6)
+
+# ── Plot 4: top hits with selection coefficients + haplotype-type hatching ───
+type_pattern_values <- c(
+  reference   = "none",
+  founder     = "none",
+  mutant      = "stripe",
+  recombinant = "crosshatch"
+)
+
+p_sel <- ggplot(
+  hap_data,
+  aes(
+    x              = generation,
+    y              = freq,
+    fill           = sel_coeff,
+    colour           = sel_coeff,
+    pattern        = type,
+    pattern_colour = type,
+    group          = haplotype_id
+  )
+) +
+  geom_area_pattern(
+    position        = "stack",
+    colour          = NA,
+    alpha           = 0.8,
+    pattern_density = 0.35,
+    pattern_spacing = 0.025,
+    pattern_fill    = NA
+  ) +
+  scale_pattern_manual(
+    values = type_pattern_values,
+    name   = "Haplotype type"
+  ) +
+  scale_pattern_colour_manual(
+    values = c(
+      reference   = "grey30",
+      founder     = "grey30",
+      mutant      = "grey30",
+      recombinant = "grey30"
+    ),
+    name = "Haplotype type"
+  ) +
+  # scale_fill_gradient2(
+  #   low      = "#3B4992",
+  #   mid      = "white",
+  #   high     = "#EE0000",
+  #   midpoint = 1,
+  #   name     = "Selection\ncoefficient"
+  # ) +
+  labs(x = "Generation", y = "Cumulative haplotype frequency", fill = "Selection coefficient") +
+  scale_y_continuous(limits = c(0, 1)) +
+  base_theme
+
+p_sel <- add_facets(p_sel)
+p_sel
+ggsave(paste0(outpref, "_sel_coeff_composition.pdf"), plot = p_sel, width = 8, height = 6)
 
 message(sprintf(
   "Done. %d haplotypes tracked (%d founder, %d mutant, %d recombinant).",
@@ -324,8 +401,4 @@ message(sprintf(
   sum(hap_summary$type == "mutant"),
   sum(hap_summary$type == "recombinant")
 ))
-message("Output files:")
-message("  ", outpref, "_haplotype_freq.pdf")
-message("  ", outpref, "_haplotype_composition.pdf")
-message("  ", outpref, "_haplotype_summary.csv")
 
