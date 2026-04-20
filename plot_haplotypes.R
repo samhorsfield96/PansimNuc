@@ -184,13 +184,14 @@ n_pops        <- length(unique(hap_data$population_id))
 has_multi_pop <- n_pops > 1
 
 type_colour_values <- c(
+  reference = "#3C5488FF",
   founder     = "#4DBBD5",
   mutant      = "#E64B35",
   recombinant = "#00A087"
 )
 
-type_colour_scale <- scale_colour_manual(values = type_colour_values, name = "Type")
-type_fill_scale   <- scale_fill_manual(values = type_colour_values,   name = "Type")
+type_colour_scale <- scale_colour_manual(values = type_colour_values, name = "Haplotype")
+type_fill_scale   <- scale_fill_manual(values = type_colour_values,   name = "Haplotype")
 
 add_facets <- function(p) {
   if (has_multi_pop) {
@@ -230,6 +231,7 @@ p_lines <- ggplot(
   base_theme
 
 p_lines <- add_facets(p_lines)
+p_lines
 ggsave(paste0(outpref, "_haplotype_freq.pdf"), plot = p_lines, width = 8, height = 6)
 
 # ── Plot 2: stacked area chart of haplotype composition ──────────────────────
@@ -251,6 +253,7 @@ p_area <- ggplot(
   base_theme
 
 p_area <- add_facets(p_area)
+p_area
 ggsave(paste0(outpref, "_haplotype_composition.pdf"), plot = p_area, width = 8, height = 6)
 
 # ── Summary table ─────────────────────────────────────────────────────────────
