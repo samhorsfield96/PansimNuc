@@ -88,14 +88,14 @@ is_recombinant <- function(h_muts, known_muts_list) {
 
 # Compute the mean selection coefficient for a set of semicolon-separated
 # log-coefficient strings (one string per genome).
-# Per genome: sum the per-site log coefficients, then exponentiate.
+# Per genome: sum the per-site log coefficients, get total log selection coefficient.
 # Returns the mean of those per-genome values, or NA if unavailable.
 hap_sel_coeff <- function(coeff_strs) {
   coeff_strs <- coeff_strs[!is.na(coeff_strs) & nchar(coeff_strs) > 0]
   if (length(coeff_strs) == 0) return(NA_real_)
   per_genome <- sapply(coeff_strs, function(s) {
     vals <- suppressWarnings(as.numeric(strsplit(s, ";")[[1]]))
-    exp(sum(vals, na.rm = TRUE))
+    sum(vals, na.rm = TRUE)
   })
   mean(per_genome, na.rm = TRUE)
 }
