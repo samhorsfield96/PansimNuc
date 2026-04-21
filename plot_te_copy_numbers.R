@@ -164,9 +164,9 @@ for (TE_type in TE_types)
                    aes(x = mean_copies, fill = feature_type, group = feature_type)) +
     #geom_histogram(aes(y = after_stat(density * nrow(mean_copies_subset))), bins = 30) +
     geom_histogram(binwidth = binwidth) +
-    geom_density(aes(y = after_stat(density * (nrow(mean_copies_subset) * binwidth))), alpha = 0.25) +
+    #geom_density(aes(y = after_stat(density * (nrow(mean_copies_subset) * binwidth))), alpha = 0.25) +
     scale_fill_npg() +
-    facet_grid(. ~ pop_id, labeller = label_both) +
+    facet_wrap(generation ~ pop_id, labeller = label_both, scales = "free") +
     labs(
       x = "Mean copy number", y = "Count", fill = "TE type") +
     theme_light() +
@@ -185,9 +185,9 @@ for (TE_type in TE_types)
                    aes(x = sd_copies, fill = feature_type, group = feature_type)) +
     #geom_histogram(aes(y = after_stat(density * nrow(mean_copies_subset))), bins = 30) +
     geom_histogram(binwidth = binwidth) +
-    geom_density(aes(y = after_stat(density * (nrow(mean_copies_subset) * binwidth))), alpha = 0.25) +
+    #geom_density(aes(y = after_stat(density * (nrow(mean_copies_subset) * binwidth))), alpha = 0.25) +
     scale_fill_npg() +
-    facet_grid(. ~ pop_id, labeller = label_both) +
+    facet_wrap(generation ~ pop_id, labeller = label_both, scales = "free") +
     labs(
       x = "SD copy number", y = "Count", fill = "TE type") +
     theme_light() +
