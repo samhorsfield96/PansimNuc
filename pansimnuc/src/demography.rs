@@ -159,6 +159,13 @@ impl MetaPopulation {
     pub fn run_simulation(&mut self, is_tracking: bool, configuration: &HashMap<String, String>) {
         let verbose = self.populations[0].verbose; // assume all populations have same verbose setting
 
+        let mut print_all_generations = false;
+        if let Some(print_all_generations_str) = configuration.get("misc.print_all_generations") {
+            print_all_generations = print_all_generations_str
+                .parse::<bool>()
+                .expect("print_all_generations must be a boolean (true/false).");
+        }
+
         for generation in 1..=self.n_generations {
             self.populations.par_iter_mut().for_each(|population| {
                 let mut rng = rand::thread_rng();
@@ -227,8 +234,12 @@ impl MetaPopulation {
                 };
             }
 
+            if print_all_generations {
+                self.write_output(configuration);
+            }
+
             println!("Finished generation {}", generation);
-    }
+        }
     }
 
     pub fn write_output(&self, configuration: &HashMap<String, String>) {
