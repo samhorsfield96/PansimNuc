@@ -23,9 +23,6 @@ args       <- args[!grepl("^--", args)]
 gff_dir    <- if (length(args) >= 1) args[1] else "."
 out_prefix <- if (length(args) >= 2) args[2] else "sfs_nuc"
 
-gff_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/exon_mu_high_recombination_high_selection_pos_high_neg_high_proppos_equal"
-out_prefix <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/exon_mu_high_recombination_high_selection_pos_high_neg_high_proppos_equal/sfs_nuc"
-
 # ── Attribute parser ──────────────────────────────────────────────────────────
 parse_attrs <- function(attr_str) {
   pairs <- strsplit(attr_str, ";", fixed = TRUE)[[1L]]
