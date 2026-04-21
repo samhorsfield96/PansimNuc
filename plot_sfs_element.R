@@ -136,6 +136,7 @@ p <- ggplot(sfs, aes(x = maf, fill = feature_type)) +
   theme(legend.position = "none",
         strip.text      = element_text(size = 9))
 
+p
 # ── Save ──────────────────────────────────────────────────────────────────────
 n_pops  <- n_distinct(sfs$population_id)
 n_gens  <- n_distinct(sfs$generation)
