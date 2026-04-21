@@ -12,9 +12,6 @@ args       <- args[!grepl("^--", args)]
 output_dir <- if (length(args) >= 1) args[1] else "."
 outpref    <- if (length(args) >= 2) args[2] else "te_copy_numbers"
 
-output_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/TE-COPY_test"
-outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/parameter_sweep/TE-COPY_test/TE_analysis"
-
 if (!dir.exists(output_dir)) {
   stop("Output directory does not exist: ", output_dir)
 }
@@ -110,7 +107,7 @@ copy_counts <- all_data %>%
 
 copy_dist <- copy_counts %>%
   group_by(pop_id, generation, feature_type, copies) %>%
-  summarise(n_genomes = n(), .groups = "drop")
+  summarise(frequency = n(), .groups = "drop")
 
 # Also compute mean copy number per element across genomes
 mean_copies <- copy_counts %>%
@@ -152,10 +149,22 @@ TE_types <- c("TE-COPY", "TE-CUT")
 for (TE_type in TE_types)
 {
   mean_copies_subset = subset(mean_copies, feature_type == TE_type)
+  if (nrow(mean_copies_subset) == 0)
+  {
+    message(paste0("No ", TE_type, " present"))
+    next
+  }
+  
+  # mean copy number
+  binwidth = (max(mean_copies_subset$mean_copies) - min(mean_copies_subset$mean_copies)) / 30
+  if (binwidth == 0) {
+    binwidth <- 1
+  }
   p_dist <- ggplot(mean_copies_subset, 
                    aes(x = mean_copies, fill = feature_type, group = feature_type)) +
-    geom_histogram(aes(y = after_stat(density * nrow(mean_copies))), bins = 30) +
-    geom_density(aes(y = after_stat(density * nrow(mean_copies))), alpha = 0.25) +
+    #geom_histogram(aes(y = after_stat(density * nrow(mean_copies_subset))), bins = 30) +
+    geom_histogram(binwidth = binwidth) +
+    geom_density(aes(y = after_stat(density * (nrow(mean_copies_subset) * binwidth))), alpha = 0.25) +
     scale_fill_npg() +
     facet_grid(. ~ pop_id, labeller = label_both) +
     labs(
@@ -164,7 +173,28 @@ for (TE_type in TE_types)
     theme(legend.position = "none")
   
   p_dist
-  ggsave(file.path(paste0(outpref, "_", TE_type, "_TE_copy_dist.pdf")),
+  ggsave(file.path(paste0(outpref, "_", TE_type, "_TE_mean_copy_dist.pdf")),
+         p_dist, width = 10, height = 6)
+  
+  # SD of copy number
+  binwidth = (max(mean_copies_subset$sd_copies) - min(mean_copies_subset$sd_copies)) / 30
+  if (binwidth == 0) {
+    binwidth <- 1
+  }
+  p_dist <- ggplot(mean_copies_subset, 
+                   aes(x = sd_copies, fill = feature_type, group = feature_type)) +
+    #geom_histogram(aes(y = after_stat(density * nrow(mean_copies_subset))), bins = 30) +
+    geom_histogram(binwidth = binwidth) +
+    geom_density(aes(y = after_stat(density * (nrow(mean_copies_subset) * binwidth))), alpha = 0.25) +
+    scale_fill_npg() +
+    facet_grid(. ~ pop_id, labeller = label_both) +
+    labs(
+      x = "SD copy number", y = "Count", fill = "TE type") +
+    theme_light() +
+    theme(legend.position = "none")
+  
+  p_dist
+  ggsave(file.path(paste0(outpref, "_", TE_type, "_TE_SD_copy_dist.pdf")),
          p_dist, width = 10, height = 6)
 }
 
