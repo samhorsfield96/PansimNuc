@@ -390,10 +390,10 @@ n_types <- n_distinct(sfs_data$feature_type)
 pdf_w <- max(9, 4.5 * n_types)
 pdf_h <- max(6, 3 * n_pops * n_gens)
 
-out_pdf <- paste0(out_prefix, "density_minor_alleles.pdf")
+out_pdf <- paste0(out_prefix, "_density_minor_alleles.pdf")
 ggsave(out_pdf, plot = p_minor_density, width = pdf_w, height = pdf_h)
 message("Saved: ", out_pdf)
-out_pdf <- paste0(out_prefix, "density_all_alleles.pdf")
+out_pdf <- paste0(out_prefix, "_density_all_alleles.pdf")
 ggsave(out_pdf, plot = p_both_density, width = pdf_w, height = pdf_h)
 message("Saved: ", out_pdf)
 
