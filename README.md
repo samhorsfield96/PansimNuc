@@ -31,4 +31,4 @@ Note that `TE-CUT` are only transposed, meaning that if they are duplicated, the
 
 ## Inter-genomic variation
 
-Recombination is governed by the rate of recombinations, mean recombination length and sequence homology threshold. The rate of recombination in the population is governed by the number of SNPs, with `recombination_rate` giving the number of bases recombined per SNP. The `recombination_size_mean` dictates how long the recombination tracts are on average. The `recombination_threshold` dictates the lower limit of sequence homology for two sequences to recombine.
+Recombination is governed by the rate of recombinations, mean recombination length and sequence homology threshold. The rate of recombination in the population is governed by the number of SNPs, with `recombination_rate` giving the number of recombination events per base per generation. The `recombination_size_mean` dictates how long the recombination tracts are on average. The `recombination_threshold` dictates the lower limit of sequence homology for two sequences to recombine.
