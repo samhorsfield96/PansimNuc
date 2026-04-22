@@ -179,13 +179,16 @@ impl MetaPopulation {
                 let mut rng = rand::thread_rng();
                 
                 // mutate at nucleotide level
-                let (total_snps, total_indels) = population.mutate();
+                let (_, _) = population.mutate();
 
                 // perform intragenome structural mutations
                 population.structural_intra_genome();
 
+                // get total size of pangenome for recombination rate scaling
+                let (total_length, _, _, _, _   , _, _, _, _, _, _, _, _, _) = population.total_seq_lengths();
+
                 // perform intergenome structural mutations, based on number of SNPs
-                population.structural_inter_genome(self.recombination_rate, total_snps, self.recombination_size_mean);
+                population.structural_inter_genome(self.recombination_rate, total_length as usize, self.recombination_size_mean);
 
                 // sample next generation
                 let sampled_indices = population.sample_individuals(&mut rng);

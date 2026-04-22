@@ -188,7 +188,7 @@ pub struct Population {
 }
 
 impl Population {
-    fn total_seq_lengths(&self) -> (f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) {
+    pub fn total_seq_lengths(&self) -> (f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) {
         let mut total_length = 0;
         let mut total_exon_length = 0;
         let mut total_intron_length = 0;
