@@ -2292,4 +2292,118 @@ mod tests {
             counts
         );
     }
+
+    #[test]
+    fn test_update_mu_dists() {
+        // Helper: extract lambda from a Poisson MutationDistribution
+        fn get_lambda(dist: &MutationDistribution) -> f64 {
+            match dist {
+                MutationDistribution::Poisson(p) => p.lambda(),
+                _ => panic!("Expected Poisson distribution"),
+            }
+        }
+
+        // Population: 2 genomes, each with 1 exon (100 bp), 1 intron (50 bp), 1 intergenic (200 bp)
+        let mut root = Vec::new();
+        root.push(vec![
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 0,
+                feature_type: "exon".to_string(),
+                start: 0,
+                end: 100,
+                strand: true,
+                seq: vec![1u8; 100],
+            },
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 0,
+                feature_type: "intron".to_string(),
+                start: 100,
+                end: 150,
+                strand: true,
+                seq: vec![2u8; 50],
+            },
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 0,
+                feature_type: "intergenic".to_string(),
+                start: 150,
+                end: 350,
+                strand: true,
+                seq: vec![4u8; 200],
+            },
+        ]);
+
+        let selection_dists = vec![
+            MutationDistribution::new_double_exp(0.5, 2.0, 0.3).unwrap(),
+            MutationDistribution::new_uniform(0.0, 1.0).unwrap(),
+            MutationDistribution::new_uniform(0.0, 1.0).unwrap(),
+        ];
+        let mu_vals = vec![1e-3, 5e-4, 2e-3];
+        let indel_vals = vec![1e-4, 5e-5, 2e-4];
+
+        let multiplier_dist = MutationDistribution::new_uniform(0.5, 1.5).unwrap();
+        let multiplier_dists = vec![
+            multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(),
+            multiplier_dist.clone(), multiplier_dist.clone(),
+        ];
+        let recombination_dists = vec![
+            MutationDistribution::new_poisson(1.0).unwrap(),
+            MutationDistribution::new_poisson(1.0).unwrap(),
+        ];
+
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut pop = Population::new(
+            root,
+            2,
+            selection_dists,
+            &mu_vals,
+            &indel_vals,
+            recombination_dists,
+            1.0,
+            default_structural_dists(),
+            10,
+            multiplier_dists,
+            10,
+            &mut rng,
+            false,
+            &vec!["chr1".to_string()],
+            &vec![],
+            false,
+            0.0,
+        );
+
+        // Pre-update: lambdas should equal the raw placeholder values
+        let pre_update_lambdas: Vec<f64> = pop.mu_dists.iter().map(|dist| get_lambda(dist)).collect();
+        let pre_update_indel_lambdas: Vec<f64> = pop.indel_dists.iter().map(|dist| get_lambda(dist)).collect();
+
+        // check genome update works
+        for genome in &mut pop.pop {
+            assert_eq!(genome.total_exon_length, 100);
+            assert_eq!(genome.total_intron_length, 50);
+            assert_eq!(genome.total_intergenic_length, 200);
+            genome.update_contig_starts();
+            assert_eq!(genome.total_exon_length, 100);
+            assert_eq!(genome.total_intron_length, 50);
+            assert_eq!(genome.total_intergenic_length, 200);
+        }
+        
+        // update contig distrubutions with the new mu/indel values
+        pop.update_mu_dists(&mu_vals, &indel_vals);
+
+        // Post-update: lambda = mu * avg_element_size per type
+        // 2 genomes × 1 exon (100 bp)       → avg = 100
+        // 2 genomes × 1 intron (50 bp)       → avg = 50
+        // 2 genomes × 1 intergenic (200 bp)  → avg = 200
+        let post_update_lambdas: Vec<f64> = pop.mu_dists.iter().map(|dist| get_lambda(dist)).collect();
+        let post_update_indel_lambdas: Vec<f64> = pop.indel_dists.iter().map(|dist| get_lambda(dist)).collect();
+        assert_eq!(post_update_lambdas[0], pre_update_lambdas[0] * 100.0);
+        assert_eq!(post_update_lambdas[1], pre_update_lambdas[1] * 50.0);
+        assert_eq!(post_update_lambdas[2], pre_update_lambdas[2] * 200.0);
+        assert_eq!(post_update_indel_lambdas[0], pre_update_indel_lambdas[0] * 100.0);
+        assert_eq!(post_update_indel_lambdas[1], pre_update_indel_lambdas[1] * 50.0);
+        assert_eq!(post_update_indel_lambdas[2], pre_update_indel_lambdas[2] * 200.0);
+
+    }
 }
