@@ -81,19 +81,87 @@ pub struct Genome {
     pub parent: String,
     pub seq: Vec<NucElement>,
     pub seq_length: usize,
+    pub total_exon_length: usize,
+    pub total_intron_length: usize,
+    pub total_intergenic_length: usize,
+    pub total_te_cut_length: usize,
+    pub total_te_copy_length: usize,
+    pub total_tracking_length: usize,
+    pub total_elements: usize,
+    pub total_exon_elements: usize,
+    pub total_intron_elements: usize,
+    pub total_intergenic_elements: usize,
+    pub total_te_cut_elements: usize,
+    pub total_te_copy_elements: usize,
+    pub total_tracking_elements: usize,
 }
 
 impl Genome {
     pub fn update_contig_starts(&mut self) {
         self.contig_starts.clear();
+        
+        // total lengths
         let mut total_length = 0;
+        let mut total_exon_length = 0;
+        let mut total_intron_length = 0;
+        let mut total_intergenic_length = 0;
+        let mut total_te_cut_length = 0;
+        let mut total_te_copy_length = 0;
+        let mut total_tracking_length = 0;
+        
+        // total elements
+        let mut total_elements = 0;
+        let mut total_exon_elements = 0;
+        let mut total_intron_elements = 0;
+        let mut total_intergenic_elements = 0;
+        let mut total_te_cut_elements = 0;
+        let mut total_te_copy_elements = 0;
+        let mut total_tracking_elements = 0;
+
         for (idx, element) in self.seq.iter().enumerate() {
             if idx == 0 || element.contig_id != self.seq[idx - 1].contig_id {
                 self.contig_starts.push(idx);
             }
             total_length += element.seq.len();
+            total_elements += 1;
+            match element.feature_type.as_str() {
+                "exon" => total_exon_length += element.seq.len(),
+                "intron" => total_intron_length += element.seq.len(),
+                "intergenic" => total_intergenic_length += element.seq.len(),
+                "TE-CUT" => total_te_cut_length += element.seq.len(),
+                "TE-COPY" => total_te_copy_length += element.seq.len(),
+                _ => {}
+            }
+
+            match element.feature_type.as_str() {
+                "exon" => total_exon_elements += 1,
+                "intron" => total_intron_elements += 1,
+                "intergenic" => total_intergenic_elements += 1,
+                "TE-CUT" => total_te_cut_elements += 1,
+                "TE-COPY" => total_te_copy_elements += 1,
+                _ => {}
+            }
+
+            if element.tracked {
+                total_tracking_length += element.seq.len();
+                total_tracking_elements += 1;
+            }
         }
         self.seq_length = total_length;
+        self.total_exon_length = total_exon_length;
+        self.total_intron_length = total_intron_length;
+        self.total_intergenic_length = total_intergenic_length;
+        self.total_te_cut_length = total_te_cut_length;
+        self.total_te_copy_length = total_te_copy_length;
+        self.total_tracking_length = total_tracking_length;
+
+        self.total_elements = total_elements;
+        self.total_exon_elements = total_exon_elements;
+        self.total_intron_elements = total_intron_elements;
+        self.total_intergenic_elements = total_intergenic_elements;
+        self.total_te_cut_elements = total_te_cut_elements;
+        self.total_te_copy_elements = total_te_copy_elements;
+        self.total_tracking_elements = total_tracking_elements;
     }
 }
 
@@ -120,8 +188,58 @@ pub struct Population {
 }
 
 impl Population {
-    fn total_seq_length(&self) -> usize {
-        self.pop.iter().map(|genome| genome.seq_length).sum()
+    fn total_seq_lengths(&self) -> (f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) {
+        let mut total_length = 0;
+        let mut total_exon_length = 0;
+        let mut total_intron_length = 0;
+        let mut total_intergenic_length = 0;
+        let mut total_te_cut_length = 0;
+        let mut total_te_copy_length = 0;
+        let mut total_tracking_length = 0;
+
+        let mut total_elements = 0;
+        let mut total_exon_elements = 0;
+        let mut total_intron_elements = 0;
+        let mut total_intergenic_elements = 0;
+        let mut total_te_cut_elements = 0;
+        let mut total_te_copy_elements = 0;
+        let mut total_tracking_elements = 0;
+
+        for genome in &self.pop {
+            total_length += genome.seq_length;
+            total_exon_length += genome.total_exon_length;
+            total_intron_length += genome.total_intron_length;
+            total_intergenic_length += genome.total_intergenic_length;
+            total_te_cut_length += genome.total_te_cut_length;
+            total_te_copy_length += genome.total_te_copy_length;
+            total_tracking_length += genome.total_tracking_length;
+
+            total_elements += genome.total_elements;
+            total_exon_elements += genome.total_exon_elements;
+            total_intron_elements += genome.total_intron_elements;
+            total_intergenic_elements += genome.total_intergenic_elements;
+            total_te_cut_elements += genome.total_te_cut_elements;
+            total_te_copy_elements += genome.total_te_copy_elements;
+            total_tracking_elements += genome.total_tracking_elements;
+        }
+
+        (
+            total_length as f64,
+            total_exon_length as f64,
+            total_intron_length as f64,
+            total_intergenic_length as f64,
+            total_te_cut_length as f64,
+            total_te_copy_length as f64,
+            total_tracking_length as f64,
+            total_elements as f64,
+            total_exon_elements as f64,
+            total_intron_elements as f64,
+            total_intergenic_elements as f64,
+            total_te_cut_elements as f64,
+            total_te_copy_elements as f64,
+            total_tracking_elements as f64,
+
+        )
     }
 
     fn is_te_feature(feature_type: &str) -> bool {
@@ -519,6 +637,19 @@ impl Population {
                 parent: "root".to_string(),
                 seq: genome.clone(),
                 seq_length: 0, // will be updated after mutations
+                total_exon_length: 0,
+                total_intron_length: 0,
+                total_intergenic_length: 0,
+                total_te_cut_length: 0,
+                total_te_copy_length: 0,
+                total_tracking_length: 0,
+                total_elements: 0,
+                total_exon_elements: 0,
+                total_intron_elements: 0,
+                total_intergenic_elements: 0,
+                total_te_cut_elements: 0,
+                total_te_copy_elements: 0,
+                total_tracking_elements: 0,
             };
             genome_entry.update_contig_starts();
             total_length += genome_entry.seq_length;
@@ -604,14 +735,36 @@ impl Population {
     }
 
     pub fn update_mu_dists(&mut self, mu_dist_vals: &Vec<f64>) {
-        let total_length = self.total_seq_length() as f64;
-        let n_genomes = self.pop.len() as f64;
-        let n_generations = self.n_generations as f64;
+        let (_, 
+            total_exon_length, 
+            total_intron_length, 
+            total_intergenic_length, 
+            total_te_cut_length, 
+            total_te_copy_length, 
+            total_tracking_length,
+            _,
+            total_exon_elements,
+            total_intron_elements,
+            total_intergenic_elements,
+            total_te_cut_elements,
+            total_te_copy_elements,
+            total_tracking_elements,
+        ) = self.total_seq_lengths();
 
+        let average_size_vector = vec![
+            total_exon_length / total_exon_elements.max(1.0),
+            total_intron_length / total_intron_elements.max(1.0),
+            total_intergenic_length / total_intergenic_elements.max(1.0),
+            total_te_cut_length / total_te_cut_elements.max(1.0),
+            total_te_copy_length / total_te_copy_elements.max(1.0),
+            total_tracking_length / total_tracking_elements.max(1.0)
+        ];
+
+        // update mutation distributions based on total element size in population
         let new_mu_dists: Vec<MutationDistribution> = mu_dist_vals
-            .into_iter()
-            .map(|mu| {
-                MutationDistribution::new_poisson(mu * total_length * n_genomes * n_generations)
+            .iter().enumerate()
+            .map(|(i, mu)| {
+                MutationDistribution::new_poisson(mu * average_size_vector[i])
                     .expect("Failed to create poisson distribution for mutation rates")
             })
             .collect();
@@ -759,6 +912,19 @@ impl Population {
                     parent: selected_genome.identifier.clone(),
                     seq: selected_genome.seq.clone(),
                     seq_length: selected_genome.seq_length,
+                    total_exon_length: selected_genome.total_exon_length,
+                    total_intron_length: selected_genome.total_intron_length,
+                    total_intergenic_length: selected_genome.total_intergenic_length,
+                    total_te_cut_length: selected_genome.total_te_cut_length,
+                    total_te_copy_length: selected_genome.total_te_copy_length,
+                    total_tracking_length: selected_genome.total_tracking_length,
+                    total_elements: selected_genome.total_elements,
+                    total_exon_elements: selected_genome.total_exon_elements,
+                    total_intron_elements: selected_genome.total_intron_elements,
+                    total_intergenic_elements: selected_genome.total_intergenic_elements,
+                    total_te_cut_elements: selected_genome.total_te_cut_elements,
+                    total_te_copy_elements: selected_genome.total_te_copy_elements,
+                    total_tracking_elements: selected_genome.total_tracking_elements,
                 }
             })
             .collect();
@@ -1515,6 +1681,19 @@ mod tests {
             parent: "test-parent".to_string(),
             seq,
             seq_length: 0,
+            total_exon_length: 0,
+            total_intron_length: 0,
+            total_intergenic_length: 0,
+            total_te_cut_length: 0,
+            total_te_copy_length: 0,
+            total_tracking_length: 0,
+            total_elements: 0,
+            total_exon_elements: 0,
+            total_intron_elements: 0,
+            total_intergenic_elements: 0,
+            total_te_cut_elements: 0,
+            total_te_copy_elements: 0,
+            total_tracking_elements: 0,
         }
     }
 

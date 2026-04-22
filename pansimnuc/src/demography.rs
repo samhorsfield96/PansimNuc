@@ -283,6 +283,19 @@ mod tests {
                 parent: "root".to_string(),
                 seq: Vec::new(),
                 seq_length: 0,
+                total_exon_length: 0,
+                total_intron_length: 0,
+                total_intergenic_length: 0,
+                total_te_cut_length: 0,
+                total_te_copy_length: 0,
+                total_tracking_length: 0,
+                total_elements: 0,
+                total_exon_elements: 0,
+                total_intron_elements: 0,
+                total_intergenic_elements: 0,
+                total_te_cut_elements: 0,
+                total_te_copy_elements: 0,
+                total_tracking_elements: 0,
             })
             .collect()
     }
