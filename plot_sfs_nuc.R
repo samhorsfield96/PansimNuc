@@ -313,6 +313,75 @@ p_both <- ggplot(stacked_sfs_data, aes(x = value, fill = variable)) +
 
 p_both
 
+# density plots
+p_minor_density <- ggplot(sfs_data, aes(x = minor_freq, fill = feature_type)) +
+  geom_histogram(
+    bins     = n_bins,
+    aes(y = ..density..),
+    boundary = 0,
+    colour   = NA,
+    position = "identity",
+    alpha    = 0.8
+  ) +
+  facet_grid(
+    rows = vars(interaction(pop_id, gen_id,
+                             sep = " / gen=", lex.order = TRUE)),
+    cols = vars(feature_type),
+    labeller = labeller(
+      .rows = function(x) paste0("pop=", sub(" / gen=", "  gen=", x))
+    ),
+    scales = "free_y"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 0.5),
+    breaks = seq(0, 0.5, by = 0.1),
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  labs(
+    x     = "Minor allele frequency",
+    y     = "Density"
+  ) +
+  scale_fill_npg() +
+  theme_light(base_size = 11) +
+  theme(legend.position = "none",
+        strip.text      = element_text(size = 9))
+
+p_minor_density
+
+p_both_density <- ggplot(stacked_sfs_data, aes(x = value, fill = variable)) +
+  geom_histogram(
+    bins     = n_bins,
+    aes(y = ..density..),
+    boundary = 0,
+    colour   = NA,
+    position = "identity",
+    alpha    = 0.8
+  ) +
+  facet_grid(
+    rows = vars(interaction(pop_id, gen_id,
+                            sep = " / gen=", lex.order = TRUE)),
+    cols = vars(feature_type),
+    labeller = labeller(
+      .rows = function(x) paste0("pop=", sub(" / gen=", "  gen=", x))
+    ),
+    scales = "free_y"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 1.0),
+    breaks = seq(0, 1.0, by = 0.1),
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  labs(
+    x     = "Allele frequency",
+    y     = "Density",
+    fill  = "Allele type"
+  ) +
+  scale_fill_npg() +
+  theme_light(base_size = 11) +
+  theme(strip.text = element_text(size = 9))
+
+p_both_density
+
 # ── Save ──────────────────────────────────────────────────────────────────────
 n_pops  <- n_distinct(sfs_data$pop_id)
 n_gens  <- n_distinct(sfs_data$gen_id)
@@ -321,11 +390,11 @@ n_types <- n_distinct(sfs_data$feature_type)
 pdf_w <- max(9, 4.5 * n_types)
 pdf_h <- max(6, 3 * n_pops * n_gens)
 
-out_pdf <- paste0(out_prefix, "_minor_alleles.pdf")
-ggsave(out_pdf, plot = p_minor, width = pdf_w, height = pdf_h)
+out_pdf <- paste0(out_prefix, "density_minor_alleles.pdf")
+ggsave(out_pdf, plot = p_minor_density, width = pdf_w, height = pdf_h)
 message("Saved: ", out_pdf)
-out_pdf <- paste0(out_prefix, "_all_alleles.pdf")
-ggsave(out_pdf, plot = p_both, width = pdf_w, height = pdf_h)
+out_pdf <- paste0(out_prefix, "density_all_alleles.pdf")
+ggsave(out_pdf, plot = p_both_density, width = pdf_w, height = pdf_h)
 message("Saved: ", out_pdf)
 
 out_csv <- paste0(out_prefix, "_sfs.csv")
