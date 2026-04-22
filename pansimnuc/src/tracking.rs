@@ -278,6 +278,7 @@ mod tests {
             recombination_rate: 0.0,
             recombination_size_mean: 1.0,
             site_mutation_mus_vals: vec![],
+            site_indel_mus_vals: vec![],
         };
 
         // Write tracking output (should append)
@@ -325,6 +326,7 @@ mod tests {
             recombination_rate: 0.0,
             recombination_size_mean: 1.0,
             site_mutation_mus_vals: vec![],
+            site_indel_mus_vals: vec![],
         };
 
         // Should panic because file doesn't exist

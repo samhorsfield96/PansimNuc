@@ -321,6 +321,7 @@ fn main() {
                         recombination_rate, 
                         recombination_size_mean, 
                         site_mutation_mus_vals,
+                        site_indel_mus_vals
                     );
 
                     println!("Finished initialising population...");

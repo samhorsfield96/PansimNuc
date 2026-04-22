@@ -656,11 +656,11 @@ impl Population {
             population.push(genome_entry);
         }
 
-        // generate mu_dists based on total population size and total sequence length, so that mutation rates are per base per genome generation
+        // placeholders, will be updated based on per-element average size in demography.rs
         let mu_dists = mu_dist_vals
             .into_iter()
             .map(|mu| {
-                MutationDistribution::new_poisson(mu * (total_length as f64) * (n_genomes as f64) * n_generations as f64)
+                MutationDistribution::new_poisson(*mu)
                     .expect("Failed to create poisson distribution for mutation rates")
             })
             .collect();
@@ -668,10 +668,11 @@ impl Population {
         let indel_dists = indel_dist_vals
             .into_iter()
             .map(|mu| {
-                MutationDistribution::new_poisson(mu * (total_length as f64) * (n_genomes as f64) * n_generations as f64)
+                MutationDistribution::new_poisson(*mu)
                     .expect("Failed to create poisson distribution for indel rates")
             })
             .collect();
+
 
         let core_vec: Vec<Vec<u8>> =
             vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16]];
@@ -684,7 +685,7 @@ impl Population {
             selection_dists,
             mu_dists,
             indel_dists,
-            structural_mu_dists: structural_mu_dists,
+            structural_mu_dists,
             recombination_dists,
             recombination_threshold,
             homology_map,
@@ -734,7 +735,7 @@ impl Population {
         (total_snps, total_indels)
     }
 
-    pub fn update_mu_dists(&mut self, mu_dist_vals: &Vec<f64>) {
+    pub fn update_mu_dists(&mut self, mu_dist_vals: &Vec<f64>, indel_dist_vals: &Vec<f64>) {
         let (_, 
             total_exon_length, 
             total_intron_length, 
@@ -768,7 +769,16 @@ impl Population {
                     .expect("Failed to create poisson distribution for mutation rates")
             })
             .collect();
+        let new_indel_dists: Vec<MutationDistribution> = indel_dist_vals
+            .iter().enumerate()
+            .map(|(i, mu)| {
+                MutationDistribution::new_poisson(mu * average_size_vector[i])
+                    .expect("Failed to create poisson distribution for indel rates")
+            })
+            .collect();
+
         self.mu_dists = new_mu_dists;
+        self.indel_dists = new_indel_dists;
     }
 
     pub fn structural_intra_genome(&mut self) {
