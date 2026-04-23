@@ -54,7 +54,6 @@ pub fn mutate_intra_genome(
 
     // store hashmap of positions of genome elements, can store multiple per entry to capture duplications
     let mut new_positions: HashMap<i64, Vec<(usize, i64)>> = HashMap::new();
-    let mut max_position: usize = 0;
 
     // check which contig each block will be inserted into
     let contig_starts = &genome.contig_starts;
@@ -68,11 +67,6 @@ pub fn mutate_intra_genome(
     let mut total_inversions = 0;
 
     for (current_pos, element) in &mut genome.seq.iter().enumerate() {
-        // determine maximum position
-        if current_pos > max_position {
-            max_position = current_pos;
-        }
-
         let mut mutation_dist: &Vec<MutationDistribution> = match element.feature_type.as_str() {
             "exon" => &structural_mu_dists[0],
             "intron" => &structural_mu_dists[1],
@@ -155,11 +149,6 @@ pub fn mutate_intra_genome(
 
             new_positions_vec.push((new_contig_id, new_pos));
 
-            // determine maximum position present
-            if new_pos as usize > max_position {
-                max_position = new_pos as usize;
-            }
-
             if dup_count > 0 && feature_type == "TE-CUT" {
                 // if element is a TE-COPY and has already been duplicated, break loop to prevent further duplications, to avoid runaway genome growth
                 break;
@@ -218,38 +207,53 @@ pub fn mutate_intra_genome(
     // generate new genome based on all intra-genome variation, current everything is 1-indexed
     let mut new_genome_seq: Vec<(usize, i64)> = Vec::new();
 
-    // iterate through each position, indexed by new position
-    for idx in 0..=max_position {
-        if let Some(prev_pos) = new_positions.get(&(idx as i64)) {
-            // value exists
-            for entry in prev_pos {
-                if entry.1 == 0 {
-                    panic!(
-                        "Entry for structural varient is 0, for position {} in genome {}",
-                        idx, genome.identifier
-                    );
-                }
+    // sort actual keys instead of iterating a sparse 0..=max_position range,
+    // which could be enormous when duplications land far from the current position
+    let mut sorted_positions: Vec<i64> = new_positions.keys().copied().collect();
+    sorted_positions.sort_unstable();
 
-                // append entry, meaning that genes are not deleted, appended in order
-                new_genome_seq.push(*entry);
+    for idx in sorted_positions {
+        for entry in &new_positions[&idx] {
+            if entry.1 == 0 {
+                panic!(
+                    "Entry for structural varient is 0, for position {} in genome {}",
+                    idx, genome.identifier
+                );
             }
+
+            // append entry, meaning that genes are not deleted, appended in order
+            new_genome_seq.push(*entry);
         }
     }
 
     // generate new genome
-    let mut new_genome: Vec<NucElement> = Vec::new();
+    // count how many times each source index is referenced so we can move
+    // single-reference elements instead of cloning them, avoiding a full
+    // duplicate of genome.seq in memory for the common (no-duplication) case
+    let mut ref_counts: Vec<usize> = vec![0usize; genome.seq.len()];
+    for &(_, element_idx) in &new_genome_seq {
+        ref_counts[element_idx.abs() as usize - 1] += 1;
+    }
+
+    let mut source: Vec<Option<NucElement>> = genome.seq.drain(..).map(Some).collect();
+    let mut new_genome: Vec<NucElement> = Vec::with_capacity(new_genome_seq.len());
 
     for (contig_id, element_idx) in new_genome_seq {
-        let invert: bool = if element_idx > 0 { false } else { true };
-        let mut new_element = genome.seq[element_idx.abs() as usize - 1].clone(); // convert back to 0 indexed
+        let invert = element_idx < 0;
+        let src_idx = element_idx.abs() as usize - 1;
+
+        ref_counts[src_idx] -= 1;
+        let mut new_element = if ref_counts[src_idx] == 0 {
+            // last (or only) reference — move instead of clone
+            source[src_idx].take().unwrap()
+        } else {
+            source[src_idx].as_ref().unwrap().clone()
+        };
 
         if invert {
             new_element.strand = !new_element.strand;
         }
-
-        // update contig id
         new_element.contig_id = contig_id;
-
         new_genome.push(new_element);
     }
 
