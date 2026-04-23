@@ -17,6 +17,7 @@ use rayon::{prelude::*};
 
 /// Returns a similarity score in [0.0, 1.0] based on normalized edit distance.
 /// 1.0 = identical, 0.0 = completely different.
+#[hotpath::measure]
 fn calculate_homology(a: &NucElement, b: &NucElement, threshold: f64) -> f64 {
     let s: &[u8] = a.seq.as_slice();
     let t: &[u8] = b.seq.as_slice();
@@ -41,6 +42,7 @@ fn calculate_homology(a: &NucElement, b: &NucElement, threshold: f64) -> f64 {
 }
 
 // write function which runs through each element and determines whether a structural mutation occurs, and if so, which one, and where it moves to.
+#[hotpath::measure]
 pub fn mutate_intra_genome(
     genome: &mut Genome,
     structural_mu_dists: &Vec<Vec<MutationDistribution>>,
@@ -266,6 +268,7 @@ pub fn mutate_intra_genome(
 }
 
 // get connected components
+#[hotpath::measure]
 fn connected_components(
     nodes: impl IntoIterator<Item = u32>,
     edges: &Vec<(u32, u32)>,
@@ -307,6 +310,7 @@ fn connected_components(
     components
 }
 
+#[hotpath::measure]
 pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize) {
     let mut rng = rand::thread_rng();
 

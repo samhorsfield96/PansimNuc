@@ -446,6 +446,7 @@ pub struct MutationMap {
     data: [FxHashMap<usize, f64>; 5],
 }
 
+#[hotpath::measure_all]
 impl MutationMap {
     fn allele_to_index(level: u8) -> Option<usize> {
         // Convert one-hot allele code to zero-based index using bit shifting:

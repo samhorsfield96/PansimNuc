@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct NucElement {
@@ -79,7 +80,7 @@ pub struct Genome {
     pub genome_id: usize,
     pub contig_starts: Vec<usize>,
     pub parent: String,
-    pub seq: Vec<NucElement>,
+    pub seq: Arc<Vec<NucElement>>,
     pub seq_length: usize,
     pub total_exon_length: usize,
     pub total_intron_length: usize,
@@ -96,6 +97,7 @@ pub struct Genome {
     pub total_tracking_elements: usize,
 }
 
+#[hotpath::measure_all]
 impl Genome {
     pub fn update_contig_starts(&mut self) {
         self.contig_starts.clear();
@@ -187,6 +189,7 @@ pub struct Population {
     pub optimal_genome_size: usize,
 }
 
+#[hotpath::measure_all]
 impl Population {
     pub fn total_seq_lengths(&self) -> (f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) {
         let mut total_length = 0;
@@ -635,7 +638,7 @@ impl Population {
                 genome_id: i,
                 contig_starts: Vec::new(), // will be updated after mutations
                 parent: "root".to_string(),
-                seq: genome.clone(),
+                seq: genome.clone().into(), // convert to Arc for shared ownership and potential memory savings
                 seq_length: 0, // will be updated after mutations
                 total_exon_length: 0,
                 total_intron_length: 0,
@@ -710,8 +713,7 @@ impl Population {
             .pop
             .par_iter_mut()
             .map(|genome| {
-                genome
-                    .seq
+                Arc::make_mut(&mut genome.seq)
                     .iter_mut()
                     .fold((0, 0), |(snps, indels), element| {
                         let (s, i) = element.mutation_map.mutate(
@@ -1701,7 +1703,7 @@ mod tests {
             genome_id: 0,
             contig_starts: vec![0],
             parent: "test-parent".to_string(),
-            seq,
+            seq: seq.clone().into(),
             seq_length: 0,
             total_exon_length: 0,
             total_intron_length: 0,

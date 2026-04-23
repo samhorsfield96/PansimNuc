@@ -17,6 +17,7 @@ pub struct MetaPopulation {
     pub site_indel_mus_vals: Vec<f64>,
 }
 
+#[hotpath::measure_all]
 impl MetaPopulation {
     pub fn new(
         population: Population, 
