@@ -765,15 +765,27 @@ impl Population {
         let new_mu_dists: Vec<MutationDistribution> = mu_dist_vals
             .iter().enumerate()
             .map(|(i, mu)| {
-                MutationDistribution::new_poisson(mu * average_size_vector[i])
-                    .expect("Failed to create poisson distribution for mutation rates")
+                if average_size_vector[i] != 0.0 {
+                    MutationDistribution::new_poisson(mu * average_size_vector[i])
+                     .expect("Failed to create poisson distribution for mutation rates")
+                } else {
+                    // no elements left, just set to mu
+                    MutationDistribution::new_poisson(*mu)
+                     .expect("Failed to create poisson distribution for mutation rates with zero average size")
+                }
             })
             .collect();
         let new_indel_dists: Vec<MutationDistribution> = indel_dist_vals
             .iter().enumerate()
             .map(|(i, mu)| {
-                MutationDistribution::new_poisson(mu * average_size_vector[i])
-                    .expect("Failed to create poisson distribution for indel rates")
+                if average_size_vector[i] != 0.0 {
+                    MutationDistribution::new_poisson(mu * average_size_vector[i])
+                     .expect("Failed to create poisson distribution for indel rates")
+                } else {
+                    // no elements left, just set to mu
+                    MutationDistribution::new_poisson(*mu)
+                     .expect("Failed to create poisson distribution for indel rates with zero average size")
+                }   
             })
             .collect();
 
