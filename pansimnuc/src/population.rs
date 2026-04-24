@@ -28,12 +28,13 @@ pub struct NucElement {
     pub strand: bool,
     pub original_length: usize,
     pub frameshift: bool,
-    pub tracked: bool
+    pub tracked: bool,
+    pub selection_coeff: f64
 }
 
 #[hotpath::measure_all]
 impl NucElement {
-    fn element_selection_coefficient(&self) -> f64 {
+    fn calculate_element_selection_coefficient(&mut self) {
         let mut element_log_sum = 0.0;
 
         for (site, allele) in self.seq.iter().enumerate() {
@@ -52,7 +53,7 @@ impl NucElement {
                 );
             }
         }
-        element_log_sum
+        self.selection_coeff = element_log_sum;
     }
 
     pub fn generate_selection_coefficients(&self) -> Vec<f64> {
@@ -442,7 +443,7 @@ impl Population {
 
             // if feature not broken, add up sites
             if !feature_broken {
-                element_log_sum += element.element_selection_coefficient();
+                element_log_sum += element.selection_coeff; // add pre-calculated selection coefficient for element, which is sum of site coefficients
                 
                 // if any value is zero, product is zero so genome selection coefficient is zero
                 if element_log_sum == std::f64::NEG_INFINITY {
@@ -597,7 +598,11 @@ impl Population {
                     original_length: feature.seq.len(),
                     frameshift: false,
                     tracked: false,
+                    selection_coeff: 0.0 // placeholder
                 };
+
+                // generate selection coefficient
+                element.calculate_element_selection_coefficient();
 
                 // determine if element is tracked and if so update mutation map accordingly
                 if is_tracking {
@@ -737,6 +742,8 @@ impl Population {
                                 n_indels,
                                 &mut thread_rng,
                             );
+                            // update selection coefficient for element based on new sequence
+                            element.calculate_element_selection_coefficient();
                             (snps + s, indels + i)
                         }
                     })
@@ -1090,7 +1097,7 @@ impl Population {
 
                 // calculate element selection coefficient
                 let log_element_selection_coefficient =
-                    element.element_selection_coefficient();
+                    element.selection_coeff;
                 let element_selection_coefficient =
                     if log_element_selection_coefficient == std::f64::NEG_INFINITY {
                         0.0
@@ -1930,7 +1937,7 @@ mod tests {
             mutation_map.set_for_test(*allele, *site, *coeff);
         }
 
-        NucElement {
+        let mut element = NucElement {
             contig_id: 0,
             element_id: 0,
             feature_id: feature_id,
@@ -1942,7 +1949,10 @@ mod tests {
             original_length: seq.len(),
             frameshift: false,
             tracked: false,
-        }
+            selection_coeff: 0.0,
+        };
+        element.calculate_element_selection_coefficient();
+        element
     }
 
     #[test]
@@ -1954,7 +1964,7 @@ mod tests {
             &coefficients,
         );
 
-        let log_sum = element.element_selection_coefficient();
+        let log_sum = element.selection_coeff;
         assert_eq!(log_sum, std::f64::NEG_INFINITY);
     }
 
@@ -1973,7 +1983,7 @@ mod tests {
 
         let expected = val1.ln() + val2.ln() + val3.ln();
 
-        let log_sum = element.element_selection_coefficient();
+        let log_sum = element.selection_coeff;
 
         assert!(log_sum == expected);
     }

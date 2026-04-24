@@ -135,6 +135,7 @@ mod tests {
             original_length: seq_len,
             frameshift: false,
             tracked: false,
+            selection_coeff: 0.0,
         }
     }
 
