@@ -10,6 +10,7 @@ use rustc_hash::FxHashMap;
 use statrs::distribution::Poisson;
 use std::collections::HashMap;
 use std::fmt;
+use std::os::unix::thread;
 use crate::population::NucElement;
 
 #[derive(Debug)]
@@ -549,11 +550,9 @@ impl MutationMap {
         core_vec: &Vec<Vec<u8>>,
         seq: &mut Vec<u8>,
         selection_dist: &Distribution,
-        mu_dist: &Distribution,
+        n_sites: usize,
         thread_rng: &mut ThreadRng
     ) -> usize {
-        // sample from Poisson distribution for number of sites to mutate in this isolate
-        let n_sites = mu_dist.sample(thread_rng) as usize;
         let seq_len = seq.len();
         let sampled_sites = (0..seq_len).choose_multiple(thread_rng, n_sites);
 
@@ -595,12 +594,9 @@ impl MutationMap {
         core_vec: &Vec<Vec<u8>>,
         seq: &mut Vec<u8>,
         selection_dist: &Distribution,
-        indel_dist: &Distribution,
+        n_sites: usize,
         thread_rng: &mut ThreadRng
     ) -> usize {
-        // sample from Poisson distribution for number of sites to mutate in this isolate
-        let n_sites = indel_dist.sample(thread_rng) as usize;
-
         // iterate for number of mutations required to reach mutation rate
         // needs to be dynamic to allow for changes in sequence length from indels
         for _ in 0..n_sites {
@@ -653,15 +649,13 @@ impl MutationMap {
         original_length: usize,
         frameshift: &mut bool,
         selection_dist: &Distribution,
-        mu_dist: &Distribution,
-        indel_dist: &Distribution,
+        n_snps: usize,
+        n_indels: usize,
+        thread_rng: &mut ThreadRng
     ) -> (usize, usize) {
-        // thread-specific random number generator
-        let mut thread_rng = rand::thread_rng();
-
         // mutate SNPs
-        let n_snps = self.mutate_snps(core_vec, seq, selection_dist, mu_dist, &mut thread_rng);
-        let n_indels = self.mutate_indels(core_vec, seq, selection_dist, indel_dist, &mut thread_rng);
+        let n_snps = self.mutate_snps(core_vec, seq, selection_dist, n_snps, thread_rng);
+        let n_indels = self.mutate_indels(core_vec, seq, selection_dist, n_indels, thread_rng);
 
         // update frameshift status
         if n_indels > 0 {
@@ -945,6 +939,7 @@ mod tests {
     #[test]
     fn test_n_allele_is_non_mutable_and_unmapped() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut thread_rng = rand::thread_rng();
         let selection_dist =
             Distribution::new_uniform(0.0, 1.0).expect("failed to create selection distribution");
         let mu_dist =
@@ -958,8 +953,11 @@ mod tests {
         let original_length = seq.len();
         let original_n_sites: Vec<u8> = seq.iter().copied().filter(|&x| x == 16).collect();
 
+        let n_snps = mu_dist.sample(&mut rng) as usize;
+        let n_indels = indel_dist.sample(&mut rng) as usize;
+
         let mut map = MutationMap::new(0, 0, &seq, &selection_dist, &mut rng);
-        map.mutate(&core_vec, &mut seq, original_length, &mut false, &selection_dist, &mu_dist, &indel_dist);
+        map.mutate(&core_vec, &mut seq, original_length, &mut false, &selection_dist, n_snps, n_indels, &mut thread_rng);
 
         assert_eq!(seq[0], 16);
         assert_eq!(seq[2], 16);
@@ -976,6 +974,7 @@ mod tests {
     // test that map is updated many times, and that selection cofficients generated remain same after many mutations
     fn test_mutation_map_consistency_after_mutations() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut thread_rng = rand::thread_rng();
         let selection_dist =
             Distribution::new_uniform(1e-10, 1e10).expect("failed to create selection distribution");
         let mu_dist =
@@ -993,7 +992,9 @@ mod tests {
 
         // mutate many times with very low mutation rates to ensure map is updated but sequence does not change
         for _ in 0..100 {
-            map.mutate(&core_vec, &mut seq, original_length, &mut false, &selection_dist, &mu_dist, &indel_dist);
+            let n_snps = mu_dist.sample(&mut rng) as usize;
+            let n_indels = indel_dist.sample(&mut rng) as usize;
+            map.mutate(&core_vec, &mut seq, original_length, &mut false, &selection_dist, n_snps, n_indels, &mut thread_rng);
             assert_eq!(seq.len(), original_length);
             assert_eq!(map.data.len(), original_map_state.len());
             for (allele_map, original_allele_map) in map.data.iter().zip(original_map_state.iter()) {
@@ -1008,6 +1009,7 @@ mod tests {
     #[test]
     fn test_indels_change_sequence_length() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut thread_rng = rand::thread_rng();
         let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
         // Large sequence so many indels fire; zero SNP rate so only indels mutate
         let seq: Vec<u8> = vec![1u8; 100];
@@ -1022,7 +1024,9 @@ mod tests {
             vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16],
         ];
 
-        map.mutate(&core_vec, &mut seq_mut, seq.len(), &mut false, &dist, &mu_dist, &indel_dist);
+        let n_snps = mu_dist.sample(&mut rng) as usize;
+        let n_indels = indel_dist.sample(&mut rng) as usize;
+        map.mutate(&core_vec, &mut seq_mut, seq.len(), &mut false, &dist, n_snps, n_indels, &mut thread_rng);
 
         // With 1000 indels on a seed that produces ~50% insertions, final length must differ
         assert_ne!(seq_mut.len(), seq.len());
@@ -1143,6 +1147,7 @@ mod tests {
     #[test]
     fn test_frameshift_flag_matches_length_change_mod3() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut thread_rng = rand::thread_rng();
         let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
         let seq: Vec<u8> = vec![1u8; 100];
         let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
@@ -1156,7 +1161,9 @@ mod tests {
         ];
 
         let mut frameshift = true;
-        map.mutate(&core_vec, &mut seq_mut, original_length, &mut frameshift, &dist, &mu_dist, &indel_dist);
+        let n_snps = mu_dist.sample(&mut thread_rng) as usize;
+        let n_indels = indel_dist.sample(&mut thread_rng) as usize;
+        map.mutate(&core_vec, &mut seq_mut, original_length, &mut frameshift, &dist, n_snps, n_indels, &mut thread_rng);
 
         let expected = seq_mut.len().abs_diff(original_length) % 3 != 0;
         println!("Original length: {}, New length: {}, Frameshift: {}, Expected frameshift: {}", original_length, seq_mut.len(), frameshift, expected);
@@ -1166,6 +1173,7 @@ mod tests {
     #[test]
     fn test_frameshift_not_updated_when_no_indels() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut thread_rng = rand::thread_rng();
         let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
         let seq: Vec<u8> = vec![1u8; 12];
         let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
@@ -1179,7 +1187,9 @@ mod tests {
 
         // Start with frameshift already set; expect it to remain unchanged when no indels fire
         let mut frameshift = true;
-        map.mutate(&core_vec, &mut seq_mut, seq.len(), &mut frameshift, &dist, &mu_dist, &indel_dist);
+        let n_snps = mu_dist.sample(&mut thread_rng) as usize;
+        let n_indels = indel_dist.sample(&mut thread_rng) as usize;
+        map.mutate(&core_vec, &mut seq_mut, seq.len(), &mut frameshift, &dist, n_snps, n_indels, &mut thread_rng);
 
         assert!(frameshift);
     }

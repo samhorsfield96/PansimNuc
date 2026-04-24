@@ -713,21 +713,32 @@ impl Population {
             .pop
             .par_iter_mut()
             .map(|genome| {
+                let mut thread_rng = rand::thread_rng();
                 genome.seq
                     .iter_mut()
                     .fold((0, 0), |(snps, indels), element| {
                         let selection_dist_id = element.mutation_map.selection_dist_id;
                         let mu_dist_id = element.mutation_map.mu_dist_id;
-                        let (s, i) = Arc::make_mut(&mut element.mutation_map).mutate(
-                            core_vec,
-                            Arc::make_mut(&mut element.seq),
-                            element.original_length,
-                            &mut element.frameshift,
-                            &selection_dists[selection_dist_id],
-                            &mu_dists[mu_dist_id],
-                            &indel_dists[mu_dist_id],
-                        );
-                        (snps + s, indels + i)
+
+                        // determine if element will mutate, otherwise skip to avoid unnecessary calculations and copies
+                        let n_snps = mu_dists[mu_dist_id].sample(&mut thread_rng) as usize;
+                        let n_indels = indel_dists[mu_dist_id].sample(&mut thread_rng) as usize;
+                        if n_snps == 0 && n_indels == 0 {
+                            (snps, indels)
+                        } else {
+                            // otherwise mutate element and update mutation map, this will return number of snps and indels that occurred
+                            let (s, i) = Arc::make_mut(&mut element.mutation_map).mutate(
+                                core_vec,
+                                Arc::make_mut(&mut element.seq),
+                                element.original_length,
+                                &mut element.frameshift,
+                                &selection_dists[selection_dist_id],
+                                n_snps,
+                                n_indels,
+                                &mut thread_rng,
+                            );
+                            (snps + s, indels + i)
+                        }
                     })
             })
             .reduce(|| (0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1));
