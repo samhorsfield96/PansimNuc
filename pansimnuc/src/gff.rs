@@ -262,6 +262,20 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
                 }
                 continue;
             }
+            // same for introns on the other side of intergenic regions
+            else if last.feature_type == "intron"
+                && current.feature_type == "intergenic"
+                && last.end >= current.start
+            {
+                last.end = last.end.max(current.end);
+                last.feature_id = 0;
+                last.strand = true;
+                last.feature_type = "intergenic".to_string();
+                if last.start < last.end && last.end <= contig_seq.len() {
+                    last.seq = encode_dna(&contig_seq[last.start..last.end]);
+                }
+                continue;
+            }
         }
 
         normalized.push(current);
@@ -270,11 +284,14 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
     *features = normalized;
 }
 
-pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePos>>> {
+pub fn extract_feature_positions(file_gff: File) -> io::Result<(Vec<Vec<FeaturePos>>, Vec<String>)> {
     let mut gff_reader = gff::io::Reader::new(BufReader::new(file_gff));
 
     // keep track of current feature ID, dictacted by gene and its upstream region
     let mut current_feature_id: usize = 1;
+
+    // generate a map from contig names to IDs
+    let mut contig_name_to_id: Vec<String> = Vec::new();
 
     // hold features
     let mut features: Vec<Vec<FeaturePos>> = Vec::new();
@@ -292,6 +309,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
             contig_id += 1;
             prev_seqname = seqname.clone();
             features.push(Vec::new());
+            contig_name_to_id.push(seqname);
         }
 
         // get last record if present
@@ -405,18 +423,18 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<Vec<Vec<FeaturePo
         }
     }
 
-    Ok(features)
+    Ok((features, contig_name_to_id))
 }
 
 pub fn read_gff_lines(
     gff_path: &str,
     fasta_path: &str,
     earlgrey_gff_path: Option<&str>,
-) -> io::Result<Vec<Vec<FeaturePos>>> {
+) -> io::Result<(Vec<Vec<FeaturePos>>, Vec<String>)> {
     let file_gff = File::open(gff_path)?;
     let file_fasta = File::open(fasta_path)?;
 
-    let mut features = extract_feature_positions(file_gff)?;
+    let (mut features, contig_name_to_id) = extract_feature_positions(file_gff)?;
 
     // Load FASTA records into memory keyed by contig name.
     let mut fasta_reader = fasta::io::Reader::new(BufReader::new(file_fasta));
@@ -490,7 +508,7 @@ pub fn read_gff_lines(
         }
     }
 
-    Ok(features)
+    Ok((features, contig_name_to_id))
 }
 
 #[cfg(test)]
@@ -536,7 +554,7 @@ ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
         let result = read_gff_lines(&gff_file, &fasta_file, None);
         assert!(result.is_ok());
 
-        let features = result.unwrap();
+        let (features, contig_name_to_id) = result.unwrap();
         assert_eq!(features.len(), 2);
 
         // Check coordinates for contig1 exon
@@ -575,7 +593,7 @@ contig2\t.\texon\t50\t150\t.\t+\t.\tID=exon2";
         let result = extract_feature_positions(file);
         assert!(result.is_ok());
 
-        let features = result.unwrap();
+        let (features, contig_name_to_id) = result.unwrap();
 
         // Check coordinates for contig1 exon
         let contig1_features = &features[0];
@@ -611,7 +629,7 @@ contig1\t.\texon\t30\t40\t.\t+\t.\tID=exon2";
         let result = extract_feature_positions(file);
         assert!(result.is_ok());
 
-        let features = result.unwrap();
+        let (features, contig_name_to_id) = result.unwrap();
         assert_eq!(features.len(), 1);
 
         let contig_features = &features[0];
@@ -672,7 +690,7 @@ contig2\t.\texon\t80\t100\t.\t-\t.\tID=c2g2e2";
         let result = extract_feature_positions(file);
         assert!(result.is_ok());
 
-        let features = result.unwrap();
+        let (features, contig_name_to_id) = result.unwrap();
         assert_eq!(features.len(), 2);
 
         for contig_features in &features {
@@ -757,7 +775,7 @@ contig1\t.\texon\t20\t50\t.\t+\t.\tID=gene2_exon1";
         let result = extract_feature_positions(file);
         assert!(result.is_ok());
 
-        let features = result.unwrap();
+        let (features, contig_name_to_id) = result.unwrap();
         assert_eq!(features.len(), 1);
         let contig_features = &features[0];
 
@@ -810,7 +828,7 @@ contig1\t.\tUnclassified\t140\t145\t.\t+\t.\tID=skip_me";
         let result = read_gff_lines(&gff_file, &fasta_file, Some(&earlgrey_file));
         assert!(result.is_ok());
 
-        let features = result.unwrap();
+        let (features, contig_name_to_id) = result.unwrap();
         assert_eq!(features.len(), 1);
         let contig_features = &features[0];
 
@@ -912,7 +930,7 @@ contig1\t.\tLINE\t35\t45\t.\t-\t.\tID=te_copy_2";
         let result = read_gff_lines(&gff_file, &fasta_file, Some(&earlgrey_file));
         assert!(result.is_ok());
 
-        let features = result.unwrap();
+        let (features, contig_name_to_id) = result.unwrap();
         assert_eq!(features.len(), 1);
         let contig_features = &features[0];
         assert!(!contig_features.is_empty());
@@ -1049,7 +1067,7 @@ contig2\t.\tUnclassified\t22\t24\t.\t+\t.\tID=skip_me";
         let result = read_gff_lines(&gff_file, &fasta_file, Some(&earlgrey_file));
         assert!(result.is_ok());
 
-        let features = result.unwrap();
+        let (features, contig_name_to_id) = result.unwrap();
         assert_eq!(features.len(), 2);
 
         let contig1_features = &features[0];

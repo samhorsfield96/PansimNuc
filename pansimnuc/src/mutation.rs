@@ -1,11 +1,15 @@
+// TODO each element mutation map needs to be shared globally, 
+//at the moment it is only found in a specific individual and so if a mutation goes
+// extinct, we lose tracking of that allele, effect should be maintained globally
+
 use rand::Rng;
 use rand::rngs::{StdRng, ThreadRng};
 use rand::seq::IteratorRandom;
 use rand_distr::{Distribution as RandDist, Exp, Normal, Uniform, Gamma};
-use rustc_hash::FxHashMap;
 use statrs::distribution::Poisson;
 use std::collections::HashMap;
 use std::fmt;
+use std::os::unix::thread;
 use crate::population::NucElement;
 
 #[derive(Debug)]
@@ -168,20 +172,21 @@ impl DoubleExponential {
 
     pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
         let weight = self.weight_rng.sample(rng);
-        let mut selection_coefficient = 0.0;
 
         if weight <= self.cutoff {
             // Higher selected gene
-            selection_coefficient = self.exp2.sample(rng);
+            return self.exp2.sample(rng);
         } else {
             // lower selected gene
-            // keep sampling until below 1, mimicking selection coefficient sampling
-            while selection_coefficient >= 1.0 {
+            // keep sampling until <= 1, mimicking selection coefficient sampling
+            let mut selection_coefficient = 2.0;
+
+            while selection_coefficient > 1.0 {
                 selection_coefficient = self.exp1.sample(rng);
             }
+            selection_coefficient *= -1.0; // make negative for deleterious mutations
+            return selection_coefficient;
         }
-
-        selection_coefficient
     }
 }
 
@@ -438,34 +443,19 @@ impl Distribution {
 pub struct MutationMap {
     pub selection_dist_id: usize,
     pub mu_dist_id: usize,
-    data: [FxHashMap<usize, f64>; 5],
+    data: [Vec<Option<f64>>; 5],
 }
 
 impl MutationMap {
     fn allele_to_index(level: u8) -> Option<usize> {
-        // Convert one-hot allele code to zero-based index using bit shifting:
-        // 1 -> 0, 2 -> 1, 4 -> 2, 8 -> 3.
-        // N (16) is represented at index 4.
-        if level == 16 {
-            return Some(4);
+        match level {
+            1 => Some(0),
+            2 => Some(1),
+            4 => Some(2),
+            8 => Some(3),
+            16 => Some(4),
+            _ => panic!("Allele code must be one-hot (1, 2, 4, 8, 16); got {}", level),
         }
-
-        if level == 0 || (level & (level - 1)) != 0 {
-            panic!("Allele code must be one-hot (1, 2, 4, 8); got {}", level);
-        }
-
-        let mut idx = 0usize;
-        let mut value = level;
-        while value > 1 {
-            value >>= 1;
-            idx += 1;
-        }
-
-        if idx >= 4 {
-            panic!("Allele code out of range for A/C/G/T map: {}", level);
-        }
-
-        Some(idx)
     }
 
     pub fn new(
@@ -475,12 +465,12 @@ impl MutationMap {
         selection_dist: &Distribution,
         rng: &mut StdRng,
     ) -> Self {
-        let mut data = std::array::from_fn(|_| FxHashMap::default());
+        let mut data = std::array::from_fn(|_| vec![None; seq.len()]);
 
         for (site, allele) in seq.iter().enumerate() {
             let allele_index = Self::allele_to_index(*allele)
                 .expect("Allele code conversion failed while building mutation map");
-            data[allele_index].insert(site, selection_dist.sample(rng));
+            data[allele_index][site] = Some(selection_dist.sample(rng));
         }
 
         Self {
@@ -490,35 +480,19 @@ impl MutationMap {
         }
     }
 
-    fn update_data (&mut self, site: usize, is_insertion: bool) {
-        // if is_insertion, need to shift all existing keys at this site and above up by 1 to account for new site
+    fn update_data (&mut self, site: usize, is_insertion: bool, sequence_length: usize) {
+        // if is_insertion, duplicate the current site entry and shift all later sites up by one
         if is_insertion {
             for allele_map in self.data.iter_mut() {
-                let num_sites = allele_map.len();
-                
-                // start at end to correctly handle shifting keys without overwriting existing entries before they are processed
-                for key in (site..num_sites).rev() {
-                    if let Some(value) = allele_map.get(&key) {
-                        allele_map.insert(key + 1, *value);
-                    }
-                }
+                let existing_value = allele_map.get(site).copied().flatten();
+                allele_map.insert(site, existing_value);
             }
         } else {
-            // deletion: need to remove any entries for this site and shift down keys above this site
+            // deletion: remove this site and shift later sites down by one
             for allele_map in self.data.iter_mut() {
-                let num_sites = allele_map.len();
-                allele_map.remove(&site);
-                if num_sites == 0 {
-                    continue;
+                if site < sequence_length {
+                    allele_map.remove(site);
                 }
-                // start at site + 1 to shift down keys above the deleted site
-                for key in site + 1..num_sites {
-                    if let Some(value) = allele_map.get(&key) {
-                        allele_map.insert(key - 1, *value);
-                    }
-                }
-                // remove the last key which is now duplicated after shifting down
-                allele_map.remove(&(num_sites - 1));
             }
         }
     }
@@ -526,13 +500,16 @@ impl MutationMap {
     fn insert(&mut self, level: u8, key: usize, value: f64) {
         let allele_index = Self::allele_to_index(level)
             .expect("Cannot insert selection coefficient for invalid allele code");
-        self.data[allele_index].insert(key, value);
+        if self.data[allele_index].len() <= key {
+            self.data[allele_index].resize(key + 1, None);
+        }
+        self.data[allele_index][key] = Some(value);
     }
 
     pub fn get(&self, level: u8, key: usize) -> Option<&f64> {
         let allele_index = Self::allele_to_index(level)
             .expect("Cannot lookup selection coefficient for invalid allele code");
-        self.data[allele_index].get(&key)
+        self.data[allele_index].get(key).and_then(Option::as_ref)
     }
 
     #[cfg(test)]
@@ -540,25 +517,27 @@ impl MutationMap {
         self.insert(level, key, value);
     }
 
-    fn mutate_SNPs (
+    fn mutate_snps(
         &mut self,
         core_vec: &Vec<Vec<u8>>,
         seq: &mut Vec<u8>,
         selection_dist: &Distribution,
-        mu_dist: &Distribution,
+        n_sites: usize,
         thread_rng: &mut ThreadRng
     ) -> usize {
-        // sample from Poisson distribution for number of sites to mutate in this isolate
-        let n_sites = mu_dist.sample(thread_rng) as usize;
         let seq_len = seq.len();
-        let sampled_sites = (0..seq_len).choose_multiple(thread_rng, n_sites);
+        if seq_len == 0 {
+            return 0;
+        }
+
+        let n_draws = n_sites.min(seq_len);
+        let sampled_sites = (0..seq_len).choose_multiple(thread_rng, n_draws);
 
         // iterate for number of mutations required to reach mutation rate
         for mutant_site in sampled_sites {
             // sample new site to mutate
             let value = seq[mutant_site];
 
-            // N is stored in the map but should not be mutated; skip
             if value == 16 {
                 continue;
             }
@@ -568,23 +547,21 @@ impl MutationMap {
             let values = &core_vec[allele_index];
 
             // sample new allele
-            let new_allele = values.iter().choose_multiple(thread_rng, 1)[0];
-            let mut selection_coefficient: f64 = 0.0;
+            let new_allele = values[thread_rng.gen_range(0..values.len())];
 
             // generate new selection coefficient for this mutation if necessary, otherwise retrieve existing one
-            if let Some(coeff) = self.get(*new_allele, mutant_site) {
+            if let Some(_) = self.get(new_allele, mutant_site) {
                 // value exists
-                selection_coefficient = *coeff;
+                continue;
             } else {
-                selection_coefficient = selection_dist.sample(thread_rng);
+                let selection_coefficient = selection_dist.sample(thread_rng);
+                self.insert(new_allele, mutant_site, selection_coefficient);
             }
 
             // set value in place
-            seq[mutant_site] = *new_allele;
-            self.insert(*new_allele, mutant_site, selection_coefficient);
+            seq[mutant_site] = new_allele;
         }
-        n_sites
-
+        n_draws
     }
 
     fn mutate_indels (
@@ -592,39 +569,46 @@ impl MutationMap {
         core_vec: &Vec<Vec<u8>>,
         seq: &mut Vec<u8>,
         selection_dist: &Distribution,
-        indel_dist: &Distribution,
+        n_sites: usize,
         thread_rng: &mut ThreadRng
     ) -> usize {
-        // sample from Poisson distribution for number of sites to mutate in this isolate
-        let n_sites = indel_dist.sample(thread_rng) as usize;
-
         // iterate for number of mutations required to reach mutation rate
         // needs to be dynamic to allow for changes in sequence length from indels
         for _ in 0..n_sites {
             // sample new site to mutate
             let seq_len = seq.len();
-            let mutant_site = thread_rng.gen_range(0..seq_len);
-            let value = seq[mutant_site];
+
+            let mut mutant_site = 0;
+            let mut value = 1;
+            
+            // protect against empty sequence edge case where no deletions can occur
+            if seq_len != 0 {
+                mutant_site = thread_rng.gen_range(0..seq_len);
+                value = seq[mutant_site];
+            }
 
             // N is stored in the map but should not be mutated; skip
             if value == 16 {
                 continue;
             }
 
-            // determine whether will be insertion or deletion
-            let is_insertion = thread_rng.gen_bool(0.5);
+            // determine whether will be insertion or deletion, set to insertion if empty already
+            let mut is_insertion = true;
+            if seq_len != 0 {
+                is_insertion = thread_rng.gen_bool(0.5);
+            }
 
             // update data for selection coefficient
-            self.update_data(mutant_site, is_insertion);
+            self.update_data(mutant_site, is_insertion, seq_len);
 
             if is_insertion {
                 // insertion: sample new allele to insert
-                let new_allele = core_vec[4].iter().choose(thread_rng).expect("Failed to sample from core_vec");
-                seq.insert(mutant_site, *new_allele);
+                let new_allele = core_vec[4][thread_rng.gen_range(0..core_vec[4].len())];
+                seq.insert(mutant_site, new_allele);
 
                 // add selection coefficient
                 let selection_coefficient = selection_dist.sample(thread_rng);
-                self.insert(*new_allele, mutant_site, selection_coefficient);
+                self.insert(new_allele, mutant_site, selection_coefficient);
             } else {
                 // deletion: remove allele at mutant_site
                 seq.remove(mutant_site);
@@ -640,15 +624,13 @@ impl MutationMap {
         original_length: usize,
         frameshift: &mut bool,
         selection_dist: &Distribution,
-        mu_dist: &Distribution,
-        indel_dist: &Distribution,
+        n_snps: usize,
+        n_indels: usize,
+        thread_rng: &mut ThreadRng
     ) -> (usize, usize) {
-        // thread-specific random number generator
-        let mut thread_rng = rand::thread_rng();
-
         // mutate SNPs
-        let n_snps = self.mutate_SNPs(core_vec, seq, selection_dist, mu_dist, &mut thread_rng);
-        let n_indels = self.mutate_indels(core_vec, seq, selection_dist, indel_dist, &mut thread_rng);
+        let n_snps = self.mutate_snps(core_vec, seq, selection_dist, n_snps, thread_rng);
+        let n_indels = self.mutate_indels(core_vec, seq, selection_dist, n_indels, thread_rng);
 
         // update frameshift status
         if n_indels > 0 {
@@ -742,6 +724,20 @@ mod tests {
 
         let dist4 = Distribution::new_double_exp(0.5, 2.0, -0.1);
         assert!(dist4.is_err());
+    }
+
+    #[test]
+    fn test_double_exp_distribution_generates_negative_weights() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let dist = Distribution::new_double_exp(0.5, 0.5, 0.0).unwrap();
+
+        // Generate a large number of samples to ensure we get some from the exp1 distribution
+        let samples: Vec<f64> = (0..20).map(|_| dist.sample(&mut rng)).collect();
+
+        println!("Sampled values: {:?}", &samples[0..20]); // Print first 20 samples for inspection
+
+        // Check that we have some negative values, which would indicate sampling from exp1
+        assert!(samples.iter().all(|&x| x < 0.0));
     }
 
     #[test]
@@ -918,6 +914,7 @@ mod tests {
     #[test]
     fn test_n_allele_is_non_mutable_and_unmapped() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut thread_rng = rand::thread_rng();
         let selection_dist =
             Distribution::new_uniform(0.0, 1.0).expect("failed to create selection distribution");
         let mu_dist =
@@ -931,8 +928,11 @@ mod tests {
         let original_length = seq.len();
         let original_n_sites: Vec<u8> = seq.iter().copied().filter(|&x| x == 16).collect();
 
+        let n_snps = mu_dist.sample(&mut rng) as usize;
+        let n_indels = indel_dist.sample(&mut rng) as usize;
+
         let mut map = MutationMap::new(0, 0, &seq, &selection_dist, &mut rng);
-        map.mutate(&core_vec, &mut seq, original_length, &mut false, &selection_dist, &mu_dist, &indel_dist);
+        map.mutate(&core_vec, &mut seq, original_length, &mut false, &selection_dist, n_snps, n_indels, &mut thread_rng);
 
         assert_eq!(seq[0], 16);
         assert_eq!(seq[2], 16);
@@ -946,8 +946,47 @@ mod tests {
     }
 
     #[test]
+    // test that map is updated many times, and that selection cofficients generated remain same after many mutations
+    fn test_mutation_map_consistency_after_mutations() {
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut thread_rng = rand::thread_rng();
+        let selection_dist =
+            Distribution::new_uniform(1e-10, 1e10).expect("failed to create selection distribution");
+        let mu_dist =
+            Distribution::new_poisson(1e3).expect("failed to create mutation-rate distribution");
+        let indel_dist =
+            Distribution::new_poisson(1e-30).expect("failed to create mutation-rate distribution");
+        let core_vec: Vec<Vec<u8>> =
+            vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
+
+        let mut seq = vec![1, 1, 4, 8, 2, 1, 2, 4];
+        let original_length = seq.len();
+
+        let mut map = MutationMap::new(0, 0, &seq, &selection_dist, &mut rng);
+        let original_map_state = map.data.clone();
+
+        // mutate many times with very low mutation rates to ensure map is updated but sequence does not change
+        for _ in 0..100 {
+            let n_snps = mu_dist.sample(&mut rng) as usize;
+            let n_indels = indel_dist.sample(&mut rng) as usize;
+            map.mutate(&core_vec, &mut seq, original_length, &mut false, &selection_dist, n_snps, n_indels, &mut thread_rng);
+            assert_eq!(seq.len(), original_length);
+            assert_eq!(map.data.len(), original_map_state.len());
+            for (allele_map, original_allele_map) in map.data.iter().zip(original_map_state.iter()) {
+                // for each pre-existing entry, check that the same key still has the same value
+                for (key, value) in original_allele_map.iter().enumerate() {
+                    if let Some(value) = value {
+                        assert_eq!(allele_map.get(key), Some(&Some(*value)));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn test_indels_change_sequence_length() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut thread_rng = rand::thread_rng();
         let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
         // Large sequence so many indels fire; zero SNP rate so only indels mutate
         let seq: Vec<u8> = vec![1u8; 100];
@@ -962,7 +1001,9 @@ mod tests {
             vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16],
         ];
 
-        map.mutate(&core_vec, &mut seq_mut, seq.len(), &mut false, &dist, &mu_dist, &indel_dist);
+        let n_snps = mu_dist.sample(&mut rng) as usize;
+        let n_indels = indel_dist.sample(&mut rng) as usize;
+        map.mutate(&core_vec, &mut seq_mut, seq.len(), &mut false, &dist, n_snps, n_indels, &mut thread_rng);
 
         // With 1000 indels on a seed that produces ~50% insertions, final length must differ
         assert_ne!(seq_mut.len(), seq.len());
@@ -996,7 +1037,7 @@ mod tests {
         map.set_for_test(8, 3, 0.40);
 
         // Inserting at site 1 should shift coefficients at sites 1+ up by one
-        map.update_data(1, true);
+        map.update_data(1, true, 4);
 
         // check insertion correct
         assert_ne!(map.get(1, 1), Some(&0.10)); // site 1 changed
@@ -1057,7 +1098,7 @@ mod tests {
         map.set_for_test(8, 3, 0.40);
 
         // Deleting site 2 should remove its coefficient from the map
-        map.update_data(2, false);
+        map.update_data(2, false, 4);
 
         assert_eq!(map.get(1, 0), Some(&0.10)); // site 0 unchanged
         assert_eq!(map.get(1, 1), Some(&0.20)); // site 1 unchanged
@@ -1083,6 +1124,7 @@ mod tests {
     #[test]
     fn test_frameshift_flag_matches_length_change_mod3() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut thread_rng = rand::thread_rng();
         let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
         let seq: Vec<u8> = vec![1u8; 100];
         let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
@@ -1096,7 +1138,9 @@ mod tests {
         ];
 
         let mut frameshift = true;
-        map.mutate(&core_vec, &mut seq_mut, original_length, &mut frameshift, &dist, &mu_dist, &indel_dist);
+        let n_snps = mu_dist.sample(&mut thread_rng) as usize;
+        let n_indels = indel_dist.sample(&mut thread_rng) as usize;
+        map.mutate(&core_vec, &mut seq_mut, original_length, &mut frameshift, &dist, n_snps, n_indels, &mut thread_rng);
 
         let expected = seq_mut.len().abs_diff(original_length) % 3 != 0;
         println!("Original length: {}, New length: {}, Frameshift: {}, Expected frameshift: {}", original_length, seq_mut.len(), frameshift, expected);
@@ -1106,6 +1150,7 @@ mod tests {
     #[test]
     fn test_frameshift_not_updated_when_no_indels() {
         let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut thread_rng = rand::thread_rng();
         let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
         let seq: Vec<u8> = vec![1u8; 12];
         let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
@@ -1119,7 +1164,9 @@ mod tests {
 
         // Start with frameshift already set; expect it to remain unchanged when no indels fire
         let mut frameshift = true;
-        map.mutate(&core_vec, &mut seq_mut, seq.len(), &mut frameshift, &dist, &mu_dist, &indel_dist);
+        let n_snps = mu_dist.sample(&mut thread_rng) as usize;
+        let n_indels = indel_dist.sample(&mut thread_rng) as usize;
+        map.mutate(&core_vec, &mut seq_mut, seq.len(), &mut frameshift, &dist, n_snps, n_indels, &mut thread_rng);
 
         assert!(frameshift);
     }

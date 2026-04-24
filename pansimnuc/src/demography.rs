@@ -1,5 +1,6 @@
 use crate::population::Population;
 use crate::config::{self, PopulationSplitConfig};
+use crate::tracking::write_tracking_output;
 use rand::Rng;
 use rand::seq::IteratorRandom;
 use std::collections::HashSet;
@@ -13,6 +14,7 @@ pub struct MetaPopulation {
     pub recombination_rate: f64,
     pub recombination_size_mean: f64,
     pub site_mutation_mus_vals: Vec<f64>,
+    pub site_indel_mus_vals: Vec<f64>,
 }
 
 impl MetaPopulation {
@@ -23,6 +25,7 @@ impl MetaPopulation {
         recombination_rate: f64,
         recombination_size_mean: f64,
         site_mutation_mus_vals: Vec<f64>,
+        site_indel_mus_vals: Vec<f64>,
     ) -> Self {
         MetaPopulation {
             populations: vec![population],
@@ -31,6 +34,7 @@ impl MetaPopulation {
             recombination_rate,
             recombination_size_mean,
             site_mutation_mus_vals,
+            site_indel_mus_vals
         }
     }
 
@@ -102,10 +106,12 @@ impl MetaPopulation {
         self.populations.push(merged_population);
     }
 
-    fn migrate(&mut self) {
+    fn migrate(&mut self) -> usize {
         if self.populations.len() < 2 {
-            return; // Need at least two populations to migrate
+            return 0; // Need at least two populations to migrate
         }
+
+        let mut n_migrations = 0;
 
         let migration_rate = self.population_split_config.migration_rate;
 
@@ -127,6 +133,8 @@ impl MetaPopulation {
                             // keep track of updated populations
                             updated_populations.insert(target_pop_idx);
 
+                            n_migrations += 1;
+
                             let target_pop_length = self.populations[target_pop_idx].pop.len();
                             let target_genome_idx = self.populations[target_pop_idx].pop[rng.gen_range(0..target_pop_length)].genome_id;
                             Some((target_pop_idx, target_genome_idx, genome.clone()))
@@ -147,36 +155,56 @@ impl MetaPopulation {
         for population_idx in updated_populations {
             self.populations[population_idx].update_homology_map();
         }
+
+        n_migrations
     }
 
-    pub fn run_simulation(&mut self) {
+    pub fn run_simulation(&mut self, is_tracking: bool, configuration: &HashMap<String, String>) {
         let verbose = self.populations[0].verbose; // assume all populations have same verbose setting
+
+        let mut print_all_generations = false;
+        if let Some(print_all_generations_str) = configuration.get("misc.print_all_generations") {
+            print_all_generations = print_all_generations_str
+                .parse::<bool>()
+                .expect("print_all_generations must be a boolean (true/false).");
+        }
+
+        // before starting, update mutation distributions for all populations based on initial genome sizes, to ensure they are correct for the first generation
+        self.populations.par_iter_mut().for_each(|population| {
+            population.update_mu_dists(&self.site_mutation_mus_vals, &self.site_indel_mus_vals);
+        });
 
         for generation in 1..=self.n_generations {
             self.populations.par_iter_mut().for_each(|population| {
                 let mut rng = rand::thread_rng();
                 
                 // mutate at nucleotide level
-                let (total_snps, total_indels) = population.mutate();
+                let (_, _) = population.mutate();
 
                 // perform intragenome structural mutations
                 population.structural_intra_genome();
 
+                // get total size of pangenome for recombination rate scaling
+                let (total_length, _, _, _, _   , _, _, _, _, _, _, _, _, _) = population.total_seq_lengths();
+
                 // perform intergenome structural mutations, based on number of SNPs
-                population.structural_inter_genome(self.recombination_rate, total_snps, self.recombination_size_mean);
+                population.structural_inter_genome(self.recombination_rate, total_length as usize, self.recombination_size_mean);
 
                 // sample next generation
                 let sampled_indices = population.sample_individuals(&mut rng);
                 population.next_generation(sampled_indices);
 
                 if generation < self.n_generations {
-                    population.update_mu_dists(&self.site_mutation_mus_vals);
+                    population.update_mu_dists(&self.site_mutation_mus_vals, &self.site_indel_mus_vals);
                 }
             });
-            println!("Finished generation {}", generation);
 
             // perform migration between populations
-            self.migrate();
+            let n_migrations = self.migrate();
+
+            if verbose {
+                println!("{} migration events", n_migrations);
+            }
 
             // perform population splits and merges at specified generations
             let current_gen_size = self.populations.len();
@@ -207,26 +235,38 @@ impl MetaPopulation {
                     }
                 }
             }
+            
+            // print tracking information for this generation if tracking enabled
+            if is_tracking {
+                if let Some(outdir) = configuration
+                    .get("output.outdir") {
+                    let output_path = format!("{}/tracking.csv", outdir);
+                    write_tracking_output(&output_path, &self);
+                };
+            }
+
+            if print_all_generations {
+                self.write_output(configuration);
+            }
+
+            println!("Finished generation {}", generation);
         }
     }
 
     pub fn write_output(&self, configuration: &HashMap<String, String>) {
         for population in &self.populations {
-            let output_fasta = configuration
-                .get("output.fasta_file")
-                .cloned()
-                .unwrap_or_else(|| "final_population.fasta".to_string());
-
-            if let Some(output_gff) = configuration.get("output.gff_file") {
-                if let Err(err) = population.write_gff(output_gff, false) {
+            if let Some(outdir) = configuration.get("output.outdir") {
+                let gff_path = format!("{}/.gff", outdir);
+                if let Err(err) = population.write_gff(&gff_path, false) {
                     eprintln!("Failed to write final population GFF files: {err}");
                     std::process::exit(1);
                 }
-            }
 
-            if let Err(err) = population.write_fasta(&output_fasta, false) {
-                eprintln!("Failed to write final population FASTA files: {err}");
-                std::process::exit(1);
+                let fasta_path = format!("{}/.fasta", outdir);
+                if let Err(err) = population.write_fasta(&fasta_path, false) {
+                    eprintln!("Failed to write final population FASTA files: {err}");
+                    std::process::exit(1);
+                }
             }
         }
     }
@@ -254,6 +294,19 @@ mod tests {
                 parent: "root".to_string(),
                 seq: Vec::new(),
                 seq_length: 0,
+                total_exon_length: 0,
+                total_intron_length: 0,
+                total_intergenic_length: 0,
+                total_te_cut_length: 0,
+                total_te_copy_length: 0,
+                total_tracking_length: 0,
+                total_elements: 0,
+                total_exon_elements: 0,
+                total_intron_elements: 0,
+                total_intergenic_elements: 0,
+                total_te_cut_elements: 0,
+                total_te_copy_elements: 0,
+                total_tracking_elements: 0,
             })
             .collect()
     }
@@ -275,6 +328,9 @@ mod tests {
             max_multiplier_dist: 0,
             n_generations: 1,
             verbose: false,
+            augment_tracking: false,
+            genome_size_penalty_per_bp: 0.0,
+            optimal_genome_size: 0,
         }
     }
 
@@ -283,7 +339,7 @@ mod tests {
         let population = test_population(7, 2, "p0");
         let split_config = test_split_config(0.1);
 
-        let meta = MetaPopulation::new(population.clone(), split_config.clone(), 10, 0.01, 100.0, vec![0.01]);
+        let meta = MetaPopulation::new(population.clone(), split_config.clone(), 10, 0.01, 100.0, vec![0.01], vec![0.01]);
 
         assert_eq!(meta.populations.len(), 1);
         assert_eq!(meta.populations[0].id, 7);
@@ -293,7 +349,7 @@ mod tests {
     #[test]
     fn test_max_population_id_returns_largest_id() {
         let population = test_population(2, 1, "p0");
-        let mut meta = MetaPopulation::new(population, test_split_config(0.1), 10, 0.01, 100.0, vec![0.01]);
+        let mut meta = MetaPopulation::new(population, test_split_config(0.1), 10, 0.01, 100.0, vec![0.01], vec![0.01]);
         meta.populations.push(test_population(9, 1, "p1"));
         meta.populations.push(test_population(4, 1, "p2"));
 
@@ -302,7 +358,7 @@ mod tests {
 
     #[test]
     fn test_split_population_adds_population_with_new_id() {
-        let mut meta = MetaPopulation::new(test_population(3, 2, "p0"), test_split_config(0.1), 10, 0.01, 100.0, vec![0.01]);
+        let mut meta = MetaPopulation::new(test_population(3, 2, "p0"), test_split_config(0.1), 10, 0.01, 100.0, vec![0.01], vec![0.01]);
 
         meta.split_population();
 
@@ -314,7 +370,7 @@ mod tests {
 
     #[test]
     fn test_merge_populations_merges_two_into_one() {
-        let mut meta = MetaPopulation::new(test_population(1, 2, "p0"), test_split_config(0.1), 10, 0.01, 100.0, vec![0.01]);
+        let mut meta = MetaPopulation::new(test_population(1, 2, "p0"), test_split_config(0.1), 10, 0.01, 100.0, vec![0.01], vec![0.01]);
         meta.populations.push(test_population(5, 2, "p1"));
 
         meta.merge_populations();
@@ -326,7 +382,7 @@ mod tests {
 
     #[test]
     fn test_merge_populations_noop_when_single_population() {
-        let mut meta = MetaPopulation::new(test_population(10, 2, "p0"), test_split_config(0.1), 10, 0.01, 100.0, vec![0.01]);
+        let mut meta = MetaPopulation::new(test_population(10, 2, "p0"), test_split_config(0.1), 10, 0.01, 100.0, vec![0.01], vec![0.01]);
 
         meta.merge_populations();
 
@@ -336,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_migrate_noop_when_rate_zero() {
-        let mut meta = MetaPopulation::new(test_population(1, 2, "a"), test_split_config(0.0), 10, 0.01, 100.0, vec![0.01]);
+        let mut meta = MetaPopulation::new(test_population(1, 2, "a"), test_split_config(0.0), 10, 0.01, 100.0, vec![0.01], vec![0.01]);
         meta.populations.push(test_population(2, 2, "b"));
 
         let before: Vec<Vec<String>> = meta
@@ -358,7 +414,7 @@ mod tests {
 
     #[test]
     fn test_migrate_noop_when_single_population() {
-        let mut meta = MetaPopulation::new(test_population(1, 2, "solo"), test_split_config(1.0), 10, 0.01, 100.0, vec![0.01]);
+        let mut meta = MetaPopulation::new(test_population(1, 2, "solo"), test_split_config(1.0), 10, 0.01, 100.0, vec![0.01], vec![0.01]);
         let before: Vec<String> = meta.populations[0]
             .pop
             .iter()
@@ -377,7 +433,7 @@ mod tests {
 
     #[test]
     fn test_migrate_moves_members_between_populations() {
-        let mut meta = MetaPopulation::new(test_population(1, 2, "a"), test_split_config(1.0), 10, 0.01, 100.0, vec![0.01]);
+        let mut meta = MetaPopulation::new(test_population(1, 2, "a"), test_split_config(1.0), 10, 0.01, 100.0, vec![0.01], vec![0.01]);
         meta.populations.push(test_population(2, 2, "b"));
 
         let pop00_before = meta.populations[0].pop[0].identifier.clone();

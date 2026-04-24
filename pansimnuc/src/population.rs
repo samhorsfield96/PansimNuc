@@ -3,6 +3,7 @@ use crate::mutation::Distribution as MutationDistribution;
 use crate::mutation::MutationMap;
 use crate::structural::mutate_inter_genome;
 use crate::structural::mutate_intra_genome;
+use crate::tracking::identify_tracked_element;
 use logsumexp::LogSumExp;
 use rand::SeedableRng;
 use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
@@ -13,6 +14,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct NucElement {
@@ -21,19 +23,20 @@ pub struct NucElement {
     pub feature_id: usize,
     pub feature_type: String,
     pub multiplier: f64,
-    pub seq: Vec<u8>,
-    pub mutation_map: MutationMap,
+    pub seq: Arc<Vec<u8>>,
+    pub mutation_map: Arc<MutationMap>,
     pub strand: bool,
     pub original_length: usize,
     pub frameshift: bool,
+    pub tracked: bool,
+    pub selection_coeff: f64
 }
 
 impl NucElement {
-    fn element_selection_coefficient(&self, genome_identifier: &str) -> f64 {
+    fn calculate_element_selection_coefficient(&mut self) {
         let mut element_log_sum = 0.0;
 
         for (site, allele) in self.seq.iter().enumerate() {
-            let allele_shifted = 1 >> allele;
             if let Some(coeff) = self.mutation_map.get(*allele, site) {
                 let log_coeff = (1.0 + coeff).ln(); // add log of coefficient to log sum
                 if log_coeff == std::f64::NEG_INFINITY {
@@ -44,12 +47,30 @@ impl NucElement {
                 element_log_sum += log_coeff;
             } else {
                 panic!(
-                    "Failed to generate selection coefficient for genome {} allele {} (shifted {}) at site {}",
-                    genome_identifier, allele, allele_shifted, site
+                    "Failed to generate selection coefficient for allele {} at site {}",
+                    allele, site
                 );
             }
         }
-        element_log_sum
+        self.selection_coeff = element_log_sum;
+    }
+
+    pub fn generate_selection_coefficients(&self) -> Vec<f64> {
+        self.seq
+            .iter()
+            .enumerate()
+            .map(|(site, allele)| {
+                if let Some(coeff) = self.mutation_map.get(*allele, site) {
+                    let log_coeff = (1.0 + coeff).ln(); // add log of coefficient to log sum
+                    log_coeff
+                } else {
+                    panic!(
+                        "Failed to generate selection coefficient for allele {} at site {}",
+                        allele, site
+                    );
+                }
+            })
+            .collect()
     }
 }
 
@@ -61,19 +82,87 @@ pub struct Genome {
     pub parent: String,
     pub seq: Vec<NucElement>,
     pub seq_length: usize,
+    pub total_exon_length: usize,
+    pub total_intron_length: usize,
+    pub total_intergenic_length: usize,
+    pub total_te_cut_length: usize,
+    pub total_te_copy_length: usize,
+    pub total_tracking_length: usize,
+    pub total_elements: usize,
+    pub total_exon_elements: usize,
+    pub total_intron_elements: usize,
+    pub total_intergenic_elements: usize,
+    pub total_te_cut_elements: usize,
+    pub total_te_copy_elements: usize,
+    pub total_tracking_elements: usize,
 }
 
 impl Genome {
     pub fn update_contig_starts(&mut self) {
         self.contig_starts.clear();
+        
+        // total lengths
         let mut total_length = 0;
+        let mut total_exon_length = 0;
+        let mut total_intron_length = 0;
+        let mut total_intergenic_length = 0;
+        let mut total_te_cut_length = 0;
+        let mut total_te_copy_length = 0;
+        let mut total_tracking_length = 0;
+        
+        // total elements
+        let mut total_elements = 0;
+        let mut total_exon_elements = 0;
+        let mut total_intron_elements = 0;
+        let mut total_intergenic_elements = 0;
+        let mut total_te_cut_elements = 0;
+        let mut total_te_copy_elements = 0;
+        let mut total_tracking_elements = 0;
+
         for (idx, element) in self.seq.iter().enumerate() {
             if idx == 0 || element.contig_id != self.seq[idx - 1].contig_id {
                 self.contig_starts.push(idx);
             }
             total_length += element.seq.len();
+            total_elements += 1;
+            match element.feature_type.as_str() {
+                "exon" => total_exon_length += element.seq.len(),
+                "intron" => total_intron_length += element.seq.len(),
+                "intergenic" => total_intergenic_length += element.seq.len(),
+                "TE-CUT" => total_te_cut_length += element.seq.len(),
+                "TE-COPY" => total_te_copy_length += element.seq.len(),
+                _ => {}
+            }
+
+            match element.feature_type.as_str() {
+                "exon" => total_exon_elements += 1,
+                "intron" => total_intron_elements += 1,
+                "intergenic" => total_intergenic_elements += 1,
+                "TE-CUT" => total_te_cut_elements += 1,
+                "TE-COPY" => total_te_copy_elements += 1,
+                _ => {}
+            }
+
+            if element.tracked {
+                total_tracking_length += element.seq.len();
+                total_tracking_elements += 1;
+            }
         }
         self.seq_length = total_length;
+        self.total_exon_length = total_exon_length;
+        self.total_intron_length = total_intron_length;
+        self.total_intergenic_length = total_intergenic_length;
+        self.total_te_cut_length = total_te_cut_length;
+        self.total_te_copy_length = total_te_copy_length;
+        self.total_tracking_length = total_tracking_length;
+
+        self.total_elements = total_elements;
+        self.total_exon_elements = total_exon_elements;
+        self.total_intron_elements = total_intron_elements;
+        self.total_intergenic_elements = total_intergenic_elements;
+        self.total_te_cut_elements = total_te_cut_elements;
+        self.total_te_copy_elements = total_te_copy_elements;
+        self.total_tracking_elements = total_tracking_elements;
     }
 }
 
@@ -94,11 +183,64 @@ pub struct Population {
     pub max_multiplier_dist: usize,
     pub n_generations: usize,
     pub verbose: bool,
+    pub augment_tracking: bool,
+    pub genome_size_penalty_per_bp: f64,
+    pub optimal_genome_size: usize,
 }
 
 impl Population {
-    fn total_seq_length(&self) -> usize {
-        self.pop.iter().map(|genome| genome.seq_length).sum()
+    pub fn total_seq_lengths(&self) -> (f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) {
+        let mut total_length = 0;
+        let mut total_exon_length = 0;
+        let mut total_intron_length = 0;
+        let mut total_intergenic_length = 0;
+        let mut total_te_cut_length = 0;
+        let mut total_te_copy_length = 0;
+        let mut total_tracking_length = 0;
+
+        let mut total_elements = 0;
+        let mut total_exon_elements = 0;
+        let mut total_intron_elements = 0;
+        let mut total_intergenic_elements = 0;
+        let mut total_te_cut_elements = 0;
+        let mut total_te_copy_elements = 0;
+        let mut total_tracking_elements = 0;
+
+        for genome in &self.pop {
+            total_length += genome.seq_length;
+            total_exon_length += genome.total_exon_length;
+            total_intron_length += genome.total_intron_length;
+            total_intergenic_length += genome.total_intergenic_length;
+            total_te_cut_length += genome.total_te_cut_length;
+            total_te_copy_length += genome.total_te_copy_length;
+            total_tracking_length += genome.total_tracking_length;
+
+            total_elements += genome.total_elements;
+            total_exon_elements += genome.total_exon_elements;
+            total_intron_elements += genome.total_intron_elements;
+            total_intergenic_elements += genome.total_intergenic_elements;
+            total_te_cut_elements += genome.total_te_cut_elements;
+            total_te_copy_elements += genome.total_te_copy_elements;
+            total_tracking_elements += genome.total_tracking_elements;
+        }
+
+        (
+            total_length as f64,
+            total_exon_length as f64,
+            total_intron_length as f64,
+            total_intergenic_length as f64,
+            total_te_cut_length as f64,
+            total_te_copy_length as f64,
+            total_tracking_length as f64,
+            total_elements as f64,
+            total_exon_elements as f64,
+            total_intron_elements as f64,
+            total_intergenic_elements as f64,
+            total_te_cut_elements as f64,
+            total_te_copy_elements as f64,
+            total_tracking_elements as f64,
+
+        )
     }
 
     fn is_te_feature(feature_type: &str) -> bool {
@@ -272,11 +414,11 @@ impl Population {
             )
         })?;
 
-        let prefixed_name = format!("{}_{}", prefix, file_name.to_string_lossy());
+        let prefixed_name = format!("{}{}", prefix, file_name.to_string_lossy());
         Ok(path.with_file_name(prefixed_name))
     }
 
-    fn decode_base(base: u8) -> u8 {
+    pub fn decode_base(base: u8) -> u8 {
         match base {
             1 => b'A',
             2 => b'C',
@@ -298,7 +440,7 @@ impl Population {
 
             // if feature not broken, add up sites
             if !feature_broken {
-                element_log_sum += element.element_selection_coefficient(&genome.identifier);
+                element_log_sum += element.selection_coeff; // add pre-calculated selection coefficient for element, which is sum of site coefficients
                 
                 // if any value is zero, product is zero so genome selection coefficient is zero
                 if element_log_sum == std::f64::NEG_INFINITY {
@@ -363,6 +505,10 @@ impl Population {
         n_generations: usize,
         rng: &mut StdRng,
         verbose: bool,
+        contig_name_to_id: &Vec<String>,
+        tracking_regions: &Vec<(String, usize, usize)>,
+        augment_tracking: bool,
+        genome_size_penalty_per_bp: f64,
     ) -> Self {
         // initialise population
         let mut population: Vec<Genome> = Vec::new();
@@ -377,8 +523,15 @@ impl Population {
         // initialise feature map, maps feature ID to number of genes that should share same ID
         let mut feature_map: HashMap<usize, Vec<usize>> = HashMap::new();
 
+        // determine if tracking enabled
+        let is_tracking = !tracking_regions.is_empty();
+
+        // track optimal genome size
+        let mut optimal_genome_size = 0;
+
         // generate starting genome
         for (contig_id, features) in root.iter().enumerate() {
+            let mut current_start = 0;
             for feature in features {
                 let selection_dist_id: usize = match feature.feature_type.as_str() {
                     "exon" => 0,
@@ -416,7 +569,6 @@ impl Population {
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
-
                 // Update feature_map, keeping track of how many features there are
                 if feature.feature_id != 0 {
                     feature_map
@@ -425,25 +577,51 @@ impl Population {
                         .push(element_id);
                 }
 
-                genome.push(NucElement {
+                let mut element = NucElement {
                     contig_id: contig_id,
                     element_id: element_id,
                     feature_id: feature.feature_id,
                     feature_type: feature.feature_type.clone(),
-                    seq: feature.seq.clone(),
+                    seq: Arc::new(feature.seq.clone()),
                     strand: feature.strand,
-                    mutation_map: MutationMap::new(
+                    mutation_map: Arc::new(MutationMap::new(
                         selection_dist_id,
                         mu_dist_id,
                         &feature.seq,
                         &selection_dists[selection_dist_id],
                         rng,
-                    ),
+                    )),
                     multiplier: multiplier,
                     original_length: feature.seq.len(),
                     frameshift: false,
-                });
+                    tracked: false,
+                    selection_coeff: 0.0 // placeholder
+                };
+
+                // generate selection coefficient
+                element.calculate_element_selection_coefficient();
+
+                // determine if element is tracked and if so update mutation map accordingly
+                if is_tracking {
+                    identify_tracked_element(&mut element, current_start, &tracking_regions, &contig_name_to_id);
+                    if element.tracked && augment_tracking {
+                        // update selection maps etc
+                        element.mutation_map = Arc::new(MutationMap::new(
+                            5, // new selection dist ID for tracked elements
+                            5, // new mu dist ID for tracked elements
+                            &element.seq,
+                            &selection_dists[5], // new selection distribution for tracked elements
+                            rng,
+                        ));
+                        element.multiplier = multiplier_dists[5].sample(rng);
+                    }
+                }
+
+                genome.push(element);
                 element_id += 1;
+                current_start += feature.seq.len();
+
+                optimal_genome_size += feature.seq.len();
 
                 // generate homology map for this element, initially just self
                 let mut element_homology_map: Vec<Vec<usize>> = Vec::new();
@@ -462,19 +640,32 @@ impl Population {
                 genome_id: i,
                 contig_starts: Vec::new(), // will be updated after mutations
                 parent: "root".to_string(),
-                seq: genome.clone(),
+                seq: genome.clone().into(), // convert to Arc for shared ownership and potential memory savings
                 seq_length: 0, // will be updated after mutations
+                total_exon_length: 0,
+                total_intron_length: 0,
+                total_intergenic_length: 0,
+                total_te_cut_length: 0,
+                total_te_copy_length: 0,
+                total_tracking_length: 0,
+                total_elements: 0,
+                total_exon_elements: 0,
+                total_intron_elements: 0,
+                total_intergenic_elements: 0,
+                total_te_cut_elements: 0,
+                total_te_copy_elements: 0,
+                total_tracking_elements: 0,
             };
             genome_entry.update_contig_starts();
             total_length += genome_entry.seq_length;
             population.push(genome_entry);
         }
 
-        // generate mu_dists based on total population size and total sequence length, so that mutation rates are per base per genome generation
+        // placeholders, will be updated based on per-element average size in demography.rs
         let mu_dists = mu_dist_vals
             .into_iter()
             .map(|mu| {
-                MutationDistribution::new_poisson(mu * (total_length as f64) * (n_genomes as f64) * n_generations as f64)
+                MutationDistribution::new_poisson(*mu)
                     .expect("Failed to create poisson distribution for mutation rates")
             })
             .collect();
@@ -482,10 +673,11 @@ impl Population {
         let indel_dists = indel_dist_vals
             .into_iter()
             .map(|mu| {
-                MutationDistribution::new_poisson(mu * (total_length as f64) * (n_genomes as f64) * n_generations as f64)
+                MutationDistribution::new_poisson(*mu)
                     .expect("Failed to create poisson distribution for indel rates")
             })
             .collect();
+
 
         let core_vec: Vec<Vec<u8>> =
             vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16]];
@@ -498,7 +690,7 @@ impl Population {
             selection_dists,
             mu_dists,
             indel_dists,
-            structural_mu_dists: structural_mu_dists,
+            structural_mu_dists,
             recombination_dists,
             recombination_threshold,
             homology_map,
@@ -506,6 +698,9 @@ impl Population {
             max_multiplier_dist,
             n_generations,
             verbose,
+            augment_tracking,
+            genome_size_penalty_per_bp,
+            optimal_genome_size,
         }
     }
 
@@ -520,20 +715,34 @@ impl Population {
             .pop
             .par_iter_mut()
             .map(|genome| {
-                genome
-                    .seq
+                let mut thread_rng = rand::thread_rng();
+                genome.seq
                     .iter_mut()
                     .fold((0, 0), |(snps, indels), element| {
-                        let (s, i) = element.mutation_map.mutate(
-                            core_vec,
-                            &mut element.seq,
-                            element.original_length,
-                            &mut element.frameshift,
-                            &selection_dists[element.mutation_map.selection_dist_id],
-                            &mu_dists[element.mutation_map.mu_dist_id],
-                            &indel_dists[element.mutation_map.mu_dist_id],
-                        );
-                        (snps + s, indels + i)
+                        let selection_dist_id = element.mutation_map.selection_dist_id;
+                        let mu_dist_id = element.mutation_map.mu_dist_id;
+
+                        // determine if element will mutate, otherwise skip to avoid unnecessary calculations and copies
+                        let n_snps = mu_dists[mu_dist_id].sample(&mut thread_rng) as usize;
+                        let n_indels = indel_dists[mu_dist_id].sample(&mut thread_rng) as usize;
+                        if n_snps == 0 && n_indels == 0 {
+                            (snps, indels)
+                        } else {
+                            // otherwise mutate element and update mutation map, this will return number of snps and indels that occurred
+                            let (s, i) = Arc::make_mut(&mut element.mutation_map).mutate(
+                                core_vec,
+                                Arc::make_mut(&mut element.seq),
+                                element.original_length,
+                                &mut element.frameshift,
+                                &selection_dists[selection_dist_id],
+                                n_snps,
+                                n_indels,
+                                &mut thread_rng,
+                            );
+                            // update selection coefficient for element based on new sequence
+                            element.calculate_element_selection_coefficient();
+                            (snps + s, indels + i)
+                        }
                     })
             })
             .reduce(|| (0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1));
@@ -545,19 +754,62 @@ impl Population {
         (total_snps, total_indels)
     }
 
-    pub fn update_mu_dists(&mut self, mu_dist_vals: &Vec<f64>) {
-        let total_length = self.total_seq_length() as f64;
-        let n_genomes = self.pop.len() as f64;
-        let n_generations = self.n_generations as f64;
+    pub fn update_mu_dists(&mut self, mu_dist_vals: &Vec<f64>, indel_dist_vals: &Vec<f64>) {
+        let (_, 
+            total_exon_length, 
+            total_intron_length, 
+            total_intergenic_length, 
+            total_te_cut_length, 
+            total_te_copy_length, 
+            total_tracking_length,
+            _,
+            total_exon_elements,
+            total_intron_elements,
+            total_intergenic_elements,
+            total_te_cut_elements,
+            total_te_copy_elements,
+            total_tracking_elements,
+        ) = self.total_seq_lengths();
 
+        let average_size_vector = vec![
+            total_exon_length / total_exon_elements.max(1.0),
+            total_intron_length / total_intron_elements.max(1.0),
+            total_intergenic_length / total_intergenic_elements.max(1.0),
+            total_te_cut_length / total_te_cut_elements.max(1.0),
+            total_te_copy_length / total_te_copy_elements.max(1.0),
+            total_tracking_length / total_tracking_elements.max(1.0)
+        ];
+
+        // update mutation distributions based on total element size in population
         let new_mu_dists: Vec<MutationDistribution> = mu_dist_vals
-            .into_iter()
-            .map(|mu| {
-                MutationDistribution::new_poisson(mu * total_length * n_genomes * n_generations)
-                    .expect("Failed to create poisson distribution for mutation rates")
+            .iter().enumerate()
+            .map(|(i, mu)| {
+                if average_size_vector[i] != 0.0 {
+                    MutationDistribution::new_poisson(mu * average_size_vector[i])
+                     .expect("Failed to create poisson distribution for mutation rates")
+                } else {
+                    // no elements left, just set to mu
+                    MutationDistribution::new_poisson(*mu)
+                     .expect("Failed to create poisson distribution for mutation rates with zero average size")
+                }
             })
             .collect();
+        let new_indel_dists: Vec<MutationDistribution> = indel_dist_vals
+            .iter().enumerate()
+            .map(|(i, mu)| {
+                if average_size_vector[i] != 0.0 {
+                    MutationDistribution::new_poisson(mu * average_size_vector[i])
+                     .expect("Failed to create poisson distribution for indel rates")
+                } else {
+                    // no elements left, just set to mu
+                    MutationDistribution::new_poisson(*mu)
+                     .expect("Failed to create poisson distribution for indel rates with zero average size")
+                }   
+            })
+            .collect();
+
         self.mu_dists = new_mu_dists;
+        self.indel_dists = new_indel_dists;
     }
 
     pub fn structural_intra_genome(&mut self) {
@@ -569,7 +821,7 @@ impl Population {
         let totals = self
             .pop
             .par_iter_mut()
-            .map(|genome| mutate_intra_genome(genome, &self.structural_mu_dists, &pos_dist))
+            .map(|genome| mutate_intra_genome(genome, &self.structural_mu_dists, &pos_dist, self.augment_tracking))
             .reduce(
                 || (0usize, 0usize, 0usize, 0usize, 0usize, 0usize, 0usize),
                 |a, b| (
@@ -609,7 +861,9 @@ impl Population {
 
     pub fn structural_inter_genome(&mut self, recombination_rate: f64, total_sites: usize, recombination_size_mean: f64) {
         // generate recombination distributions
-        let average_recombinations_per_generation = (recombination_rate * total_sites as f64) / recombination_size_mean;
+        let average_recombinations_per_generation = 
+            ((recombination_rate * total_sites as f64) / recombination_size_mean)
+            .max(f64::MIN_POSITIVE);
         if self.verbose {
             println!("Average recombinations per generation: {}", average_recombinations_per_generation);
         }
@@ -643,18 +897,31 @@ impl Population {
             eprintln!("Selection post-norm weights: {:?}", selection_weights);
         }
 
-        let sum_weights: f64 = selection_weights.iter().sum();
+        // update selection weights by genome size penalty
         selection_weights = selection_weights
-            .iter()
-            .map(|&w| {
-                if w != std::f64::NEG_INFINITY {
-                    w / sum_weights
-                } else {
-                    0.0
-                }
+            .into_iter()
+            .enumerate()
+            .map(|(i, w)| {
+                let genome_size = self.pop[i].seq_length;
+                // calculate total penalty based on difference from optimal genome size, ensuring that penalty scales with genome size and doesn't become negative
+                let size_penalty = (1.0 - (self.genome_size_penalty_per_bp * ((genome_size as isize - self.optimal_genome_size as isize).abs() as f64))).max(0.0);
+                //println!("Genome {} size: {}, size penalty: {}", i, genome_size, size_penalty);
+                (w * size_penalty).max(0.0) // ensure weights don't become negative due to penalty
             })
             .collect();
 
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("Selection post-genome size penalty weights: {:?}", selection_weights);
+        }
+
+        let sum_weights: f64 = selection_weights.iter().sum();
+        // account for all values being zero
+        if sum_weights == 0.0 {
+            // if all weights are zero, set all weights to equal probability to prevent issues with sampling, as all genomes are equally likely to be selected
+            selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+        }
+        
         // Create a WeightedIndex distribution based on weights
         let sampling_dist = WeightedIndex::new(&selection_weights)
             .expect("Failed to generate sampling index for population.");
@@ -686,6 +953,19 @@ impl Population {
                     parent: selected_genome.identifier.clone(),
                     seq: selected_genome.seq.clone(),
                     seq_length: selected_genome.seq_length,
+                    total_exon_length: selected_genome.total_exon_length,
+                    total_intron_length: selected_genome.total_intron_length,
+                    total_intergenic_length: selected_genome.total_intergenic_length,
+                    total_te_cut_length: selected_genome.total_te_cut_length,
+                    total_te_copy_length: selected_genome.total_te_copy_length,
+                    total_tracking_length: selected_genome.total_tracking_length,
+                    total_elements: selected_genome.total_elements,
+                    total_exon_elements: selected_genome.total_exon_elements,
+                    total_intron_elements: selected_genome.total_intron_elements,
+                    total_intergenic_elements: selected_genome.total_intergenic_elements,
+                    total_te_cut_elements: selected_genome.total_te_cut_elements,
+                    total_te_copy_elements: selected_genome.total_te_copy_elements,
+                    total_tracking_elements: selected_genome.total_tracking_elements,
                 }
             })
             .collect();
@@ -738,7 +1018,7 @@ impl Population {
 
                 let mut wrapped_line_len = 0usize;
                 for idx in indices {
-                    for &base in &genome.seq[idx].seq {
+                    for &base in genome.seq[idx].seq.iter() {
                         writer.write_all(&[Self::decode_base(base)])?;
                         wrapped_line_len += 1;
 
@@ -814,7 +1094,7 @@ impl Population {
 
                 // calculate element selection coefficient
                 let log_element_selection_coefficient =
-                    element.element_selection_coefficient(&genome.identifier);
+                    element.selection_coeff;
                 let element_selection_coefficient =
                     if log_element_selection_coefficient == std::f64::NEG_INFINITY {
                         0.0
@@ -946,6 +1226,10 @@ mod tests {
             10,
             &mut rng,
             true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking_regions
+            true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
         );
 
         // Check population was created correctly
@@ -1022,6 +1306,10 @@ mod tests {
             10,
             &mut rng,
             true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking
+            true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
         );
 
         let temp_path = std::env::temp_dir().join(format!(
@@ -1103,6 +1391,11 @@ mod tests {
             10,
             &mut rng,
             true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking
+            true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
+
         );
 
         let temp_path = std::env::temp_dir().join(format!(
@@ -1190,6 +1483,10 @@ mod tests {
             10,
             &mut rng,
             true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking
+            true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
         );
 
         let original_seq = pop.pop[0].seq[0].seq.clone();
@@ -1272,6 +1569,10 @@ mod tests {
             10,
             &mut rng,
             true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking
+            true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
         );
 
         let original_identifiers: Vec<String> = pop
@@ -1288,7 +1589,7 @@ mod tests {
                 genome
                     .seq
                     .iter()
-                    .map(|element| element.seq.clone())
+                    .map(|element| (*element.seq).clone())
                     .collect()
             })
             .collect();
@@ -1311,7 +1612,7 @@ mod tests {
             let new_sequences: Vec<Vec<u8>> = genome
                 .seq
                 .iter()
-                .map(|element| element.seq.clone())
+                .map(|element| (*element.seq).clone())
                 .collect();
             assert_eq!(new_sequences, original_sequences[selected_index]);
         }
@@ -1406,6 +1707,10 @@ mod tests {
             10,
             &mut rng,
             true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking
+            true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
         )
     }
 
@@ -1415,8 +1720,21 @@ mod tests {
             genome_id: 0,
             contig_starts: vec![0],
             parent: "test-parent".to_string(),
-            seq,
+            seq: seq.clone().into(),
             seq_length: 0,
+            total_exon_length: 0,
+            total_intron_length: 0,
+            total_intergenic_length: 0,
+            total_te_cut_length: 0,
+            total_te_copy_length: 0,
+            total_tracking_length: 0,
+            total_elements: 0,
+            total_exon_elements: 0,
+            total_intron_elements: 0,
+            total_intergenic_elements: 0,
+            total_te_cut_elements: 0,
+            total_te_copy_elements: 0,
+            total_tracking_elements: 0,
         }
     }
 
@@ -1616,18 +1934,22 @@ mod tests {
             mutation_map.set_for_test(*allele, *site, *coeff);
         }
 
-        NucElement {
+        let mut element = NucElement {
             contig_id: 0,
             element_id: 0,
             feature_id: feature_id,
             feature_type: "exon".to_string(),
             multiplier: 1.0,
-            seq: seq.clone(),
-            mutation_map,
+            seq: seq.clone().into(),
+            mutation_map: mutation_map.into(),
             strand: true,
             original_length: seq.len(),
             frameshift: false,
-        }
+            tracked: false,
+            selection_coeff: 0.0,
+        };
+        element.calculate_element_selection_coefficient();
+        element
     }
 
     #[test]
@@ -1639,7 +1961,7 @@ mod tests {
             &coefficients,
         );
 
-        let log_sum = element.element_selection_coefficient("test-genome");
+        let log_sum = element.selection_coeff;
         assert_eq!(log_sum, std::f64::NEG_INFINITY);
     }
 
@@ -1658,7 +1980,7 @@ mod tests {
 
         let expected = val1.ln() + val2.ln() + val3.ln();
 
-        let log_sum = element.element_selection_coefficient("test-genome");
+        let log_sum = element.selection_coeff;
 
         assert!(log_sum == expected);
     }
@@ -1781,5 +2103,341 @@ mod tests {
             expected_with_te as f32,
             "Expected e2 contribution to be scaled by TE multiplier"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Helper shared by the tracking tests below
+    // -----------------------------------------------------------------------
+    fn make_two_exon_population_with_tracking(
+        structural_mu_dists: Vec<Vec<MutationDistribution>>,
+        tracking_region: (String, usize, usize),
+        seq_len: usize,
+    ) -> Population {
+        let root = vec![vec![
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 1,
+                feature_type: "exon".to_string(),
+                start: 0,
+                end: seq_len,
+                strand: true,
+                seq: vec![1u8; seq_len],
+            },
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 2,
+                feature_type: "exon".to_string(),
+                start: seq_len,
+                end: seq_len * 2,
+                strand: true,
+                seq: vec![1u8; seq_len],
+            },
+        ]];
+
+        // 6 selection dists: indices 0-4 for feature types, 5 for tracked elements
+        let selection_dists: Vec<MutationDistribution> = (0..6)
+            .map(|_| MutationDistribution::new_uniform(0.0, 1.0).unwrap())
+            .collect();
+        // 6 mu/indel rates (index 5 accessed for tracked elements)
+        let mu_dist_vals = vec![1.0f64; 6];
+        let indel_dist_vals = vec![1e-6f64; 6];
+        let recombination_dists = vec![
+            MutationDistribution::new_poisson(0.01).unwrap(),
+            MutationDistribution::new_poisson(1.0).unwrap(),
+        ];
+        // 6 multiplier dists (index 5 for tracked elements)
+        let multiplier_dists: Vec<MutationDistribution> = (0..6)
+            .map(|_| MutationDistribution::new_uniform(0.5, 1.5).unwrap())
+            .collect();
+
+        let mut rng = StdRng::seed_from_u64(0);
+        Population::new(
+            root,
+            1,
+            selection_dists,
+            &mu_dist_vals,
+            &indel_dist_vals,
+            recombination_dists,
+            1.0,
+            structural_mu_dists,
+            10,
+            multiplier_dists,
+            1,
+            &mut rng,
+            false,
+            &vec!["chr1".to_string()],
+            &vec![tracking_region],
+            true,
+            0.01
+        )
+    }
+
+    fn zero_structural_dists() -> Vec<Vec<MutationDistribution>> {
+        let zero = MutationDistribution::new_uniform(0.0, 0.5).unwrap();
+        (0..6)
+            .map(|_| vec![zero.clone(), zero.clone(), zero.clone()])
+            .collect()
+    }
+
+    #[test]
+    fn test_population_new_tracked_exon_uses_dist_id_5_untracked_keeps_type_dist_id() {
+        // Two exon features at [0, 100) and [100, 200).
+        // Tracking region [0, 99] covers only the first exon.
+        // After Population::new the tracked exon should have selection_dist_id=5
+        // and mu_dist_id=5; the untracked exon should keep id=0 (exon default).
+        let pop = make_two_exon_population_with_tracking(
+            zero_structural_dists(),
+            ("chr1".to_string(), 0, 99),
+            100,
+        );
+
+        let exon0 = &pop.pop[0].seq[0]; // first exon — inside tracking region
+        let exon1 = &pop.pop[0].seq[1]; // second exon — outside tracking region
+
+        assert!(exon0.tracked, "first exon inside region should be tracked");
+        assert_eq!(exon0.mutation_map.selection_dist_id, 5,
+            "tracked exon should sample selection coefficients from tracked dist (id=5)");
+        assert_eq!(exon0.mutation_map.mu_dist_id, 5,
+            "tracked exon should use tracked mutation rate dist (id=5)");
+
+        assert!(!exon1.tracked, "second exon outside region should not be tracked");
+        assert_eq!(exon1.mutation_map.selection_dist_id, 0,
+            "untracked exon should keep exon selection dist (id=0)");
+        assert_eq!(exon1.mutation_map.mu_dist_id, 0,
+            "untracked exon should keep exon mutation rate dist (id=0)");
+    }
+
+    #[test]
+    fn test_population_new_tracked_exon_uses_tracked_structural_dist() {
+        // Two exon features at [0, 10) and [10, 20).
+        // Tracking region [0, 9] covers only the first exon so it is tracked.
+        // structural_mu_dists[0] (exon path) guarantees 10 duplications;
+        // structural_mu_dists[5] (tracked path) guarantees 0 duplications.
+        // After structural_intra_genome the genome should contain exactly 1 tracked
+        // copy and 11 untracked copies (original + 10 dups).
+        let zero = MutationDistribution::new_uniform(0.0, 0.5).unwrap(); // → 0 when cast to usize
+        let ten_dups = MutationDistribution::new_uniform(10.0, 10.5).unwrap(); // → 10 when cast to usize
+        let structural_mu_dists = vec![
+            vec![ten_dups, zero.clone(), zero.clone()], // 0: exon — 10 dups, 0 dels, 0 inv
+            vec![zero.clone(), zero.clone(), zero.clone()], // 1: intron
+            vec![zero.clone(), zero.clone(), zero.clone()], // 2: intergenic
+            vec![zero.clone(), zero.clone(), zero.clone()], // 3: TE-CUT
+            vec![zero.clone(), zero.clone(), zero.clone()], // 4: TE-COPY
+            vec![zero.clone(), zero.clone(), zero.clone()], // 5: tracked — 0 dups
+        ];
+
+        let mut pop = make_two_exon_population_with_tracking(
+            structural_mu_dists,
+            ("chr1".to_string(), 0, 9),
+            10,
+        );
+
+        pop.structural_intra_genome();
+
+        let tracked_count = pop.pop[0].seq.iter().filter(|e| e.tracked).count();
+        let untracked_count = pop.pop[0].seq.iter().filter(|e| !e.tracked).count();
+
+        assert_eq!(tracked_count, 1,
+            "tracked exon should not be duplicated (structural_mu_dists[5] has 0 dups)");
+        assert_eq!(untracked_count, 11,
+            "untracked exon should be duplicated 10 times (structural_mu_dists[0] has 10 dups)");
+    }
+
+    #[test]
+    fn test_genome_size_penalty_impacts_selection_weights() {
+        let mut root = Vec::new();
+        root.push(vec![FeaturePos {
+            contig_id: 0,
+            feature_id: 0,
+            feature_type: "intergenic".to_string(),
+            start: 0,
+            end: 4,
+            strand: true,
+            seq: vec![1, 2, 4, 8], // 4 bp
+        }]);
+
+        let selection_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("failed to create selection dist");
+        let site_mutation_dists = vec![
+            selection_dist.clone(), // exon
+            selection_dist.clone(), // intron
+            selection_dist,         // intergenic
+        ];
+        let mu_vals = vec![1e-12, 1e-12, 1e-12]; // effectively no mutations
+
+        let recomb_prob = MutationDistribution::new_poisson(1.0)
+            .expect("failed to create recombination prob dist");
+        let recomb_len = MutationDistribution::new_poisson(1.0)
+            .expect("failed to create recombination len dist");
+        let recombination_dists = vec![recomb_prob, recomb_len];
+
+        let multiplier_dist = MutationDistribution::new_uniform(0.5, 1.5)
+            .expect("failed to create multiplier dist");
+        let multiplier_dists = vec![
+            multiplier_dist.clone(),
+            multiplier_dist.clone(),
+            multiplier_dist.clone(),
+            multiplier_dist.clone(),
+            multiplier_dist,
+        ];
+
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut pop = Population::new(
+            root,
+            2,
+            site_mutation_dists,
+            &mu_vals,
+            &mu_vals,
+            recombination_dists,
+            1.0,
+            default_structural_dists(),
+            10,
+            multiplier_dists,
+            10,
+            &mut rng,
+            false,
+            &vec!["chr1".to_string()],
+            &vec![],  // no tracking
+            false,
+            0.01, // genome_size_penalty_per_bp
+        );
+
+        assert_eq!(pop.optimal_genome_size, 4);
+
+        // Give genome 0 a large deviation and genome 1 a small deviation.
+        // The penalty multiplies each weight by (penalty_per_bp * |deviation|), so
+        // genome 0 (deviation=1000) will have ~10x the weight of genome 1 (deviation=100).
+        pop.pop[0].seq_length = pop.optimal_genome_size + 1000;
+        pop.pop[1].seq_length = pop.optimal_genome_size + 1;
+
+        let mut thread_rng = rand::thread_rng();
+        let n_rounds = 500;
+        let mut counts = [0usize; 2];
+        for _ in 0..n_rounds {
+            for idx in pop.sample_individuals(&mut thread_rng) {
+                counts[idx] += 1;
+            }
+        }
+
+        // Genome 0 has a 10x larger deviation so it should be sampled far more often.
+        assert!(
+            counts[0] < counts[1],
+            "genome with larger size deviation should have higher selection weight; counts = {:?}",
+            counts
+        );
+    }
+
+    #[test]
+    fn test_update_mu_dists() {
+        // Helper: extract lambda from a Poisson MutationDistribution
+        fn get_lambda(dist: &MutationDistribution) -> f64 {
+            match dist {
+                MutationDistribution::Poisson(p) => p.lambda(),
+                _ => panic!("Expected Poisson distribution"),
+            }
+        }
+
+        // Population: 2 genomes, each with 1 exon (100 bp), 1 intron (50 bp), 1 intergenic (200 bp)
+        let mut root = Vec::new();
+        root.push(vec![
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 0,
+                feature_type: "exon".to_string(),
+                start: 0,
+                end: 100,
+                strand: true,
+                seq: vec![1u8; 100],
+            },
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 0,
+                feature_type: "intron".to_string(),
+                start: 100,
+                end: 150,
+                strand: true,
+                seq: vec![2u8; 50],
+            },
+            FeaturePos {
+                contig_id: 0,
+                feature_id: 0,
+                feature_type: "intergenic".to_string(),
+                start: 150,
+                end: 350,
+                strand: true,
+                seq: vec![4u8; 200],
+            },
+        ]);
+
+        let selection_dists = vec![
+            MutationDistribution::new_double_exp(0.5, 2.0, 0.3).unwrap(),
+            MutationDistribution::new_uniform(0.0, 1.0).unwrap(),
+            MutationDistribution::new_uniform(0.0, 1.0).unwrap(),
+        ];
+        let mu_vals = vec![1e-3, 5e-4, 2e-3];
+        let indel_vals = vec![1e-4, 5e-5, 2e-4];
+
+        let multiplier_dist = MutationDistribution::new_uniform(0.5, 1.5).unwrap();
+        let multiplier_dists = vec![
+            multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(),
+            multiplier_dist.clone(), multiplier_dist.clone(),
+        ];
+        let recombination_dists = vec![
+            MutationDistribution::new_poisson(1.0).unwrap(),
+            MutationDistribution::new_poisson(1.0).unwrap(),
+        ];
+
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let mut pop = Population::new(
+            root,
+            2,
+            selection_dists,
+            &mu_vals,
+            &indel_vals,
+            recombination_dists,
+            1.0,
+            default_structural_dists(),
+            10,
+            multiplier_dists,
+            10,
+            &mut rng,
+            false,
+            &vec!["chr1".to_string()],
+            &vec![],
+            false,
+            0.0,
+        );
+
+        // Pre-update: lambdas should equal the raw placeholder values
+        let pre_update_lambdas: Vec<f64> = pop.mu_dists.iter().map(|dist| get_lambda(dist)).collect();
+        let pre_update_indel_lambdas: Vec<f64> = pop.indel_dists.iter().map(|dist| get_lambda(dist)).collect();
+
+        // check genome update works
+        for genome in &mut pop.pop {
+            assert_eq!(genome.total_exon_length, 100);
+            assert_eq!(genome.total_intron_length, 50);
+            assert_eq!(genome.total_intergenic_length, 200);
+            genome.update_contig_starts();
+            assert_eq!(genome.total_exon_length, 100);
+            assert_eq!(genome.total_intron_length, 50);
+            assert_eq!(genome.total_intergenic_length, 200);
+        }
+        
+        // update contig distrubutions with the new mu/indel values
+        pop.update_mu_dists(&mu_vals, &indel_vals);
+
+        // Post-update: lambda = mu * avg_element_size per type
+        // 2 genomes × 1 exon (100 bp)       → avg = 100
+        // 2 genomes × 1 intron (50 bp)       → avg = 50
+        // 2 genomes × 1 intergenic (200 bp)  → avg = 200
+        let post_update_lambdas: Vec<f64> = pop.mu_dists.iter().map(|dist| get_lambda(dist)).collect();
+        let post_update_indel_lambdas: Vec<f64> = pop.indel_dists.iter().map(|dist| get_lambda(dist)).collect();
+        assert_eq!(post_update_lambdas[0], pre_update_lambdas[0] * 100.0);
+        assert_eq!(post_update_lambdas[1], pre_update_lambdas[1] * 50.0);
+        assert_eq!(post_update_lambdas[2], pre_update_lambdas[2] * 200.0);
+        assert_eq!(post_update_indel_lambdas[0], pre_update_indel_lambdas[0] * 100.0);
+        assert_eq!(post_update_indel_lambdas[1], pre_update_indel_lambdas[1] * 50.0);
+        assert_eq!(post_update_indel_lambdas[2], pre_update_indel_lambdas[2] * 200.0);
+
     }
 }

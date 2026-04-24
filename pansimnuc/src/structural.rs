@@ -45,6 +45,7 @@ pub fn mutate_intra_genome(
     genome: &mut Genome,
     structural_mu_dists: &Vec<Vec<MutationDistribution>>,
     pos_dist: &MutationDistribution,
+    augment_tracking: bool,
 ) -> (usize, usize, usize, usize, usize, usize, usize) {
     let mut thread_rng = rand::thread_rng();
 
@@ -53,7 +54,6 @@ pub fn mutate_intra_genome(
 
     // store hashmap of positions of genome elements, can store multiple per entry to capture duplications
     let mut new_positions: HashMap<i64, Vec<(usize, i64)>> = HashMap::new();
-    let mut max_position: usize = 0;
 
     // check which contig each block will be inserted into
     let contig_starts = &genome.contig_starts;
@@ -67,12 +67,7 @@ pub fn mutate_intra_genome(
     let mut total_inversions = 0;
 
     for (current_pos, element) in &mut genome.seq.iter().enumerate() {
-        // determine maximum position
-        if current_pos > max_position {
-            max_position = current_pos;
-        }
-
-        let mutation_dist: &Vec<MutationDistribution> = match element.feature_type.as_str() {
+        let mut mutation_dist: &Vec<MutationDistribution> = match element.feature_type.as_str() {
             "exon" => &structural_mu_dists[0],
             "intron" => &structural_mu_dists[1],
             "intergenic" => &structural_mu_dists[2],
@@ -80,6 +75,11 @@ pub fn mutate_intra_genome(
             "TE-COPY" => &structural_mu_dists[4],
             _ => panic!("Unknown feature type: {}", element.feature_type),
         };
+
+        // override for tracked elements
+        if element.tracked && augment_tracking {
+            mutation_dist = &structural_mu_dists[5];
+        }
 
         // get feature type
         let feature_type = &element.feature_type;
@@ -149,11 +149,6 @@ pub fn mutate_intra_genome(
 
             new_positions_vec.push((new_contig_id, new_pos));
 
-            // determine maximum position present
-            if new_pos as usize > max_position {
-                max_position = new_pos as usize;
-            }
-
             if dup_count > 0 && feature_type == "TE-CUT" {
                 // if element is a TE-COPY and has already been duplicated, break loop to prevent further duplications, to avoid runaway genome growth
                 break;
@@ -212,38 +207,53 @@ pub fn mutate_intra_genome(
     // generate new genome based on all intra-genome variation, current everything is 1-indexed
     let mut new_genome_seq: Vec<(usize, i64)> = Vec::new();
 
-    // iterate through each position, indexed by new position
-    for idx in 0..=max_position {
-        if let Some(prev_pos) = new_positions.get(&(idx as i64)) {
-            // value exists
-            for entry in prev_pos {
-                if entry.1 == 0 {
-                    panic!(
-                        "Entry for structural varient is 0, for position {} in genome {}",
-                        idx, genome.identifier
-                    );
-                }
+    // sort actual keys instead of iterating a sparse 0..=max_position range,
+    // which could be enormous when duplications land far from the current position
+    let mut sorted_positions: Vec<i64> = new_positions.keys().copied().collect();
+    sorted_positions.sort_unstable();
 
-                // append entry, meaning that genes are not deleted, appended in order
-                new_genome_seq.push(*entry);
+    for idx in sorted_positions {
+        for entry in &new_positions[&idx] {
+            if entry.1 == 0 {
+                panic!(
+                    "Entry for structural varient is 0, for position {} in genome {}",
+                    idx, genome.identifier
+                );
             }
+
+            // append entry, meaning that genes are not deleted, appended in order
+            new_genome_seq.push(*entry);
         }
     }
 
     // generate new genome
-    let mut new_genome: Vec<NucElement> = Vec::new();
+    // count how many times each source index is referenced so we can move
+    // single-reference elements instead of cloning them, avoiding a full
+    // duplicate of genome.seq in memory for the common (no-duplication) case
+    let mut ref_counts: Vec<usize> = vec![0usize; genome.seq.len()];
+    for &(_, element_idx) in &new_genome_seq {
+        ref_counts[element_idx.abs() as usize - 1] += 1;
+    }
+
+    let mut source: Vec<Option<NucElement>> = genome.seq.drain(..).map(Some).collect();
+    let mut new_genome: Vec<NucElement> = Vec::with_capacity(new_genome_seq.len());
 
     for (contig_id, element_idx) in new_genome_seq {
-        let invert: bool = if element_idx > 0 { false } else { true };
-        let mut new_element = genome.seq[element_idx.abs() as usize - 1].clone(); // convert back to 0 indexed
+        let invert = element_idx < 0;
+        let src_idx = element_idx.abs() as usize - 1;
+
+        ref_counts[src_idx] -= 1;
+        let mut new_element = if ref_counts[src_idx] == 0 {
+            // last (or only) reference — move instead of clone
+            source[src_idx].take().unwrap()
+        } else {
+            source[src_idx].as_ref().unwrap().clone()
+        };
 
         if invert {
             new_element.strand = !new_element.strand;
         }
-
-        // update contig id
         new_element.contig_id = contig_id;
-
         new_genome.push(new_element);
     }
 
@@ -645,6 +655,7 @@ mod tests {
     use crate::population::{Genome, NucElement};
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use std::sync::Arc;
 
     fn default_structural_dists() -> Vec<Vec<MutationDistribution>> {
         let mut structural_dists = Vec::new();
@@ -668,6 +679,19 @@ mod tests {
             genome_id: 0,
             parent: "root".to_string(),
             contig_starts: vec![0],
+            total_exon_length: 0,
+            total_intron_length: 0,
+            total_intergenic_length: 0,
+            total_te_cut_length: 0,
+            total_te_copy_length: 0,
+            total_tracking_length: 0,
+            total_elements: 0,
+            total_exon_elements: 0,
+            total_intron_elements: 0,
+            total_intergenic_elements: 0,
+            total_te_cut_elements: 0,
+            total_te_copy_elements: 0,
+            total_tracking_elements: 0,
             seq: vec![
                 NucElement {
                     contig_id: 0,
@@ -675,11 +699,13 @@ mod tests {
                     feature_id: 0,
                     feature_type: "exon".to_string(),
                     multiplier: 1.0,
-                    seq: vec![],
-                    mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
+                    seq: Arc::new(vec![]),
+                    mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
                     strand: true,
                     original_length: 0,
                     frameshift: false,
+                    tracked: false,
+                    selection_coeff: 0.0,
                 },
                 NucElement {
                     contig_id: 0,
@@ -687,11 +713,13 @@ mod tests {
                     feature_id: 1,
                     feature_type: "exon".to_string(),
                     multiplier: 1.0,
-                    seq: vec![],
-                    mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
+                    seq: Arc::new(vec![]),
+                    mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
                     strand: false,
                     original_length: 0,
                     frameshift: false,
+                    tracked: false,
+                    selection_coeff: 0.0,
                 },
                 NucElement {
                     contig_id: 0,
@@ -699,11 +727,13 @@ mod tests {
                     feature_id: 2,
                     feature_type: "exon".to_string(),
                     multiplier: 1.0,
-                    seq: vec![],
-                    mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
+                    seq: Arc::new(vec![]),
+                    mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
                     strand: false,
                     original_length: 0,
                     frameshift: false,
+                    tracked: false,
+                    selection_coeff: 0.0,
                 },
             ],
             seq_length: 0,
@@ -725,11 +755,13 @@ mod tests {
             feature_id,
             feature_type: "exon".to_string(),
             multiplier: 1.0,
-            seq: vec![],
-            mutation_map: MutationMap::new(0, 0, &vec![], sel_dist, rng),
+            seq: Arc::new(vec![]),
+            mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], sel_dist, rng)),
             strand,
             original_length: 0,
             frameshift: false,
+            tracked: false,
+            selection_coeff: 0.0,
         };
 
         Genome {
@@ -746,6 +778,19 @@ mod tests {
                 make_element(2, 5, 5, false, &sel_dist, &mut rng),
             ],
             seq_length: 0,
+            total_exon_length: 0,
+            total_intron_length: 0,
+            total_intergenic_length: 0,
+            total_te_cut_length: 0,
+            total_te_copy_length: 0,
+            total_tracking_length: 0,
+            total_elements: 0,
+            total_exon_elements: 0,
+            total_intron_elements: 0,
+            total_intergenic_elements: 0,
+            total_te_cut_elements: 0,
+            total_te_copy_elements: 0,
+            total_tracking_elements: 0,
         }
     }
 
@@ -768,8 +813,8 @@ mod tests {
                 feature_id: idx,
                 feature_type: "exon".to_string(),
                 multiplier: 1.0,
-                seq: marker_seq.clone(),
-                mutation_map: MutationMap::new(0, 0, &marker_seq, &sel_dist, &mut rng),
+                seq: Arc::new(marker_seq.clone()),
+                mutation_map: Arc::new(MutationMap::new(0, 0, &marker_seq, &sel_dist, &mut rng)),
                 strand: if idx % 2 == 0 {
                     strand_seed
                 } else {
@@ -777,6 +822,8 @@ mod tests {
                 },
                 original_length: marker_seq.len(),
                 frameshift: false,
+                tracked: false,
+                selection_coeff: 0.0,
             });
         }
 
@@ -787,6 +834,19 @@ mod tests {
             contig_starts: vec![0],
             seq,
             seq_length: 0,
+            total_exon_length: 0,
+            total_intron_length: 0,
+            total_intergenic_length: 0,
+            total_te_cut_length: 0,
+            total_te_copy_length: 0,
+            total_tracking_length: 0,
+            total_elements: 0,
+            total_exon_elements: 0,
+            total_intron_elements: 0,
+            total_intergenic_elements: 0,
+            total_te_cut_elements: 0,
+            total_te_copy_elements: 0,
+            total_tracking_elements: 0,
         }
     }
 
@@ -821,6 +881,9 @@ mod tests {
             max_multiplier_dist: 10,
             n_generations: 10,
             verbose: true,
+            augment_tracking: false,
+            genome_size_penalty_per_bp: 0.01,
+            optimal_genome_size: 1000,
         }
     }
 
@@ -855,7 +918,7 @@ mod tests {
             homology_map.push(vec![vec![0]]);
         }
 
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
 
         let after_strands: Vec<bool> = genome.seq.iter().map(|e| e.strand).collect();
         assert_ne!(
@@ -883,7 +946,7 @@ mod tests {
         }
 
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
 
         assert!(
             genome.seq.len() < before_len,
@@ -914,7 +977,7 @@ mod tests {
 
         // Use a non-zero offset so duplicates land somewhere other than position 0.
         let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
 
         assert_eq!(
             genome.seq.len(),
@@ -942,7 +1005,7 @@ mod tests {
 
         let pos = MutationDistribution::new_uniform(0.0, 0.9).unwrap();
 
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
 
         let contig_ids: Vec<usize> = genome.seq.iter().map(|e| e.contig_id).collect();
         assert!(!contig_ids.is_empty(), "mutated genome should not be empty");
@@ -1155,11 +1218,13 @@ mod tests {
                 feature_id: 0,
                 feature_type: element_type.to_string(),
                 multiplier: 1.0,
-                seq: vec![1, 2, 4, 8],
-                mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
+                seq: Arc::new(vec![1, 2, 4, 8]),
+                mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
                 strand: true,
                 original_length: 4,
                 frameshift: false,
+                tracked: false,
+                selection_coeff: 0.0,
             },
             NucElement {
                 contig_id: 0,
@@ -1167,11 +1232,13 @@ mod tests {
                 feature_id: 0,
                 feature_type: "exon".to_string(),
                 multiplier: 1.0,
-                seq: vec![1, 2, 4, 8],
-                mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
+                seq: Arc::new(vec![1, 2, 4, 8]),
+                mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
                 strand: true,
                 original_length: 4,
                 frameshift: false,
+                tracked: false,
+                selection_coeff: 0.0,
             },
             NucElement {
                 contig_id: 0,
@@ -1179,13 +1246,28 @@ mod tests {
                 feature_id: 0,
                 feature_type: "intergenic".to_string(),
                 multiplier: 1.0,
-                seq: vec![1, 2, 4, 8],
-                mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
+                seq: Arc::new(vec![1, 2, 4, 8]),
+                mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
                 strand: true,
                 original_length: 4,
                 frameshift: false,
+                tracked: false,
+                selection_coeff: 0.0,
             }],
             seq_length: 0,
+            total_exon_length: 0,
+            total_intron_length: 0,
+            total_intergenic_length: 0,
+            total_te_cut_length: 0,
+            total_te_copy_length: 0,
+            total_tracking_length: 0,
+            total_elements: 0,
+            total_exon_elements: 0,
+            total_intron_elements: 0,
+            total_intergenic_elements: 0,
+            total_te_cut_elements: 0,
+            total_te_copy_elements: 0,
+            total_tracking_elements: 0,
         };
         genome
     }
@@ -1203,7 +1285,7 @@ mod tests {
         default_structural_dists[4][0] = MutationDistribution::new_uniform(2.0, 2.1).unwrap();
         let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
         
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
         
         // TE-COPY should result in multiple copies (original + duplicates)
         assert!(
@@ -1237,7 +1319,7 @@ mod tests {
         default_structural_dists[3][1] = MutationDistribution::new_uniform(2.0, 2.1).unwrap();
         let pos = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
         
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
         
         // After cut-and-paste, genome should have same or fewer elements
         // (original deleted, one copy inserted)
@@ -1279,7 +1361,7 @@ mod tests {
         // Use Poisson position distribution for non-TEs
         let pos = MutationDistribution::new_poisson(1.5).unwrap();
         
-        mutate_intra_genome(&mut genome, &default_structural_dists, &pos);
+        mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
         
         // Should have duplications
         assert!(
