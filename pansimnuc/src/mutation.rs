@@ -446,7 +446,6 @@ pub struct MutationMap {
     data: [Vec<Option<f64>>; 5],
 }
 
-#[hotpath::measure_all]
 impl MutationMap {
     fn allele_to_index(level: u8) -> Option<usize> {
         match level {

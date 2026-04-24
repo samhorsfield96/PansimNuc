@@ -32,7 +32,6 @@ pub struct NucElement {
     pub selection_coeff: f64
 }
 
-#[hotpath::measure_all]
 impl NucElement {
     fn calculate_element_selection_coefficient(&mut self) {
         let mut element_log_sum = 0.0;
@@ -98,7 +97,6 @@ pub struct Genome {
     pub total_tracking_elements: usize,
 }
 
-#[hotpath::measure_all]
 impl Genome {
     pub fn update_contig_starts(&mut self) {
         self.contig_starts.clear();
@@ -190,7 +188,6 @@ pub struct Population {
     pub optimal_genome_size: usize,
 }
 
-#[hotpath::measure_all]
 impl Population {
     pub fn total_seq_lengths(&self) -> (f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) {
         let mut total_length = 0;

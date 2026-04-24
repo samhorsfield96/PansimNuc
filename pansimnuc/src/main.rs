@@ -33,7 +33,7 @@ struct Args {
     #[arg(long, help = "Optional path to config file")]
     config: Option<String>,
 }
-#[hotpath::main]
+
 fn main() {
     let args = Args::parse();
 
@@ -44,11 +44,9 @@ fn main() {
     let mut genome_size_penalty_per_bp = 0.0;
     let mut print_dfe = false;
 
-    let config_path = "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc/test_configs/testing.conf";
-
     // Load config if provided
     let mut verbose = false;
-    //if let Some(config_path) = &args.config {
+    if let Some(config_path) = &args.config {
         match Config::from_file(config_path) {
             Ok(config) => {
                 println!("Loaded config from: {}", config_path);
@@ -104,7 +102,7 @@ fn main() {
                 std::process::exit(1);
             }
         }
-    //}
+    }
 
     // enable multithreading
     if let Some(n_threads_str) = configuration.get("misc.threads") {
@@ -329,14 +327,7 @@ fn main() {
                     println!("Finished initialising population...");
 
                     // run simulation
-                    let pool = rayon::ThreadPoolBuilder::new()
-                        .num_threads(1)
-                        .use_current_thread()  // <-- runs work on the calling (main) thread
-                        .build()
-                        .unwrap();
-                    pool.install(|| {
-                        metapopopulation.run_simulation(is_tracking, &configuration);
-                    });
+                    metapopopulation.run_simulation(is_tracking, &configuration);
                     
                     println!("Writing output...");
                     metapopopulation.write_output(&configuration);

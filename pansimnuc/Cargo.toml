@@ -18,8 +18,3 @@ petgraph = "0.8.3"
 itertools = "0.14.0"
 triple_accel = "*"
 csv = "1.4.0"
-hotpath = "0.15"
-
-[features]
-hotpath = ["hotpath/hotpath"]
-hotpath-alloc = ["hotpath/hotpath-alloc"]
