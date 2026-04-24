@@ -659,6 +659,7 @@ mod tests {
     use crate::population::{Genome, NucElement};
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use std::sync::Arc;
 
     fn default_structural_dists() -> Vec<Vec<MutationDistribution>> {
         let mut structural_dists = Vec::new();
@@ -702,8 +703,8 @@ mod tests {
                     feature_id: 0,
                     feature_type: "exon".to_string(),
                     multiplier: 1.0,
-                    seq: vec![],
-                    mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
+                    seq: Arc::new(vec![]),
+                    mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
                     strand: true,
                     original_length: 0,
                     frameshift: false,
@@ -715,8 +716,8 @@ mod tests {
                     feature_id: 1,
                     feature_type: "exon".to_string(),
                     multiplier: 1.0,
-                    seq: vec![],
-                    mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
+                    seq: Arc::new(vec![]),
+                    mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
                     strand: false,
                     original_length: 0,
                     frameshift: false,
@@ -728,8 +729,8 @@ mod tests {
                     feature_id: 2,
                     feature_type: "exon".to_string(),
                     multiplier: 1.0,
-                    seq: vec![],
-                    mutation_map: MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng),
+                    seq: Arc::new(vec![]),
+                    mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
                     strand: false,
                     original_length: 0,
                     frameshift: false,
@@ -755,8 +756,8 @@ mod tests {
             feature_id,
             feature_type: "exon".to_string(),
             multiplier: 1.0,
-            seq: vec![],
-            mutation_map: MutationMap::new(0, 0, &vec![], sel_dist, rng),
+            seq: Arc::new(vec![]),
+            mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], sel_dist, rng)),
             strand,
             original_length: 0,
             frameshift: false,
@@ -812,8 +813,8 @@ mod tests {
                 feature_id: idx,
                 feature_type: "exon".to_string(),
                 multiplier: 1.0,
-                seq: marker_seq.clone(),
-                mutation_map: MutationMap::new(0, 0, &marker_seq, &sel_dist, &mut rng),
+                seq: Arc::new(marker_seq.clone()),
+                mutation_map: Arc::new(MutationMap::new(0, 0, &marker_seq, &sel_dist, &mut rng)),
                 strand: if idx % 2 == 0 {
                     strand_seed
                 } else {
@@ -1216,8 +1217,8 @@ mod tests {
                 feature_id: 0,
                 feature_type: element_type.to_string(),
                 multiplier: 1.0,
-                seq: vec![1, 2, 4, 8],
-                mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
+                seq: Arc::new(vec![1, 2, 4, 8]),
+                mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
                 strand: true,
                 original_length: 4,
                 frameshift: false,
@@ -1229,8 +1230,8 @@ mod tests {
                 feature_id: 0,
                 feature_type: "exon".to_string(),
                 multiplier: 1.0,
-                seq: vec![1, 2, 4, 8],
-                mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
+                seq: Arc::new(vec![1, 2, 4, 8]),
+                mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
                 strand: true,
                 original_length: 4,
                 frameshift: false,
@@ -1242,8 +1243,8 @@ mod tests {
                 feature_id: 0,
                 feature_type: "intergenic".to_string(),
                 multiplier: 1.0,
-                seq: vec![1, 2, 4, 8],
-                mutation_map: MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng),
+                seq: Arc::new(vec![1, 2, 4, 8]),
+                mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
                 strand: true,
                 original_length: 4,
                 frameshift: false,

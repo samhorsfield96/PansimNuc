@@ -23,8 +23,8 @@ pub struct NucElement {
     pub feature_id: usize,
     pub feature_type: String,
     pub multiplier: f64,
-    pub seq: Vec<u8>,
-    pub mutation_map: MutationMap,
+    pub seq: Arc<Vec<u8>>,
+    pub mutation_map: Arc<MutationMap>,
     pub strand: bool,
     pub original_length: usize,
     pub frameshift: bool,
@@ -80,7 +80,7 @@ pub struct Genome {
     pub genome_id: usize,
     pub contig_starts: Vec<usize>,
     pub parent: String,
-    pub seq: Arc<Vec<NucElement>>,
+    pub seq: Vec<NucElement>,
     pub seq_length: usize,
     pub total_exon_length: usize,
     pub total_intron_length: usize,
@@ -584,15 +584,15 @@ impl Population {
                     element_id: element_id,
                     feature_id: feature.feature_id,
                     feature_type: feature.feature_type.clone(),
-                    seq: feature.seq.clone(),
+                    seq: Arc::new(feature.seq.clone()),
                     strand: feature.strand,
-                    mutation_map: MutationMap::new(
+                    mutation_map: Arc::new(MutationMap::new(
                         selection_dist_id,
                         mu_dist_id,
                         &feature.seq,
                         &selection_dists[selection_dist_id],
                         rng,
-                    ),
+                    )),
                     multiplier: multiplier,
                     original_length: feature.seq.len(),
                     frameshift: false,
@@ -604,13 +604,13 @@ impl Population {
                     identify_tracked_element(&mut element, current_start, &tracking_regions, &contig_name_to_id);
                     if element.tracked && augment_tracking {
                         // update selection maps etc
-                        element.mutation_map = MutationMap::new(
+                        element.mutation_map = Arc::new(MutationMap::new(
                             5, // new selection dist ID for tracked elements
                             5, // new mu dist ID for tracked elements
                             &element.seq,
                             &selection_dists[5], // new selection distribution for tracked elements
                             rng,
-                        );
+                        ));
                         element.multiplier = multiplier_dists[5].sample(rng);
                     }
                 }
@@ -713,17 +713,19 @@ impl Population {
             .pop
             .par_iter_mut()
             .map(|genome| {
-                Arc::make_mut(&mut genome.seq)
+                genome.seq
                     .iter_mut()
                     .fold((0, 0), |(snps, indels), element| {
-                        let (s, i) = element.mutation_map.mutate(
+                        let selection_dist_id = element.mutation_map.selection_dist_id;
+                        let mu_dist_id = element.mutation_map.mu_dist_id;
+                        let (s, i) = Arc::make_mut(&mut element.mutation_map).mutate(
                             core_vec,
-                            &mut element.seq,
+                            Arc::make_mut(&mut element.seq),
                             element.original_length,
                             &mut element.frameshift,
-                            &selection_dists[element.mutation_map.selection_dist_id],
-                            &mu_dists[element.mutation_map.mu_dist_id],
-                            &indel_dists[element.mutation_map.mu_dist_id],
+                            &selection_dists[selection_dist_id],
+                            &mu_dists[mu_dist_id],
+                            &indel_dists[mu_dist_id],
                         );
                         (snps + s, indels + i)
                     })
@@ -1001,7 +1003,7 @@ impl Population {
 
                 let mut wrapped_line_len = 0usize;
                 for idx in indices {
-                    for &base in &genome.seq[idx].seq {
+                    for &base in genome.seq[idx].seq.iter() {
                         writer.write_all(&[Self::decode_base(base)])?;
                         wrapped_line_len += 1;
 
@@ -1572,7 +1574,7 @@ mod tests {
                 genome
                     .seq
                     .iter()
-                    .map(|element| element.seq.clone())
+                    .map(|element| (*element.seq).clone())
                     .collect()
             })
             .collect();
@@ -1595,7 +1597,7 @@ mod tests {
             let new_sequences: Vec<Vec<u8>> = genome
                 .seq
                 .iter()
-                .map(|element| element.seq.clone())
+                .map(|element| (*element.seq).clone())
                 .collect();
             assert_eq!(new_sequences, original_sequences[selected_index]);
         }
@@ -1923,8 +1925,8 @@ mod tests {
             feature_id: feature_id,
             feature_type: "exon".to_string(),
             multiplier: 1.0,
-            seq: seq.clone(),
-            mutation_map,
+            seq: seq.clone().into(),
+            mutation_map: mutation_map.into(),
             strand: true,
             original_length: seq.len(),
             frameshift: false,

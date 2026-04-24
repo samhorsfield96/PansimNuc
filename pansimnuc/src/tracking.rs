@@ -117,6 +117,7 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     fn make_element(contig_id: usize, seq_len: usize) -> NucElement {
         let seq = vec![1u8; seq_len];
@@ -128,8 +129,8 @@ mod tests {
             feature_id: 0,
             feature_type: "intergenic".to_string(),
             multiplier: 1.0,
-            mutation_map: MutationMap::new(0, 0, &seq, &dist, &mut rng),
-            seq,
+            mutation_map: Arc::new(MutationMap::new(0, 0, &seq, &dist, &mut rng)),
+            seq: Arc::new(seq),
             strand: true,
             original_length: seq_len,
             frameshift: false,
