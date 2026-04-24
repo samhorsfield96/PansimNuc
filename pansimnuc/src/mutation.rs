@@ -6,7 +6,6 @@ use rand::Rng;
 use rand::rngs::{StdRng, ThreadRng};
 use rand::seq::IteratorRandom;
 use rand_distr::{Distribution as RandDist, Exp, Normal, Uniform, Gamma};
-use rustc_hash::FxHashMap;
 use statrs::distribution::Poisson;
 use std::collections::HashMap;
 use std::fmt;
@@ -444,35 +443,20 @@ impl Distribution {
 pub struct MutationMap {
     pub selection_dist_id: usize,
     pub mu_dist_id: usize,
-    data: [FxHashMap<usize, f64>; 5],
+    data: [Vec<Option<f64>>; 5],
 }
 
 #[hotpath::measure_all]
 impl MutationMap {
     fn allele_to_index(level: u8) -> Option<usize> {
-        // Convert one-hot allele code to zero-based index using bit shifting:
-        // 1 -> 0, 2 -> 1, 4 -> 2, 8 -> 3.
-        // N (16) is represented at index 4.
-        if level == 16 {
-            return Some(4);
+        match level {
+            1 => Some(0),
+            2 => Some(1),
+            4 => Some(2),
+            8 => Some(3),
+            16 => Some(4),
+            _ => panic!("Allele code must be one-hot (1, 2, 4, 8, 16); got {}", level),
         }
-
-        if level == 0 || (level & (level - 1)) != 0 {
-            panic!("Allele code must be one-hot (1, 2, 4, 8); got {}", level);
-        }
-
-        let mut idx = 0usize;
-        let mut value = level;
-        while value > 1 {
-            value >>= 1;
-            idx += 1;
-        }
-
-        if idx >= 4 {
-            panic!("Allele code out of range for A/C/G/T map: {}", level);
-        }
-
-        Some(idx)
     }
 
     pub fn new(
@@ -482,12 +466,12 @@ impl MutationMap {
         selection_dist: &Distribution,
         rng: &mut StdRng,
     ) -> Self {
-        let mut data = std::array::from_fn(|_| FxHashMap::default());
+        let mut data = std::array::from_fn(|_| vec![None; seq.len()]);
 
         for (site, allele) in seq.iter().enumerate() {
             let allele_index = Self::allele_to_index(*allele)
                 .expect("Allele code conversion failed while building mutation map");
-            data[allele_index].insert(site, selection_dist.sample(rng));
+            data[allele_index][site] = Some(selection_dist.sample(rng));
         }
 
         Self {
@@ -498,32 +482,18 @@ impl MutationMap {
     }
 
     fn update_data (&mut self, site: usize, is_insertion: bool, sequence_length: usize) {
-        // if is_insertion, need to shift all existing keys at this site and above up by 1 to account for new site
+        // if is_insertion, duplicate the current site entry and shift all later sites up by one
         if is_insertion {
             for allele_map in self.data.iter_mut() {
-                
-                // start at end to correctly handle shifting keys without overwriting existing entries before they are processed
-                for key in (site..sequence_length).rev() {
-                    if let Some(value) = allele_map.get(&key) {
-                        allele_map.insert(key + 1, *value);
-                    }
-                }
+                let existing_value = allele_map.get(site).copied().flatten();
+                allele_map.insert(site, existing_value);
             }
         } else {
-            // deletion: need to remove any entries for this site and shift down keys above this site
+            // deletion: remove this site and shift later sites down by one
             for allele_map in self.data.iter_mut() {
-                allele_map.remove(&site);
-                if allele_map.len() == 0 {
-                    continue;
+                if site < sequence_length {
+                    allele_map.remove(site);
                 }
-                // start at site + 1 to shift down keys above the deleted site
-                for key in site + 1..sequence_length {
-                    if let Some(value) = allele_map.get(&key) {
-                        allele_map.insert(key - 1, *value);
-                    }
-                }
-                // remove the last key which is now duplicated after shifting down
-                allele_map.remove(&(sequence_length - 1));
             }
         }
     }
@@ -531,13 +501,16 @@ impl MutationMap {
     fn insert(&mut self, level: u8, key: usize, value: f64) {
         let allele_index = Self::allele_to_index(level)
             .expect("Cannot insert selection coefficient for invalid allele code");
-        self.data[allele_index].insert(key, value);
+        if self.data[allele_index].len() <= key {
+            self.data[allele_index].resize(key + 1, None);
+        }
+        self.data[allele_index][key] = Some(value);
     }
 
     pub fn get(&self, level: u8, key: usize) -> Option<&f64> {
         let allele_index = Self::allele_to_index(level)
             .expect("Cannot lookup selection coefficient for invalid allele code");
-        self.data[allele_index].get(&key)
+        self.data[allele_index].get(key).and_then(Option::as_ref)
     }
 
     #[cfg(test)]
@@ -1001,9 +974,11 @@ mod tests {
             assert_eq!(seq.len(), original_length);
             assert_eq!(map.data.len(), original_map_state.len());
             for (allele_map, original_allele_map) in map.data.iter().zip(original_map_state.iter()) {
-                // for each entry in original allele map, check that same key exists in mutated map and has same value; also check no new keys were added
-                for (key, value) in original_allele_map.iter() {
-                    assert_eq!(allele_map.get(key), Some(value));
+                // for each pre-existing entry, check that the same key still has the same value
+                for (key, value) in original_allele_map.iter().enumerate() {
+                    if let Some(value) = value {
+                        assert_eq!(allele_map.get(key), Some(&Some(*value)));
+                    }
                 }
             }
         }

@@ -31,12 +31,12 @@ pub struct NucElement {
     pub tracked: bool
 }
 
+#[hotpath::measure_all]
 impl NucElement {
-    fn element_selection_coefficient(&self, genome_identifier: &str) -> f64 {
+    fn element_selection_coefficient(&self) -> f64 {
         let mut element_log_sum = 0.0;
 
         for (site, allele) in self.seq.iter().enumerate() {
-            let allele_shifted = 1 >> allele;
             if let Some(coeff) = self.mutation_map.get(*allele, site) {
                 let log_coeff = (1.0 + coeff).ln(); // add log of coefficient to log sum
                 if log_coeff == std::f64::NEG_INFINITY {
@@ -47,8 +47,8 @@ impl NucElement {
                 element_log_sum += log_coeff;
             } else {
                 panic!(
-                    "Failed to generate selection coefficient for genome {} allele {} (shifted {}) at site {}",
-                    genome_identifier, allele, allele_shifted, site
+                    "Failed to generate selection coefficient for allele {} at site {}",
+                    allele, site
                 );
             }
         }
@@ -442,7 +442,7 @@ impl Population {
 
             // if feature not broken, add up sites
             if !feature_broken {
-                element_log_sum += element.element_selection_coefficient(&genome.identifier);
+                element_log_sum += element.element_selection_coefficient();
                 
                 // if any value is zero, product is zero so genome selection coefficient is zero
                 if element_log_sum == std::f64::NEG_INFINITY {
@@ -1090,7 +1090,7 @@ impl Population {
 
                 // calculate element selection coefficient
                 let log_element_selection_coefficient =
-                    element.element_selection_coefficient(&genome.identifier);
+                    element.element_selection_coefficient();
                 let element_selection_coefficient =
                     if log_element_selection_coefficient == std::f64::NEG_INFINITY {
                         0.0
@@ -1954,7 +1954,7 @@ mod tests {
             &coefficients,
         );
 
-        let log_sum = element.element_selection_coefficient("test-genome");
+        let log_sum = element.element_selection_coefficient();
         assert_eq!(log_sum, std::f64::NEG_INFINITY);
     }
 
@@ -1973,7 +1973,7 @@ mod tests {
 
         let expected = val1.ln() + val2.ln() + val3.ln();
 
-        let log_sum = element.element_selection_coefficient("test-genome");
+        let log_sum = element.element_selection_coefficient();
 
         assert!(log_sum == expected);
     }
