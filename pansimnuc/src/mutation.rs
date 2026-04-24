@@ -545,7 +545,7 @@ impl MutationMap {
         self.insert(level, key, value);
     }
 
-    fn mutate_snps (
+    fn mutate_snps(
         &mut self,
         core_vec: &Vec<Vec<u8>>,
         seq: &mut Vec<u8>,
@@ -554,14 +554,18 @@ impl MutationMap {
         thread_rng: &mut ThreadRng
     ) -> usize {
         let seq_len = seq.len();
-        let sampled_sites = (0..seq_len).choose_multiple(thread_rng, n_sites);
+        if seq_len == 0 {
+            return 0;
+        }
+
+        let n_draws = n_sites.min(seq_len);
+        let sampled_sites = (0..seq_len).choose_multiple(thread_rng, n_draws);
 
         // iterate for number of mutations required to reach mutation rate
         for mutant_site in sampled_sites {
             // sample new site to mutate
             let value = seq[mutant_site];
 
-            // N is stored in the map but should not be mutated; skip
             if value == 16 {
                 continue;
             }
@@ -571,22 +575,21 @@ impl MutationMap {
             let values = &core_vec[allele_index];
 
             // sample new allele
-            let new_allele = values.iter().choose_multiple(thread_rng, 1)[0];
+            let new_allele = values[thread_rng.gen_range(0..values.len())];
 
             // generate new selection coefficient for this mutation if necessary, otherwise retrieve existing one
-            if let Some(_) = self.get(*new_allele, mutant_site) {
+            if let Some(_) = self.get(new_allele, mutant_site) {
                 // value exists
                 continue;
             } else {
                 let selection_coefficient = selection_dist.sample(thread_rng);
-                self.insert(*new_allele, mutant_site, selection_coefficient);
+                self.insert(new_allele, mutant_site, selection_coefficient);
             }
 
             // set value in place
-            seq[mutant_site] = *new_allele;
+            seq[mutant_site] = new_allele;
         }
-        n_sites
-
+        n_draws
     }
 
     fn mutate_indels (
@@ -628,12 +631,12 @@ impl MutationMap {
 
             if is_insertion {
                 // insertion: sample new allele to insert
-                let new_allele = core_vec[4].iter().choose(thread_rng).expect("Failed to sample from core_vec");
-                seq.insert(mutant_site, *new_allele);
+                let new_allele = core_vec[4][thread_rng.gen_range(0..core_vec[4].len())];
+                seq.insert(mutant_site, new_allele);
 
                 // add selection coefficient
                 let selection_coefficient = selection_dist.sample(thread_rng);
-                self.insert(*new_allele, mutant_site, selection_coefficient);
+                self.insert(new_allele, mutant_site, selection_coefficient);
             } else {
                 // deletion: remove allele at mutant_site
                 seq.remove(mutant_site);
