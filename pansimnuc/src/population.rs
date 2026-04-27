@@ -274,6 +274,12 @@ impl Population {
 
             // check upstream elements in feature_map_entry
             for feature_element_idx in 0..position {
+                // check if feature valid, may have moved to start of genome so break
+                if position - feature_element_idx > element_idx {
+                    feature_broken = true;
+                    break;
+                }
+                
                 // get upstream feature in genome
                 let actual_element = &genome.seq[element_idx - (position - feature_element_idx)];
                 let actual_element_id = actual_element.element_id;
