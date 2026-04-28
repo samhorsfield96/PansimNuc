@@ -96,6 +96,13 @@ fn main() {
                         .parse::<bool>()
                         .expect("print_DFE must be a boolean (true/false).");
                 }
+
+                if let Some(outdir) = configuration.get("output.outdir") {
+                    std::fs::create_dir_all(outdir).unwrap_or_else(|err| {
+                        eprintln!("Failed to create output directory '{}': {err}", outdir);
+                        std::process::exit(1);
+                    });
+                }
             }
             Err(err) => {
                 eprintln!("Failed to read config file: {err}");
