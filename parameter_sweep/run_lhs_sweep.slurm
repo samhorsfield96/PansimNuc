@@ -27,25 +27,27 @@
 #SBATCH --job-name=pansimnuc_lhs
 #SBATCH --output=logs/%A_%a.out
 #SBATCH --error=logs/%A_%a.err
-#SBATCH --array=0-99              # <-- Set to 0-(N_SAMPLES-1)
+#SBATCH --array=0-999%10              # <-- Set to 0-(N_SAMPLES-1)
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16        # Should match threads= in your .conf
+#SBATCH --cpus-per-task=4        # Should match threads= in your .conf
 #SBATCH --mem=32G
 #SBATCH --time=24:00:00
-##SBATCH --partition=your_partition   # Uncomment and set if required
-##SBATCH --account=your_account       # Uncomment and set if required
+#SBATCH --partition=normal.168h   # Uncomment and set if required
+##SBATCH --mail-user=samuel.horsfield@unine.ch       # Uncomment and set if required
+##SBATCH --mail-type=END,FAIL
 
 # =============================================================================
 # User configuration – edit these paths before submitting
 # =============================================================================
-EXECUTABLE="PansimNuc/pansimnuc/target/release/PansimNuc"
+EXECUTABLE="/home/sam/Software/PansimNuc/pansimnuc/target/release/PansimNuc"
 
 # Directory containing run_0.conf, run_1.conf, … (--configs-dir from lhs script)
-CONFIGS_DIR="$(dirname "$0")/lhs_configs"
+CONFIGS_DIR="/data/sam/analysis/PansimNuc/lhs_configs/uniform_selection_no_demography"
 
 # Base output directory for PansimNuc results (--outdir-base from lhs script)
 # Each run writes to $OUTDIR_BASE/run_<id>/
-OUTDIR_BASE="PansimNuc/lhs_sweep"
+OUTDIR_BASE="/data/sam/analysis/PansimNuc/lhs_parameter_sweep/uniform_selection_no_demography"
+mkdir -p $OUTDIR_BASE
 # =============================================================================
 
 set -euo pipefail
@@ -67,7 +69,6 @@ if [[ ! -f "$RUN_CONFIG" ]]; then
 fi
 
 mkdir -p "$RUN_OUTDIR"
-mkdir -p "$(dirname "$0")/logs"
 
 echo "========================================================"
 echo "Job ID   : ${SLURM_JOB_ID:-local}_${RUN_ID}"

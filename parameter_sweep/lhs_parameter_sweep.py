@@ -68,9 +68,9 @@ def parse_param_spec(spec: str) -> dict[str, Any]:
 
     if low >= high:
         raise ValueError(f"LOW must be strictly less than HIGH for {key_path!r}")
-    if log_scale and (low <= 0 or high <= 0):
+    if log_scale and (low <= 0 and high >= 0 or low >= 0 and high <= 0):
         raise ValueError(
-            f"Log-scale sampling requires strictly positive bounds for {key_path!r}"
+            f"Log-scale sampling requires both bounds to be strictly positive or strictly negative for {key_path!r}"
         )
 
     return {
@@ -100,8 +100,14 @@ def sample_lhs(
     for i, param in enumerate(params):
         lo, hi = param["low"], param["high"]
         if param["log_scale"]:
-            log_lo, log_hi = np.log10(lo), np.log10(hi)
+            neg_lo = lo < 0
+
+            log_lo, log_hi = np.log10(abs(lo)), np.log10(abs(hi))
             scaled[:, i] = 10.0 ** (unit[:, i] * (log_hi - log_lo) + log_lo)
+            
+            # account for negative bounds by flipping the sign after scaling
+            if neg_lo:
+                scaled[:, i] *= -1
         else:
             scaled[:, i] = unit[:, i] * (hi - lo) + lo
 
