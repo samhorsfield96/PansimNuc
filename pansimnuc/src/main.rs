@@ -268,12 +268,18 @@ fn main() {
 
                     // generate initial population
                     let n_individuals: usize = n_individuals_str
-                        .parse::<usize>()
-                        .expect("n_individuals must be an integer.");
+                        .parse::<f64>()
+                        .unwrap_or_else(|err| {
+                            panic!("Failed to parse n_individuals: {err}");
+                        })
+                        .round() as usize;
 
                     let n_generations: usize = n_generation_str
-                        .parse::<usize>()
-                        .expect("n_generation must be an integer.");
+                        .parse::<f64>()
+                        .unwrap_or_else(|err| {
+                            panic!("Failed to parse n_generations: {err}");
+                        })
+                        .round() as usize;
                     
                     println!("Initialising population...");
                     // genome size penalty is 1 - penalty for multiplication
@@ -287,7 +293,7 @@ fn main() {
                         recombination_dists,
                         recombination_threshold,
                         structural_dists,
-                        parse_usize("population.max_multiplier_dist"),
+                        parse_f64("population.max_multiplier_dist").round() as usize,
 						multiplier_dists,
                         n_generations,
                         &mut rng,
