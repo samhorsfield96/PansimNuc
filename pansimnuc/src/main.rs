@@ -9,7 +9,7 @@ mod population;
 mod structural;
 mod demography;
 mod tracking;
-use rayon::prelude::*;
+use rayon::{prelude::*, vec};
 
 use crate::config::PopulationSplitConfig;
 use crate::demography::MetaPopulation;
@@ -166,7 +166,11 @@ fn main() {
                             .unwrap_or_else(|_| panic!("Config key '{}' must be an integer", key))
                     };
 
-                    let feature_sections = ["exons", "introns", "intergenic", "TE-CUT", "TE-COPY", "tracking"];
+                    let mut feature_sections = vec!["exons", "introns", "intergenic", "TE-CUT", "TE-COPY"];
+
+                    if !tracking_regions.is_empty() {
+                        feature_sections.push("tracking");
+                    }
 
                     // generate distributions to draw mutations from
                     let mut site_selection_dists: Vec<Distribution> = Vec::new();
@@ -175,7 +179,7 @@ fn main() {
                     let mut structural_dists: Vec<Vec<Distribution>> = Vec::new();
 					let mut multiplier_dists: Vec<Distribution> = Vec::new();
 
-                    for section in feature_sections {
+                    for section in feature_sections.clone() {
                         let mutation_rate_key = format!("{}.mutation_rate", section);
                         let duplication_rate_key = format!("{}.duplication_rate", section);
                         let deletion_rate_key = format!("{}.deletion_rate", section);
