@@ -3,7 +3,7 @@ python lhs_parameter_sweep.py \
     --samples 1000 \
     --output N1000_uniform_selection_no_demography_lhs_samples.csv \
     --configs-dir /data/sam/analysis/PansimNuc/lhs_configs/uniform_selection_no_demography \
-    --outdir-base /data/sam/analysis/PansimNuc/lhs_parameter_sweep/uniform_selection_no_demography \
+    --outdir-base /scratch/sam_simulations/uniform_selection_no_demography \
     --seed 42 \
     -p population.n_individuals:10:10000 \
     -p population.n_generations:10:10000 \
@@ -11,42 +11,42 @@ python lhs_parameter_sweep.py \
     -p population.recombination_size_mean:100:100000 \
     -p population.recombination_threshold:0.1:0.9 \
     -p population.max_multiplier_dist:0:5000 \
-    -p exons.mutation_rate:1e-20:1e-2:log \
-    -p exons.indel_rate:1e-20:1e-2:log \
+    -p exons.mutation_rate:1e-20:1e-7:log \
+    -p exons.indel_rate:1e-20:1e-7:log \
     -p exons.selection_low:-1e0:-1e-20:log \
     -p exons.selection_high:1e-20:1e2:log \
-    -p exons.duplication_rate:1e-20:1e-1:log \
-    -p exons.deletion_rate:1e-20:1e-1:log \
-    -p exons.inversion_rate:1e-20:1e-1:log \
-    -p introns.mutation_rate:1e-20:1e-2:log \
-    -p introns.indel_rate:1e-20:1e-2:log \
+    -p exons.duplication_rate:1e-20:1e-2:log \
+    -p exons.deletion_rate:1e-20:1e-2:log \
+    -p exons.inversion_rate:1e-20:1e-2:log \
+    -p introns.mutation_rate:1e-20:1e-7:log \
+    -p introns.indel_rate:1e-20:1e-7:log \
     -p introns.selection_low:-1e0:-1e-20:log \
     -p introns.selection_high:1e-20:1e2:log \
-    -p introns.duplication_rate:1e-20:1e-1:log \
-    -p introns.deletion_rate:1e-20:1e-1:log \
-    -p introns.inversion_rate:1e-20:1e-1:log \
-    -p intergenic.mutation_rate:1e-20:1e-2:log \
-    -p intergenic.indel_rate:1e-20:1e-2:log \
+    -p introns.duplication_rate:1e-20:1e-2:log \
+    -p introns.deletion_rate:1e-20:1e-2:log \
+    -p introns.inversion_rate:1e-20:1e-2:log \
+    -p intergenic.mutation_rate:1e-20:1e-7:log \
+    -p intergenic.indel_rate:1e-20:1e-7:log \
     -p intergenic.selection_low:-1e0:-1e-20:log \
     -p intergenic.selection_high:1e-20:1e2:log \
-    -p intergenic.duplication_rate:1e-20:1e-1:log \
-    -p intergenic.deletion_rate:1e-20:1e-1:log \
-    -p intergenic.inversion_rate:1e-20:1e-1:log \
-    -p TE-CUT.mutation_rate:1e-20:1e-2:log \
-    -p TE-CUT.indel_rate:1e-20:1e-2:log \
+    -p intergenic.duplication_rate:1e-20:1e-2:log \
+    -p intergenic.deletion_rate:1e-20:1e-2:log \
+    -p intergenic.inversion_rate:1e-20:1e-2:log \
+    -p TE-CUT.mutation_rate:1e-20:1e-7:log \
+    -p TE-CUT.indel_rate:1e-20:1e-7:log \
     -p TE-CUT.selection_low:-1e0:-1e-20:log \
     -p TE-CUT.selection_high:1e-20:1e2:log \
-    -p TE-CUT.duplication_rate:1e-20:1e-1:log \
-    -p TE-CUT.deletion_rate:1e-20:1e-1:log \
-    -p TE-CUT.inversion_rate:1e-20:1e-1:log \
+    -p TE-CUT.duplication_rate:1e-20:1e-2:log \
+    -p TE-CUT.deletion_rate:1e-20:1e-2:log \
+    -p TE-CUT.inversion_rate:1e-20:1e-2:log \
     -p TE-CUT.multiplier_rate:1e-20:1e2:log \
     -p TE-CUT.multiplier_scale:1e-20:1e2:log \
-    -p TE-COPY.mutation_rate:1e-20:1e-2:log \
-    -p TE-COPY.indel_rate:1e-20:1e-2:log \
+    -p TE-COPY.mutation_rate:1e-20:1e-7:log \
+    -p TE-COPY.indel_rate:1e-20:1e-7:log \
     -p TE-COPY.selection_low:-1e0:-1e-20:log \
     -p TE-COPY.selection_high:1e-20:1e2:log \
-    -p TE-COPY.duplication_rate:1e-20:1e-1:log \
-    -p TE-COPY.deletion_rate:1e-20:1e-1:log \
-    -p TE-COPY.inversion_rate:1e-20:1e-1:log \
+    -p TE-COPY.duplication_rate:1e-20:1e-2:log \
+    -p TE-COPY.deletion_rate:1e-20:1e-2:log \
+    -p TE-COPY.inversion_rate:1e-20:1e-2:log \
     -p TE-COPY.multiplier_rate:1e-20:1e2:log \
     -p TE-COPY.multiplier_scale:1e-20:1e2:log
