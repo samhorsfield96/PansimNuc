@@ -180,12 +180,7 @@ fn main() {
 					let mut multiplier_dists: Vec<Distribution> = Vec::new();
 
                     for section in feature_sections.clone() {
-                        let mutation_rate_key = format!("{}.mutation_rate", section);
-                        let duplication_rate_key = format!("{}.duplication_rate", section);
-                        let deletion_rate_key = format!("{}.deletion_rate", section);
-                        let inversion_rate_key = format!("{}.inversion_rate", section);
-                        let indel_rate_key = format!("{}.indel_rate", section);
-
+                        // update selection distribution for this section
                         site_selection_dists.push(
 							Distribution::from_selection_config(&configuration, section).unwrap_or_else(|err| {
 								panic!(
@@ -195,15 +190,56 @@ fn main() {
 							}),
 						);
 
-                        // each position takes two elements of vector
+                        
+                        // mutation and indel rates are always poisson
+                        let mutation_rate_key = format!("{}.mutation_rate", section);
+                        let indel_rate_key = format!("{}.indel_rate", section);
+
+                        // update mutation values
                         site_mutation_mus_vals.push(parse_f64(&mutation_rate_key));
                         site_indel_mus_vals.push(parse_f64(&indel_rate_key));
 
-                        structural_dists.push(vec![
-                            Distribution::new_poisson(parse_f64(&duplication_rate_key)).expect("Failed to create duplication distribution"),
-                            Distribution::new_poisson(parse_f64(&deletion_rate_key)).expect("Failed to create deletion distribution"),
-                            Distribution::new_poisson(parse_f64(&inversion_rate_key)).expect("Failed to create inversion distribution"),
-                        ]);
+                        // get rate and dispersion keys for each mutation type for this section
+                        let mut structural_dist_vec: Vec<Distribution> = Vec::new();
+
+                        let duplication_rate_key = format!("{}.duplication_rate", section);
+                        let duplication_rate = parse_f64(&duplication_rate_key);
+                        let duplication_dispersion_key = format!("{}.duplication_dispersion", section);
+
+                        // attempt to parse duplication_dispersion_key, if it exists, and if so use negative binomial distribution for duplications instead of poisson
+                        if let Some(duplication_dispersion_str) = configuration.get(&duplication_dispersion_key) {
+                            let duplication_dispersion = duplication_dispersion_str.parse::<f64>().unwrap_or_else(|_| panic!("Config key '{}' must be a float", duplication_dispersion_key));
+                            structural_dist_vec.push(Distribution::new_negative_binomial(duplication_rate, duplication_dispersion).expect("Failed to create duplication distribution"));
+                        } else {
+                            structural_dist_vec.push(Distribution::new_poisson(duplication_rate).expect("Failed to create duplication distribution"));
+                        }
+
+                        let deletion_rate_key = format!("{}.deletion_rate", section);
+                        let deletion_rate = parse_f64(&deletion_rate_key);
+                        let deletion_dispersion_key = format!("{}.deletion_dispersion", section);
+
+                        // attempt to parse deletion_dispersion_key, if it exists, and if so use negative binomial distribution for deletions instead of poisson
+                        if let Some(deletion_dispersion_str) = configuration.get(&deletion_dispersion_key) {
+                            let deletion_dispersion = deletion_dispersion_str.parse::<f64>().unwrap_or_else(|_| panic!("Config key '{}' must be a float", deletion_dispersion_key));
+                            structural_dist_vec.push(Distribution::new_negative_binomial(deletion_rate, deletion_dispersion).expect("Failed to create deletion distribution"));
+                        } else {
+                            structural_dist_vec.push(Distribution::new_poisson(deletion_rate).expect("Failed to create deletion distribution"));
+                        }
+
+                        let inversion_rate_key = format!("{}.inversion_rate", section);
+                        let inversion_rate = parse_f64(&inversion_rate_key);
+                        let inversion_dispersion_key = format!("{}.inversion_dispersion", section);
+
+                        // attempt to parse inversion_dispersion_key, if it exists, and if so use negative binomial distribution for inversions instead of poisson
+                        if let Some(inversion_dispersion_str) = configuration.get(&inversion_dispersion_key) {
+                            let inversion_dispersion = inversion_dispersion_str.parse::<f64>().unwrap_or_else(|_| panic!("Config key '{}' must be a float", inversion_dispersion_key));
+                            structural_dist_vec.push(Distribution::new_negative_binomial(inversion_rate, inversion_dispersion).expect("Failed to create inversion distribution"));
+                        } else {
+                            structural_dist_vec.push(Distribution::new_poisson(inversion_rate).expect("Failed to create inversion distribution"));
+                        }
+
+                        // update vector of structural mutation distributions for this section
+                        structural_dists.push(structural_dist_vec);
 
 						// get multiplier just for TE sections and tracking
 						if section.starts_with("TE") || section == "tracking" {
