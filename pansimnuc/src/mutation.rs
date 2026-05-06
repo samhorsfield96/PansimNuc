@@ -21,6 +21,7 @@ pub enum DistributionError {
     InvalidPoissonParameters,
     InvalidGammaParameters,
     InvalidNegativeBinomialParameters,
+    InvalidNegativeBinomialMomentsParameters
 }
 
 impl fmt::Display for DistributionError {
@@ -55,6 +56,9 @@ impl fmt::Display for DistributionError {
             }
             DistributionError::InvalidGammaParameters => {
                 write!(f, "Invalid Gamma distribution: shape and scale must be positive")
+            }
+            DistributionError::InvalidNegativeBinomialMomentsParameters => {
+                write!(f, "Invalid Negative Binomial moments: variance must be greater than mean, and mean must be positive")
             }
         }
     }
@@ -457,6 +461,15 @@ impl Distribution {
             .map_err(|_| DistributionError::InvalidNegativeBinomialParameters)
     }
 
+    pub fn new_negative_binomial_from_moments(mean: f64, variance: f64) -> Result<Self, DistributionError> {
+        if mean <= 0.0 || variance <= mean {
+            return Err(DistributionError::InvalidNegativeBinomialMomentsParameters);
+        }
+        let p = mean / variance;
+        let r = (mean * mean) / (variance - mean);
+        Self::new_negative_binomial(r, p)
+    }
+
     pub fn new_gamma(shape: f64, scale: f64) -> Result<Self, DistributionError> {
         Gamma::new(shape, scale)
             .map(Distribution::Gamma)
@@ -761,6 +774,21 @@ mod tests {
     }
 
     #[test]
+    fn test_negative_binomial_from_moments_creation() {
+        let dist = Distribution::new_negative_binomial_from_moments(5.0, 10.0);
+        assert!(dist.is_ok());
+    }
+
+    #[test]
+    fn test_negative_binomial_from_moments_invalid_params() {
+        let dist = Distribution::new_negative_binomial_from_moments(-5.0, 10.0);
+        assert!(dist.is_err());
+
+        let dist2 = Distribution::new_negative_binomial_from_moments(5.0, 4.0);
+        assert!(dist2.is_err());
+    }
+
+    #[test]
     fn test_double_exp_distribution_invalid_params() {
         // Invalid lambda1
         let dist1 = Distribution::new_double_exp(-0.5, 2.0, 0.3);
@@ -833,6 +861,10 @@ mod tests {
 
         let neg_binomial = Distribution::new_negative_binomial(5.0, 0.5).unwrap();
         let sample = neg_binomial.sample(&mut rng);
+        assert!(sample >= 0.0);
+
+        let neg_binomial_moments = Distribution::new_negative_binomial_from_moments(5.0, 10.0).unwrap();
+        let sample = neg_binomial_moments.sample(&mut rng);
         assert!(sample >= 0.0);
     }
 
