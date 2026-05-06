@@ -26,6 +26,7 @@ pub struct NucElement {
     pub seq: Arc<Vec<u8>>,
     pub mutation_map: Arc<MutationMap>,
     pub strand: bool,
+    pub inverted: bool,
     pub original_length: usize,
     pub frameshift: bool,
     pub tracked: bool,
@@ -424,12 +425,12 @@ impl Population {
         Ok(path.with_file_name(prefixed_name))
     }
 
-    pub fn decode_base(base: u8) -> u8 {
+    pub fn decode_base(base: u8, inverted: bool) -> u8 {
         match base {
-            1 => b'A',
-            2 => b'C',
-            4 => b'G',
-            8 => b'T',
+            1 => if inverted { b'T' } else { b'A' },
+            2 => if inverted { b'G' } else { b'C' },
+            4 => if inverted { b'C' } else { b'G' },
+            8 => if inverted { b'A' } else { b'T' },
             16 => b'N',
             _ => panic!("Invalid base encoding: {}", base),
         }
@@ -590,6 +591,7 @@ impl Population {
                     feature_type: feature.feature_type.clone(),
                     seq: Arc::new(feature.seq.clone()),
                     strand: feature.strand,
+                    inverted: false,
                     mutation_map: Arc::new(MutationMap::new(
                         selection_dist_id,
                         mu_dist_id,
@@ -1024,13 +1026,26 @@ impl Population {
 
                 let mut wrapped_line_len = 0usize;
                 for idx in indices {
-                    for &base in genome.seq[idx].seq.iter() {
-                        writer.write_all(&[Self::decode_base(base)])?;
-                        wrapped_line_len += 1;
+                    // if inverted, write in reverse complement
+                    if genome.seq[idx].inverted {
+                        for &base in genome.seq[idx].seq.iter().rev() {
+                            writer.write_all(&[Self::decode_base(base, true)])?;
+                            wrapped_line_len += 1;
 
-                        if wrapped_line_len == 80 {
-                            writer.write_all(b"\n")?;
-                            wrapped_line_len = 0;
+                            if wrapped_line_len == 80 {
+                                writer.write_all(b"\n")?;
+                                wrapped_line_len = 0;
+                            }
+                        }
+                    } else {
+                        for &base in genome.seq[idx].seq.iter() {
+                            writer.write_all(&[Self::decode_base(base, false)])?;
+                            wrapped_line_len += 1;
+
+                            if wrapped_line_len == 80 {
+                                writer.write_all(b"\n")?;
+                                wrapped_line_len = 0;
+                            }
                         }
                     }
                 }
@@ -1949,6 +1964,7 @@ mod tests {
             seq: seq.clone().into(),
             mutation_map: mutation_map.into(),
             strand: true,
+            inverted: false,
             original_length: seq.len(),
             frameshift: false,
             tracked: false,

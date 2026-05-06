@@ -78,7 +78,7 @@ pub fn write_tracking_output(out_path: &str, metapopulation: &MetaPopulation) {
                 let element_end = current_start + element.seq.len();
 
                 if element.tracked {
-                    let element_seq = element.seq.iter().map(|&base| Population::decode_base(base)).collect::<Vec<u8>>();
+                    let element_seq = element.seq.iter().map(|&base| Population::decode_base(base, false)).collect::<Vec<u8>>();
                     let element_selection_coefficients = element.generate_selection_coefficients();
 
                     wtr.write_record(&[
@@ -132,6 +132,7 @@ mod tests {
             mutation_map: Arc::new(MutationMap::new(0, 0, &seq, &dist, &mut rng)),
             seq: Arc::new(seq),
             strand: true,
+            inverted: false,
             original_length: seq_len,
             frameshift: false,
             tracked: false,

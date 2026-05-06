@@ -702,6 +702,7 @@ mod tests {
                     seq: Arc::new(vec![]),
                     mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
                     strand: true,
+                    inverted: false,
                     original_length: 0,
                     frameshift: false,
                     tracked: false,
@@ -716,6 +717,7 @@ mod tests {
                     seq: Arc::new(vec![]),
                     mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
                     strand: false,
+                    inverted: false,
                     original_length: 0,
                     frameshift: false,
                     tracked: false,
@@ -730,6 +732,7 @@ mod tests {
                     seq: Arc::new(vec![]),
                     mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
                     strand: false,
+                    inverted: false,
                     original_length: 0,
                     frameshift: false,
                     tracked: false,
@@ -762,6 +765,7 @@ mod tests {
             frameshift: false,
             tracked: false,
             selection_coeff: 0.0,
+            inverted: false,
         };
 
         Genome {
@@ -824,6 +828,7 @@ mod tests {
                 frameshift: false,
                 tracked: false,
                 selection_coeff: 0.0,
+                inverted: false,
             });
         }
 
@@ -1221,6 +1226,7 @@ mod tests {
                 seq: Arc::new(vec![1, 2, 4, 8]),
                 mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
                 strand: true,
+                inverted: false,
                 original_length: 4,
                 frameshift: false,
                 tracked: false,
@@ -1235,6 +1241,7 @@ mod tests {
                 seq: Arc::new(vec![1, 2, 4, 8]),
                 mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
                 strand: true,
+                inverted: false,
                 original_length: 4,
                 frameshift: false,
                 tracked: false,
@@ -1252,6 +1259,7 @@ mod tests {
                 original_length: 4,
                 frameshift: false,
                 tracked: false,
+                inverted: false,
                 selection_coeff: 0.0,
             }],
             seq_length: 0,
