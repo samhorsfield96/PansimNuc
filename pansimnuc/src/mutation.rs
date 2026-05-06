@@ -6,7 +6,7 @@ use rand::Rng;
 use rand::rngs::{StdRng, ThreadRng};
 use rand::seq::IteratorRandom;
 use rand_distr::{Distribution as RandDist, Exp, Normal, Uniform, Gamma};
-use statrs::distribution::Poisson;
+use statrs::distribution::{Poisson, NegativeBinomial};
 use std::collections::HashMap;
 use std::fmt;
 use std::os::unix::thread;
@@ -20,6 +20,7 @@ pub enum DistributionError {
     InvalidDoubleExpParameters,
     InvalidPoissonParameters,
     InvalidGammaParameters,
+    InvalidNegativeBinomialParameters,
 }
 
 impl fmt::Display for DistributionError {
@@ -48,6 +49,9 @@ impl fmt::Display for DistributionError {
             }
             DistributionError::InvalidPoissonParameters => {
                 write!(f, "Invalid Poisson distribution: lambda must be positive")
+            }
+            DistributionError::InvalidNegativeBinomialParameters => {
+                write!(f, "Invalid Negative Binomial distribution: parameters must be positive")
             }
             DistributionError::InvalidGammaParameters => {
                 write!(f, "Invalid Gamma distribution: shape and scale must be positive")
@@ -198,6 +202,7 @@ pub enum Distribution {
     DoubleExp(DoubleExponential),
     Poisson(Poisson),
     Gamma(Gamma<f64>),
+    NegativeBinomial(NegativeBinomial),
 }
 
 impl Distribution {
@@ -359,6 +364,28 @@ impl Distribution {
                     }
                 })
             }
+            "negbinom" | "negativebinomial" | "negative_binomial" => {
+                let r = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_r", section),
+                )?;
+                let p = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_p", section),
+                )?;
+
+                Self::new_negative_binomial(r, p).map_err(|source| {
+                    DistributionConfigError::InvalidDistributionParameters {
+                        section: section.to_string(),
+                        distribution: raw_distribution,
+                        source,
+                    }
+                })
+            }
             "gamma" => {
                 let shape = Self::parse_required_f64(
                     configuration,
@@ -421,6 +448,15 @@ impl Distribution {
             .map_err(|_| DistributionError::InvalidPoissonParameters)
     }
 
+    pub fn new_negative_binomial(r: f64, p: f64) -> Result<Self, DistributionError> {
+        if r <= 0.0 || p <= 0.0 || p >= 1.0 {
+            return Err(DistributionError::InvalidNegativeBinomialParameters);
+        }
+        NegativeBinomial::new(r, p)
+            .map(Distribution::NegativeBinomial)
+            .map_err(|_| DistributionError::InvalidNegativeBinomialParameters)
+    }
+
     pub fn new_gamma(shape: f64, scale: f64) -> Result<Self, DistributionError> {
         Gamma::new(shape, scale)
             .map(Distribution::Gamma)
@@ -435,6 +471,7 @@ impl Distribution {
             Distribution::DoubleExp(d) => d.sample(rng),
             Distribution::Poisson(d) => d.sample(rng),
             Distribution::Gamma(d) => d.sample(rng),
+            Distribution::NegativeBinomial(d) => d.sample(rng) as f64,
         }
     }
 }
@@ -709,6 +746,21 @@ mod tests {
     }
 
     #[test]
+    fn test_negative_binomial_creation() {
+        let dist = Distribution::new_negative_binomial(5.0, 0.5);
+        assert!(dist.is_ok());
+    }
+
+    #[test]
+    fn test_negative_binomial_invalid_params() {
+        let dist = Distribution::new_negative_binomial(-5.0, 0.5);
+        assert!(dist.is_err());
+
+        let dist2 = Distribution::new_negative_binomial(5.0, -0.5);
+        assert!(dist2.is_err());
+    }
+
+    #[test]
     fn test_double_exp_distribution_invalid_params() {
         // Invalid lambda1
         let dist1 = Distribution::new_double_exp(-0.5, 2.0, 0.3);
@@ -778,6 +830,10 @@ mod tests {
         let gamma = Distribution::new_gamma(2.0, 3.0).unwrap();
         let sample = gamma.sample(&mut rng);
         assert!(sample >= 0.0);
+
+        let neg_binomial = Distribution::new_negative_binomial(5.0, 0.5).unwrap();
+        let sample = neg_binomial.sample(&mut rng);
+        assert!(sample >= 0.0);
     }
 
     #[test]
@@ -846,6 +902,21 @@ mod tests {
 
         let result = Distribution::from_selection_config(&config, "TE-COPY");
         assert!(matches!(result, Ok(Distribution::Poisson(_))));
+    }
+
+    #[test]
+    fn test_selection_distribution_from_config_negative_binomial() {
+        let config = selection_config(
+            "TE-COPY",
+            &[
+                ("selection_distribution", "negative_binomial"),
+                ("selection_r", "5.0"),
+                ("selection_p", "0.5"),
+            ],
+        );
+
+        let result = Distribution::from_selection_config(&config, "TE-COPY");
+        assert!(matches!(result, Ok(Distribution::NegativeBinomial(_))));
     }
 
     #[test]
