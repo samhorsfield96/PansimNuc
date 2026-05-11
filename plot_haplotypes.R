@@ -100,167 +100,135 @@ hap_sel_coeff <- function(coeff_strs) {
   mean(per_genome, na.rm = TRUE)
 }
 
-# ── Whole-genome recombinant detection ────────────────────────────────────────
-# profile_c      : named character vector  element_key -> mut_sig  for one genome
-# known_profiles : list of such named vectors for all previously-seen genome haplotypes
-# C is a recombinant of A and B when every element allele in C matches A or B,
-# A contributes >=1 element that differs from B, and B contributes >=1 that differs from A.
-is_recombinant_genome <- function(profile_c, known_profiles) {
-  if (length(known_profiles) < 2) return(FALSE)
-  elements <- names(profile_c)
-  n <- length(known_profiles)
-  for (i in seq_len(n - 1)) {
-    a <- known_profiles[[i]]
-    for (j in seq(i + 1, n)) {
-      b <- known_profiles[[j]]
-      common_els <- Reduce(intersect, list(elements, names(a), names(b)))
-      if (length(common_els) < 2) next
-      c_sub <- profile_c[common_els]
-      a_sub <- a[common_els]
-      b_sub <- b[common_els]
-      matches_a <- c_sub == a_sub
-      matches_b <- c_sub == b_sub
-      if (!all(matches_a | matches_b)) next
-      if (any(matches_a & !matches_b) && any(matches_b & !matches_a)) return(TRUE)
-    }
-  }
-  FALSE
-}
+# ── Per-group haplotype classification ───────────────────────────────────────
+#
+# For a single (element_id, feature_type, population_id) group:
+#   - Initialise unique haplotypes from generation 1 (type = "founder").
+#   - For each subsequent generation, any new sequence is classified as:
+#       "recombinant" if its mutation set = union of two prior haplotypes, or
+#       "mutant"      otherwise.
+#   - Returns a tidy data frame: generation, haplotype_id, mutation_sig, freq,
+#     type, sel_coeff
+classify_haplotypes <- function(group_df) {
+  generations   <- sort(unique(group_df$generation))
+  first_gen     <- generations[1]
+  has_sel_coeff <- "log_selection_coefficients" %in% colnames(group_df)
 
-# ── Assign per-element mutation signatures ────────────────────────────────────
-# For a single (element_id, feature_type, population_id) group, build the
-# reference from the first generation and annotate every row with its
-# mutation signature relative to that reference.
-assign_element_sigs <- function(group_df) {
-  first_gen <- min(group_df$generation)
   reference <- build_reference(group_df$sequence[group_df$generation == first_gen])
-  group_df$mut_sig <- vapply(group_df$sequence, function(s) {
-    if (is.na(s) || nchar(s) == 0) return(NA_character_)
-    get_mutation_sig(s, reference)
-  }, character(1L))
-  group_df
-}
 
-# ── Classify whole-genome haplotypes for one population ──────────────────────
-# pop_df has per-element mutation signatures (mut_sig) for all genomes in one
-# population across all generations.
-# Returns a tidy data frame: generation, haplotype_id, profile_str, freq, type, sel_coeff
-classify_genome_haplotypes <- function(pop_df) {
-  has_sel     <- "log_selection_coefficients" %in% colnames(pop_df)
-  generations <- sort(unique(pop_df$generation))
-  first_gen   <- generations[1]
-
-  # Build per-genome profile: a named vector (element_key -> mut_sig) per (genome_id, gen)
-  genome_profiles <- pop_df %>%
-    filter(!is.na(mut_sig)) %>%
-    mutate(element_key = paste(element_id, feature_type, sep = ":")) %>%
-    group_by(genome_id, generation) %>%
-    summarise(
-      profile_str = paste(sort(paste(element_key, mut_sig, sep = "=")), collapse = "|"),
-      profile_vec = list(setNames(mut_sig, element_key)),
-      sel_coeff   = if (has_sel) {
-        sum(vapply(log_selection_coefficients, function(s) {
-          vals <- suppressWarnings(as.numeric(strsplit(s, ";")[[1]]))
-          sum(vals, na.rm = TRUE)
-        }, numeric(1L)), na.rm = TRUE)
-      } else NA_real_,
-      .groups = "drop"
-    )
-
-  known_profiles <- list()   # profile_str -> named vector
-  known_types    <- list()   # profile_str -> type string
-  hap_labels     <- list()   # profile_str -> short label
-  counter        <- 0L
-  new_label <- function(prefix) { counter <<- counter + 1L; paste0(prefix, counter) }
+  known_haps  <- list()  # mutation_sig -> "founder" | "mutant" | "recombinant"
+  hap_labels  <- list()  # mutation_sig -> short label e.g. "F1", "M2", "R1"
+  known_muts  <- list()  # mutation_sig -> pre-parsed mutation vector (cache)
+  counter    <- 0L
+  new_label  <- function(prefix) { counter <<- counter + 1L; paste0(prefix, counter) }
 
   rows <- list()
-  pb <- txtProgressBar(min = min(generations), max = max(generations), style = 3)
-  message(paste0("Classifying genome haplotypes across ", length(generations), " generations"))
 
+  gen_counter <- 0
+  gen <- 1
+  pb <- txtProgressBar(min = min(generations), max = max(generations), style = 3)
+  message(paste0("Parsing generations: ", max(generations)))
   for (gen in generations) {
-    gen_data <- genome_profiles[genome_profiles$generation == gen, ]
-    n_total  <- nrow(gen_data)
+    gen_counter <- gen_counter + 1
+
+    gen_mask  <- group_df$generation == gen & nchar(group_df$sequence) > 0
+    sel_all   <- if (has_sel_coeff) group_df$log_selection_coefficients[gen_mask] else NULL
+    seqs_all  <- group_df$sequence[gen_mask]
+    n_total   <- length(seqs_all)
     if (n_total == 0) next
 
-    prof_tbl    <- table(gen_data$profile_str)
-    sel_by_prof <- split(gen_data$sel_coeff, gen_data$profile_str)
-    vec_by_prof <- lapply(
-      split(seq_len(nrow(gen_data)), gen_data$profile_str),
-      function(idx) gen_data$profile_vec[[idx[1]]]
-    )
+    # Pre-build frequency table and per-sequence coefficient lookup once per gen
+    seq_tbl    <- table(seqs_all)
+    sel_by_seq <- if (has_sel_coeff) split(sel_all, seqs_all) else NULL
 
-    for (prof_str in names(prof_tbl)) {
-      freq      <- prof_tbl[[prof_str]] / n_total
-      sel_coeff <- mean(unlist(sel_by_prof[[prof_str]]), na.rm = TRUE)
-      prof_vec  <- vec_by_prof[[prof_str]]
+    for (seq in names(seq_tbl)) {
+      sig       <- get_mutation_sig(seq, reference)
+      sig_muts  <- parse_sig(sig)
+      freq      <- seq_tbl[[seq]] / n_total
 
-      if (!prof_str %in% names(known_profiles)) {
+      # Mean selection coefficient for genomes carrying this haplotype
+      if (has_sel_coeff) {
+        sel_coeff <- hap_sel_coeff(sel_by_seq[[seq]])
+      } else {
+        sel_coeff <- NA_real_
+      }
+      
+      # start.time <- Sys.time()
+      if (!sig %in% names(known_haps)) {
         if (gen == first_gen) {
-          htype <- "founder"; prefix <- "F"
-        } else if (is_recombinant_genome(prof_vec, unname(known_profiles))) {
+          htype <- "founder";     prefix <- "F"
+        } else if (is_recombinant(sig_muts, known_muts)) {
           htype <- "recombinant"; prefix <- "R"
         } else {
-          htype <- "mutant"; prefix <- "M"
+          htype <- "mutant";      prefix <- "M"
         }
-        known_profiles[[prof_str]] <- prof_vec
-        known_types[[prof_str]]    <- htype
-        hap_labels[[prof_str]]     <- new_label(prefix)
+        known_haps[[sig]] <- htype
+        hap_labels[[sig]] <- new_label(prefix)
+        known_muts[[sig]] <- sig_muts  # cache parsed form
+      }
+      # end.time <- Sys.time()
+      # time.taken <- end.time - start.time
+      # time.taken
+      # message(paste0("Time taken: ", time.taken))
+      
+      if (sig == "") {
+        haplotype_id = "R"
+        htype = "reference"
+      } else {
+        haplotype_id = hap_labels[[sig]]
+        htype         = known_haps[[sig]]
       }
 
-      rows[[length(rows) + 1]] <- data.frame(
-        generation   = gen,
-        haplotype_id = hap_labels[[prof_str]],
-        profile_str  = prof_str,
-        freq         = freq,
-        type         = known_types[[prof_str]],
-        sel_coeff    = sel_coeff,
+      df_tmp <- data.frame(
+        generation     = gen,
+        haplotype_id   = haplotype_id,
+        mutation_sig   = sig,
+        freq           = freq,
+        type           = htype,
+        sel_coeff = sel_coeff,
         stringsAsFactors = FALSE
       )
+      
+      rows[[length(rows) + 1]] <- df_tmp
     }
     setTxtProgressBar(pb, gen)
   }
   close(pb)
+
   bind_rows(rows)
 }
 
-# ── Run classification ────────────────────────────────────────────────────────
-message("Assigning per-element mutation signatures...")
+# ── Run classification across all groups ─────────────────────────────────────
+message("Tracking haplotype frequencies...")
 
-element_sig_df <- df %>%
+hap_data <- df %>%
   group_by(element_id, feature_type, population_id) %>%
-  group_modify(~ assign_element_sigs(.x)) %>%
-  ungroup()
-
-message("Classifying whole-genome haplotypes per population...")
-
-hap_data <- element_sig_df %>%
-  group_by(population_id) %>%
-  group_modify(~ classify_genome_haplotypes(.x)) %>%
+  group_modify(~ classify_haplotypes(.x)) %>%
   ungroup()
 
 # Fill in zero-frequency rows so that every haplotype appears in every
 # generation (needed for correct stacked areas and unbroken lines).
 hap_data <- hap_data %>%
-  group_by(population_id) %>%
+  group_by(element_id, feature_type, population_id) %>%
   complete(
     generation   = unique(generation),
     haplotype_id = unique(haplotype_id),
     fill         = list(freq = 0)
   ) %>%
-  group_by(population_id, haplotype_id) %>%
-  fill(type, profile_str, sel_coeff, .direction = "downup") %>%
+  group_by(element_id, feature_type, population_id, haplotype_id) %>%
+  fill(type, mutation_sig, sel_coeff, .direction = "downup") %>%
   ungroup()
 
 # ── Summary table ─────────────────────────────────────────────────────────────
 hap_summary <- hap_data %>%
-  group_by(population_id, haplotype_id, type, profile_str) %>%
+  group_by(element_id, feature_type, population_id, haplotype_id, type, mutation_sig) %>%
   summarise(
     first_generation = min(generation[freq > 0]),
     peak_freq        = max(freq),
     mean_sel_coeff   = mean(sel_coeff, na.rm = TRUE),
     .groups          = "drop"
   ) %>%
-  arrange(population_id, first_generation)
+  arrange(element_id, population_id, first_generation)
 
 write.csv(hap_summary,
           file      = paste0(outpref, "_haplotype_summary.csv"),
@@ -270,15 +238,15 @@ write.csv(hap_summary,
 if (top_n > 0L) {
   message(sprintf("Retaining top %d haplotype(s) per type by cumulative frequency change.", top_n))
   top_haps <- hap_data %>%
-    arrange(population_id, haplotype_id, generation) %>%
-    group_by(population_id, haplotype_id, type) %>%
+    arrange(element_id, feature_type, population_id, haplotype_id, generation) %>%
+    group_by(element_id, feature_type, population_id, haplotype_id, type) %>%
     summarise(total_change = sum(abs(diff(freq))), .groups = "drop") %>%
-    group_by(population_id, type) %>%
+    group_by(element_id, feature_type, population_id, type) %>%
     slice_max(total_change, n = top_n, with_ties = FALSE) %>%
     ungroup()
 
   hap_data <- hap_data %>%
-    semi_join(top_haps, by = c("population_id", "haplotype_id"))
+    semi_join(top_haps, by = c("element_id", "feature_type", "population_id", "haplotype_id"))
 }
 
 # ── Plotting helpers ──────────────────────────────────────────────────────────
@@ -297,9 +265,17 @@ type_fill_scale   <- scale_fill_manual(values = type_colour_values,   name = "Ha
 
 add_facets <- function(p) {
   if (has_multi_pop) {
-    p + facet_wrap(~ population_id, labeller = label_both, ncol = 1)
+    p + facet_grid(
+      rows     = vars(population_id),
+      cols     = vars(element_id),
+      labeller = label_both
+    )
   } else {
-    p
+    p + facet_wrap(
+      ~ element_id,
+      labeller = as_labeller(function(x) paste0("element_id: ", x)),
+      ncol     = 1
+    )
   }
 }
 
@@ -315,7 +291,7 @@ p_lines <- ggplot(
     x      = generation,
     y      = freq,
     colour = type,
-    group  = haplotype_id
+    group  = interaction(haplotype_id, population_id)
   )
 ) +
   geom_line(alpha = 0.8) +
