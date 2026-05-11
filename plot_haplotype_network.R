@@ -200,12 +200,13 @@ get_mutation_sig <- function(seq, reference, element_id) {
 # checked, all good
 parse_sig <- function(s) if (nchar(s) == 0) character(0) else strsplit(s, ";")[[1]]
 
-# Hamming distance between two equal-length sequences (character vectors or strings).
-hamming <- function(a, b) {
-  ca <- strsplit(toupper(a), "")[[1]]
-  cb <- strsplit(toupper(b), "")[[1]]
-  len <- min(length(ca), length(cb))
-  sum(ca[seq_len(len)] != cb[seq_len(len)])
+# Jaccard distance between two sequences (character vectors or strings).
+jaccard_distance <- function(a, b) {
+  ca <- parse_sig(a)
+  cb <- parse_sig(b)
+  intersection = length(intersect(ca, cb))
+  union = (length(ca) + length(cb)) - intersection
+  return (1 - (intersection/union))
 }
 
 # ── Whole-genome haplotype functions ─────────────────────────────────────────
@@ -328,9 +329,10 @@ classify_genome_haplotypes <- function(pop_df) {
 
 # ── Build haplotype network for one generation snapshot ──────────────────────
 # Returns a ggplot object (or NULL if < 2 haplotypes).
+# TODO
 build_network_plot <- function(snap_df, title = "") {
   # snap_df: one row per haplotype, columns: haplotype_id, sequence, freq, type, sel_coeff
-  snap_df <- snap_df[nchar(snap_df$sequence) > 0 & snap_df$freq > 0, , drop = FALSE]
+  snap_df <- snap_df[nchar(snap_df$profile_str) > 0 & snap_df$freq > 0, , drop = FALSE]
   if (nrow(snap_df) < 2) {
     message("  Fewer than 2 haplotypes — skipping network for: ", title)
     return(NULL)
@@ -342,7 +344,7 @@ build_network_plot <- function(snap_df, title = "") {
   dist_mat <- matrix(0L, n, n, dimnames = list(snap_df$haplotype_id, snap_df$haplotype_id))
   for (i in seq_len(n - 1)) {
     for (j in seq(i + 1, n)) {
-      d <- hamming(snap_df$sequence[i], snap_df$sequence[j])
+      d <- jaccard_distance(snap_df$profile_str[i], snap_df$profile_str[j])
       dist_mat[i, j] <- d
       dist_mat[j, i] <- d
     }
@@ -449,9 +451,8 @@ build_network_plot <- function(snap_df, title = "") {
     # Nodes
     geom_point(
       data = node_df,
-      aes(x = x, y = y, fill = type, size = freq),
+      aes(x = x, y = y, fill = sel_coeff, colour = type, size = freq),
       shape  = 21,
-      colour = "white",
       stroke = 0.6,
       alpha  = 0.9
     ) +
@@ -463,11 +464,11 @@ build_network_plot <- function(snap_df, title = "") {
       vjust = -1.2,
       fontface = "bold"
     ) +
-    scale_fill_manual(values = use_colours, name = "Haplotype type") +
+    scale_colour_manual(values = use_colours, name = "Haplotype type") +
+    scale_fill_continuous(name = "Log selection coefficient") +
     scale_size_continuous(
       name   = "Frequency",
-      range  = c(3, 14),
-      limits = c(0, 1)
+      range  = c(3, 14)
     ) +
     labs(title = title, x = NULL, y = NULL) +
     theme_void(base_size = 11) +
