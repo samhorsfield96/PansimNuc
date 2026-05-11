@@ -243,12 +243,18 @@ is_recombinant_genome <- function(profile_c, unnamed_known_profiles) {
   
   for (i in seq_len(n - 1)) {
     a <- candidates[[i]]
+    # ignore direct matches
+    if (setequal(a, profile_c)) next
+    
     for (j in seq(i + 1, n)) {
       b <- candidates[[j]]
+      # ignore direct matches
+      if (setequal(b, profile_c)) next
+      
       # Both parents must each contribute at least one mutation the other lacks.
       if (!any(!a %in% b) || !any(!b %in% a)) next
       ab <- union(a, b)
-      if (length(ab) == h_len && setequal(ab, h_muts)) return(TRUE)
+      if (length(ab) == profile_c_len && setequal(ab, profile_c)) return(TRUE)
     }
   }
   FALSE
@@ -266,12 +272,12 @@ classify_genome_haplotypes <- function(pop_df) {
     group_by(genome_id, generation) %>%
     summarise(
       profile_str = paste(mut_sig, collapse = ";"),
-      #profile_vec = list(setNames(mut_sig, element_id)),
-      #concat_seq  = paste(sequence[order(element_id)], collapse = ""),
       sel_coeff   = sum(log_sel_coeff, na.rm = TRUE),
       .groups     = "drop"
     )
-
+  
+  # add all profiles to known_profiles to all determination of recombinants, not reliant on order of reading
+  all_profiles <- lapply(names(table(genome_profiles$profile_str)), parse_sig)
   known_profiles <- list()
   known_types    <- list()
   hap_labels     <- list()
@@ -296,7 +302,7 @@ classify_genome_haplotypes <- function(pop_df) {
         if (gen == 0) {
           htype <- "founder"; prefix <- "F"
         } else
-          if (is_recombinant_genome(prof_vec, unname(known_profiles))) {
+          if (is_recombinant_genome(prof_vec, unname(all_profiles))) {
           htype <- "recombinant"; prefix <- "R"
         } else {
           htype <- "mutant"; prefix <- "M"
