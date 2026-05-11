@@ -1122,7 +1122,7 @@ impl Population {
                         ((log_element_selection_coefficient - logsumexp_value).exp() / sum_weights).ln() // exp(log(w) - logsumexp)
                     };
 
-                let seq_id = format!("contig_{}", element.contig_id + 1);
+                let seq_id = format!("contig_{}", element.contig_id);
                 let start_1based = start_0 + 1;
                 let end_1based = end_0;
                 let strand = if element.strand { "+" } else { "-" };
