@@ -25,11 +25,6 @@ out_prefix <- if (length(args) >= 2) args[2] else "ld_analysis"
 top_n      <- if (length(args) >= 3) as.integer(args[3]) else 5L
 flank_bp   <- if (length(args) >= 4) as.integer(args[4]) else 10000L
 
-gff_dir <- "/Users/samhorsfield/OneDrive/Work/Postdoc_Unine/Analysis/PansimNuc_results/testing_high_mu_low_selection"
-out_prefix <- "/Users/samhorsfield/OneDrive/Work/Postdoc_Unine/Analysis/PansimNuc_results/ld_analysis"
-top_n <- 2
-flank_bp <- 1000L
-
 message(sprintf("Parameters: top_n=%d  flank_bp=%d", top_n, flank_bp))
 
 # ── Attribute parser ──────────────────────────────────────────────────────────
@@ -178,9 +173,6 @@ top_elements <- element_sel |>
   group_by(pop_id, gen_id) |>
   slice_max(order_by = mean_log_sel, n = top_n, with_ties = FALSE) |>
   ungroup()
-
-# testing
-top_elements <- element_sel[element_sel$element_id == 8,]
 
 message(sprintf("Selected %d element × (pop,gen) combinations total.", nrow(top_elements)))
 print(top_elements)
@@ -370,9 +362,18 @@ ld_summary$facet_label <- mapply(
   ld_summary$mean_log_sel
 )
 
+locus_x_limits <- ld_summary |>
+  distinct(facet_label, locus_start, locus_end) |>
+  tidyr::pivot_longer(c(locus_start, locus_end),
+                      names_to = "bound", values_to = "partner_pos") |>
+  mutate(mean_r2 = 0)
+
 p_ld <- ggplot(ld_summary,
                aes(x = partner_pos, y = mean_r2,
                    colour = in_partner_el)) +
+  geom_blank(data = locus_x_limits,
+             aes(x = partner_pos, y = mean_r2),
+             inherit.aes = FALSE) +
   geom_point(size = 0.8, alpha = 0.6) +
   geom_smooth(data    = ld_summary |> filter(!in_partner_el),
               aes(group = 1),
@@ -401,8 +402,17 @@ p_ld <- ggplot(ld_summary,
 p_ld
 
 # ── Heatmap: pairwise r² within each locus (focal × all sites) ───────────────
+heat_xy_limits <- all_ld |>
+  distinct(pop_id, gen_id, element_id, locus_start, locus_end) |>
+  tidyr::pivot_longer(c(locus_start, locus_end),
+                      names_to = "bound", values_to = "pos") |>
+  mutate(focal_pos = pos, partner_pos = pos, r2 = NA_real_)
+
 p_heat <- ggplot(all_ld |> filter(!is.na(r2)),
                  aes(x = focal_pos, y = partner_pos, fill = r2)) +
+  geom_blank(data = heat_xy_limits,
+             aes(x = focal_pos, y = partner_pos),
+             inherit.aes = FALSE) +
   geom_tile() +
   facet_wrap(~interaction(pop_id, gen_id, element_id, sep = " / "),
              scales = "free", ncol = 2) +
@@ -440,3 +450,4 @@ message("Saved: ", out_csv_ld)
 out_csv_top <- paste0(out_prefix, "_top_elements.csv")
 write.csv(top_elements, out_csv_top, row.names = FALSE)
 message("Saved: ", out_csv_top)
+
