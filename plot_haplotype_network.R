@@ -230,7 +230,7 @@ assign_element_sigs <- function(group_df) {
 # Returns a length-2 character vector of the two parent profile strings when C
 # is a recombinant (union of their mutation sets equals C's, each contributes
 # at least one exclusive mutation), or NULL otherwise.
-# TODO
+# checked, all good
 find_recombinant_parents <- function(profile_c, all_profiles_named) {
   if (length(all_profiles_named) < 2) return(NULL)
 
@@ -269,10 +269,12 @@ classify_genome_haplotypes <- function(pop_df) {
   generations <- sort(unique(pop_df$generation))
 
   genome_profiles <- pop_df %>%
-    filter(!is.na(mut_sig)) %>%
     group_by(genome_id, generation) %>%
     summarise(
-      profile_str = paste(mut_sig, collapse = ";"),
+      profile_str = {
+        sigs <- mut_sig[!is.na(mut_sig)]
+        if (length(sigs) == 0L) "NA" else paste(sigs, collapse = ";")
+      },
       sel_coeff   = sum(log_sel_coeff, na.rm = TRUE),
       .groups     = "drop"
     )
@@ -308,7 +310,9 @@ classify_genome_haplotypes <- function(pop_df) {
       if (!prof_str %in% names(known_profiles)) {
         prof_vec       <- parse_sig(prof_str)
         parent_str     <- NA_character_
-        if (gen == 0) {
+        if (prof_str == "NA") {
+          htype <- "reference"; prefix <- "REF"
+        } else if (gen == 0) {
           htype <- "founder"; prefix <- "F"
         } else {
           parent_profiles <- find_recombinant_parents(prof_vec, all_profiles_named)
@@ -323,7 +327,12 @@ classify_genome_haplotypes <- function(pop_df) {
         known_profiles[[prof_str]] <- prof_vec
         known_types[[prof_str]]    <- htype
         known_parents[[prof_str]]  <- parent_str
-        hap_labels[[prof_str]]     <- new_label(prefix)
+        if (prefix != "REF") {
+          hap_labels[[prof_str]]     <- new_label(prefix)
+        } else {
+          hap_labels[[prof_str]] <- "REF"
+        }
+        
       }
 
       rows[[length(rows) + 1]] <- data.frame(
@@ -357,15 +366,17 @@ classify_genome_haplotypes <- function(pop_df) {
 
 # ── Build haplotype network for one generation snapshot ──────────────────────
 # Returns a ggplot object (or NULL if < 2 haplotypes).
-# TODO
+# TODO need to add reference to plot also
 build_network_plot <- function(snap_df, title = "") {
   # snap_df: one row per haplotype, columns: haplotype_id, sequence, freq, type, sel_coeff
-  snap_df <- snap_df[nchar(snap_df$profile_str) > 0 & snap_df$freq > 0, , drop = FALSE]
+  snap_df <- snap_df[snap_df$freq > 0, , drop = FALSE]
   if (nrow(snap_df) < 2) {
     message("  Fewer than 2 haplotypes — skipping network for: ", title)
     return(NULL)
   }
-
+  
+  # convert REF to empty string
+  snap_df$profile_str[snap_df$profile_str == "NA"] <- ""
   n <- nrow(snap_df)
 
   # ── Build pairwise distance matrix (Hamming steps) ───────────────────────
@@ -429,6 +440,9 @@ build_network_plot <- function(snap_df, title = "") {
   # ── Plot ──────────────────────────────────────────────────────────────────
   # Node radius proportional to frequency (sqrt for area)
   node_df$size <- 4 + 10 * sqrt(node_df$freq)
+
+  has_sel <- any(!is.na(node_df$sel_coeff) & is.finite(node_df$sel_coeff))
+  node_df$fill_var <- if (has_sel) node_df$sel_coeff else node_df$type
 
   # ── Recombinant parent edges (dashed) ─────────────────────────────────────
   recomb_nodes <- node_df[node_df$type == "recombinant" &
@@ -507,7 +521,7 @@ build_network_plot <- function(snap_df, title = "") {
     # Nodes
     geom_point(
       data = node_df,
-      aes(x = x, y = y, fill = sel_coeff, colour = type, size = freq),
+      aes(x = x, y = y, fill = fill_var, colour = type, size = freq),
       shape  = 21,
       stroke = 0.6,
       alpha  = 0.9
@@ -521,7 +535,11 @@ build_network_plot <- function(snap_df, title = "") {
       fontface = "bold"
     ) +
     scale_colour_manual(values = use_colours, name = "Haplotype type") +
-    scale_fill_continuous(name = "Log selection coefficient") +
+    { if (has_sel)
+        scale_fill_continuous(name = "Log selection coefficient")
+      else
+        scale_fill_manual(values = use_colours, name = "Haplotype type", guide = "none")
+    } +
     scale_size_continuous(
       name   = "Frequency",
       range  = c(3, 14)
