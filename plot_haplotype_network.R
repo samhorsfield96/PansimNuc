@@ -189,12 +189,12 @@ build_reference <- function(seqs) {
 
 # determine mutated sites between reference and sequences
 # checked, all good
-get_mutation_sig <- function(seq, reference) {
+get_mutation_sig <- function(seq, reference, element_id) {
   chars <- toupper(strsplit(seq, "")[[1]])
   len   <- min(length(chars), length(reference))
   idx   <- which(chars[seq_len(len)] != reference[seq_len(len)])
-  if (length(idx) == 0) return("")
-  paste(paste0(idx, ":", chars[idx]), collapse = ";")
+  if (length(idx) == 0) return(NA_character_)
+  paste(paste0(element_id, ":", idx, ":", chars[idx]), collapse = ";")
 }
 
 # checked, all good
@@ -212,38 +212,43 @@ hamming <- function(a, b) {
 
 # Assign per-element mutation signatures relative to each element's founding
 # generation consensus. Called per (element_id, feature_type, population_id).
+# checked, all good
 assign_element_sigs <- function(group_df) {
   first_gen <- min(group_df$generation)
   reference <- build_reference(group_df$sequence[group_df$generation == first_gen])
+  element_id <- unique(group_df$element_id_tmp)
   group_df$mut_sig <- vapply(group_df$sequence, function(s) {
-    if (is.na(s) || nchar(s) == 0) return(NA_character_)
-    get_mutation_sig(s, reference)
+    get_mutation_sig(s, reference, element_id)
   }, character(1L))
   group_df
 }
 
 # Genome-level recombinant detection.
 # profile_c      : named character vector  element_key -> mut_sig  for one genome
-# known_profiles : list of such vectors for all previously seen genome haplotypes
+# unnamed_known_profiles : list of such vectors for all previously seen genome haplotypes
 # C is a recombinant of A and B when every element allele matches A or B, and
 # both parents each contribute at least one element the other doesn't.
-is_recombinant_genome <- function(profile_c, known_profiles) {
-  if (length(known_profiles) < 2) return(FALSE)
-  elements <- names(profile_c)
-  n <- length(known_profiles)
+# Checked, all good
+is_recombinant_genome <- function(profile_c, unnamed_known_profiles) {
+  if (length(unnamed_known_profiles) < 2) return(FALSE)
+  
+  profile_c_len <- length(profile_c)
+  # Pre-filter: a valid parent must be a non-empty strict subset of h_muts
+  candidates <- Filter(
+    function(a) length(a) > 0 && length(a) < profile_c_len && all(a %in% profile_c_len),
+    unnamed_known_profiles
+  )
+  if (length(candidates) < 2) return(FALSE)
+  n <- length(candidates)
+  
   for (i in seq_len(n - 1)) {
-    a <- known_profiles[[i]]
+    a <- candidates[[i]]
     for (j in seq(i + 1, n)) {
-      b <- known_profiles[[j]]
-      common_els <- Reduce(intersect, list(elements, names(a), names(b)))
-      if (length(common_els) < 2) next
-      c_sub <- profile_c[common_els]
-      a_sub <- a[common_els]
-      b_sub <- b[common_els]
-      matches_a <- c_sub == a_sub
-      matches_b <- c_sub == b_sub
-      if (!all(matches_a | matches_b)) next
-      if (any(matches_a & !matches_b) && any(matches_b & !matches_a)) return(TRUE)
+      b <- candidates[[j]]
+      # Both parents must each contribute at least one mutation the other lacks.
+      if (!any(!a %in% b) || !any(!b %in% a)) next
+      ab <- union(a, b)
+      if (length(ab) == h_len && setequal(ab, h_muts)) return(TRUE)
     }
   }
   FALSE
@@ -252,18 +257,17 @@ is_recombinant_genome <- function(profile_c, known_profiles) {
 # Classify whole-genome haplotypes for one population.
 # pop_df must have mut_sig (from assign_element_sigs) and log_sel_coeff columns.
 # Returns: generation, haplotype_id, profile_str, sequence (concatenated), freq, type, sel_coeff
+# Checked, all good
 classify_genome_haplotypes <- function(pop_df) {
   generations <- sort(unique(pop_df$generation))
-  first_gen   <- generations[1]
 
   genome_profiles <- pop_df %>%
     filter(!is.na(mut_sig)) %>%
-    mutate(element_key = paste(element_id, feature_type, sep = ":")) %>%
     group_by(genome_id, generation) %>%
     summarise(
-      profile_str = paste(sort(paste(element_key, mut_sig, sep = "=")), collapse = "|"),
-      profile_vec = list(setNames(mut_sig, element_key)),
-      concat_seq  = paste(sequence[order(element_key)], collapse = ""),
+      profile_str = paste(mut_sig, collapse = ";"),
+      #profile_vec = list(setNames(mut_sig, element_id)),
+      #concat_seq  = paste(sequence[order(element_id)], collapse = ""),
       sel_coeff   = sum(log_sel_coeff, na.rm = TRUE),
       .groups     = "drop"
     )
@@ -282,20 +286,17 @@ classify_genome_haplotypes <- function(pop_df) {
 
     prof_tbl    <- table(gen_data$profile_str)
     sel_by_prof <- split(gen_data$sel_coeff, gen_data$profile_str)
-    idx_by_prof <- split(seq_len(nrow(gen_data)), gen_data$profile_str)
-    vec_by_prof <- lapply(idx_by_prof, function(idx) gen_data$profile_vec[[idx[1]]])
-    seq_by_prof <- lapply(idx_by_prof, function(idx) gen_data$concat_seq[idx[1]])
 
     for (prof_str in names(prof_tbl)) {
       freq       <- prof_tbl[[prof_str]] / n_total
       sel_coeff  <- mean(unlist(sel_by_prof[[prof_str]]), na.rm = TRUE)
-      prof_vec   <- vec_by_prof[[prof_str]]
-      concat_seq <- seq_by_prof[[prof_str]]
 
       if (!prof_str %in% names(known_profiles)) {
-        if (gen == first_gen) {
+        prof_vec <- parse_sig(prof_str)
+        if (gen == 0) {
           htype <- "founder"; prefix <- "F"
-        } else if (is_recombinant_genome(prof_vec, unname(known_profiles))) {
+        } else
+          if (is_recombinant_genome(prof_vec, unname(known_profiles))) {
           htype <- "recombinant"; prefix <- "R"
         } else {
           htype <- "mutant"; prefix <- "M"
@@ -309,7 +310,6 @@ classify_genome_haplotypes <- function(pop_df) {
         generation   = gen,
         haplotype_id = hap_labels[[prof_str]],
         profile_str  = prof_str,
-        sequence     = concat_seq,
         freq         = freq,
         type         = known_types[[prof_str]],
         sel_coeff    = sel_coeff,
@@ -476,13 +476,17 @@ build_network_plot <- function(snap_df, title = "") {
 # ── Classify whole-genome haplotypes ─────────────────────────────────────────
 message("Assigning per-element mutation signatures...")
 
+group_df <- subset(df, element_id == 8 & population_id == 0) # TESTING
 element_sig_df <- df %>%
+  mutate(element_id_tmp = element_id) %>%
   group_by(element_id, feature_type, population_id) %>%
   group_modify(~ assign_element_sigs(.x)) %>%
+  mutate(element_id_tmp = NULL) %>%
   ungroup()
 
 message("Classifying whole-genome haplotypes per population...")
 
+pop_df <- subset(element_sig_df, population_id == 0) # TESTING
 hap_data <- element_sig_df %>%
   group_by(population_id) %>%
   group_modify(~ classify_genome_haplotypes(.x)) %>%
