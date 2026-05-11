@@ -1,18 +1,18 @@
 library(dplyr)
 library(ggplot2)
-library(tidyr)
 library(igraph)
-library(ape)
-library(pegas)
 
 # Usage:
-#   Rscript plot_haplotype_network.R [tracking.csv] [output_prefix] [generation]
+#   Rscript plot_haplotype_network.R [gff_dir] [output_prefix] [generation]
 #
 # Arguments:
-#   tracking.csv   – path to the tracking CSV (default: tracking.csv)
+#   gff_dir        – directory containing GFF + FASTA files (default: .)
 #   output_prefix  – prefix for output files       (default: haplotype_network)
 #   generation     – generation to plot; "all" plots one PDF per generation,
 #                    "last" plots the final generation (default: "last")
+#
+# GFF files must match: pop_<pop>_gen_<gen>_genome_<id>.gff
+# FASTA files must share the same basename with a .fasta extension.
 #
 # Output: one PDF per (element_id, feature_type, population_id) group, per
 #         requested generation. Nodes are sized by frequency, coloured by
@@ -20,25 +20,146 @@ library(pegas)
 #         edge weights reflect the number of mutational steps between
 #         haplotypes.
 
-args          <- commandArgs(trailingOnly = TRUE)
-args          <- args[!grepl("^--", args)]
-tracking_file <- if (length(args) >= 1) args[1] else "tracking.csv"
-outpref       <- if (length(args) >= 2) args[2] else "haplotype_network"
-gen_arg       <- if (length(args) >= 3) args[3] else "last"
+args    <- commandArgs(trailingOnly = TRUE)
+args    <- args[!grepl("^--", args)]
+gff_dir <- if (length(args) >= 1) args[1] else "."
+outpref <- if (length(args) >= 2) args[2] else "haplotype_network"
+gen_arg <- if (length(args) >= 3) args[3] else "last"
 
-if (!file.exists(tracking_file)) {
-  stop("Cannot find tracking file: ", tracking_file)
+
+# ── GFF / FASTA reading (adapted from ld_analysis.R) ─────────────────────────
+
+parse_attrs <- function(attr_str) {
+  pairs <- strsplit(attr_str, ";", fixed = TRUE)[[1L]]
+  kv    <- strsplit(pairs, "=", fixed = TRUE)
+  keys  <- vapply(kv, `[[`, character(1L), 1L)
+  vals  <- vapply(kv, function(x) if (length(x) >= 2L) x[[2L]] else NA_character_,
+                  character(1L))
+  setNames(vals, keys)
 }
 
-message("Reading ", tracking_file)
-df <- read.csv(tracking_file, stringsAsFactors = FALSE)
-
-required_cols <- c("element_id", "feature_type", "generation",
-                   "population_id", "genome_id", "sequence")
-missing <- setdiff(required_cols, colnames(df))
-if (length(missing) > 0) {
-  stop("Missing required columns: ", paste(missing, collapse = ", "))
+read_sim_gff <- function(path) {
+  lines <- readLines(path, warn = FALSE)
+  lines <- lines[nchar(lines) > 0L & !startsWith(lines, "#")]
+  if (length(lines) == 0L) return(NULL)
+  rows <- lapply(lines, function(line) {
+    f <- strsplit(line, "\t", fixed = TRUE)[[1L]]
+    if (length(f) < 9L) return(NULL)
+    a <- parse_attrs(f[9L])
+    contig_name  <- f[1L]
+    contig_index <- suppressWarnings(
+      as.integer(sub("contig_", "", contig_name)) - 1L
+    )
+    data.frame(
+      contig_index  = contig_index,
+      start         = as.integer(f[4L]),
+      end           = as.integer(f[5L]),
+      strand        = f[7L],
+      element_id    = suppressWarnings(as.integer(a[["element_id"]])),
+      feature_type  = a[["feature_type"]],
+      log_sel_coeff = suppressWarnings(as.numeric(a[["log_element_selection_coefficient"]])),
+      stringsAsFactors = FALSE
+    )
+  })
+  bind_rows(Filter(Negate(is.null), rows))
 }
+
+read_fasta <- function(path) {
+  lines   <- readLines(path, warn = FALSE)
+  headers <- which(startsWith(lines, ">"))
+  seqs    <- vector("list", length(headers))
+  for (i in seq_along(headers)) {
+    h_line <- lines[headers[i]]
+    m <- regmatches(h_line, regexpr("_contig(\\d+)", h_line, perl = TRUE))
+    if (length(m) == 0L) next
+    idx        <- as.integer(sub("_contig", "", m))
+    body_start <- headers[i] + 1L
+    body_end   <- if (i < length(headers)) headers[i + 1L] - 1L else length(lines)
+    seq_str    <- paste(lines[body_start:body_end], collapse = "")
+    seqs[[i]]  <- list(idx = idx, seq = toupper(seq_str))
+  }
+  result <- Filter(Negate(is.null), seqs)
+  setNames(
+    vapply(result, `[[`, character(1L), "seq"),
+    vapply(result, function(x) as.character(x[["idx"]]), character(1L))
+  )
+}
+
+rev_comp <- function(seq) {
+  comp <- chartr("ACGTN", "TGCAN", seq)
+  paste(rev(strsplit(comp, "")[[1L]]), collapse = "")
+}
+
+extract_element_seq <- function(fasta_seqs, contig_index, start, end, strand) {
+  key   <- as.character(contig_index)
+  if (!key %in% names(fasta_seqs)) return(NA_character_)
+  full  <- fasta_seqs[[key]]
+  start <- max(1L, start)
+  end   <- min(nchar(full), end)
+  if (start > end) return(NA_character_)
+  sub_seq <- substr(full, start, end)
+  if (strand == "-") sub_seq <- rev_comp(sub_seq)
+  sub_seq
+}
+
+# ── Discover and parse GFF files ──────────────────────────────────────────────
+
+gff_files <- list.files(gff_dir,
+                        pattern    = "^pop_\\d+_gen_\\d+_genome_\\d+\\.gff$",
+                        full.names = TRUE)
+if (length(gff_files) == 0L) {
+  stop("No GFF files matching pop_<pop>_gen_<gen>_genome_<id>.gff found in: ", gff_dir)
+}
+message("Found ", length(gff_files), " GFF file(s) in: ", gff_dir)
+
+file_meta <- lapply(gff_files, function(fp) {
+  bn <- sub("\\.gff$", "", basename(fp))
+  m  <- regmatches(bn, regexpr("^pop_(\\d+)_gen_(\\d+)_genome_(\\d+)$", bn, perl = TRUE))
+  if (length(m) == 0L) return(NULL)
+  parts <- as.integer(strsplit(sub("^pop_", "", m), "_gen_|_genome_")[[1L]])
+  data.frame(
+    gff_path   = fp,
+    fasta_path = sub("\\.gff$", ".fasta", fp),
+    pop_id     = parts[1L],
+    gen_id     = parts[2L],
+    genome_id  = parts[3L],
+    stringsAsFactors = FALSE
+  )
+})
+file_meta <- bind_rows(Filter(Negate(is.null), file_meta))
+
+# ── Extract element sequences from each genome ────────────────────────────────
+message("Extracting element sequences from GFF + FASTA files...")
+
+df_rows <- lapply(seq_len(nrow(file_meta)), function(i) {
+  row <- file_meta[i, ]
+  if (!file.exists(row$fasta_path)) {
+    message("  FASTA not found, skipping: ", row$fasta_path)
+    return(NULL)
+  }
+  gff   <- read_sim_gff(row$gff_path)
+  if (is.null(gff) || nrow(gff) == 0L) return(NULL)
+  fasta <- read_fasta(row$fasta_path)
+
+  gff$sequence <- mapply(
+    extract_element_seq,
+    contig_index = gff$contig_index,
+    start        = gff$start,
+    end          = gff$end,
+    strand       = gff$strand,
+    MoreArgs     = list(fasta_seqs = fasta)
+  )
+
+  gff$generation   <- row$gen_id
+  gff$population_id <- row$pop_id
+  gff$genome_id    <- row$genome_id
+  gff[!is.na(gff$sequence) & !is.na(gff$element_id), ]
+})
+
+df <- bind_rows(Filter(Negate(is.null), df_rows))
+
+if (nrow(df) == 0L) stop("No element sequences could be extracted.")
+message(sprintf("Extracted sequences for %d element × genome records.", nrow(df)))
 
 # ── Helper functions ──────────────────────────────────────────────────────────
 
@@ -85,14 +206,10 @@ is_recombinant <- function(h_muts, known_muts_list) {
   FALSE
 }
 
-hap_sel_coeff <- function(coeff_strs) {
-  coeff_strs <- coeff_strs[!is.na(coeff_strs) & nchar(coeff_strs) > 0]
-  if (length(coeff_strs) == 0) return(NA_real_)
-  per_genome <- sapply(coeff_strs, function(s) {
-    vals <- suppressWarnings(as.numeric(strsplit(s, ";")[[1]]))
-    sum(vals, na.rm = TRUE)
-  })
-  mean(per_genome, na.rm = TRUE)
+hap_sel_coeff <- function(coeffs) {
+  coeffs <- coeffs[!is.na(coeffs)]
+  if (length(coeffs) == 0) return(NA_real_)
+  mean(coeffs, na.rm = TRUE)
 }
 
 # Hamming distance between two equal-length sequences (character vectors or strings).
@@ -107,7 +224,7 @@ hamming <- function(a, b) {
 classify_haplotypes <- function(group_df) {
   generations   <- sort(unique(group_df$generation))
   first_gen     <- generations[1]
-  has_sel_coeff <- "log_selection_coefficients" %in% colnames(group_df)
+  has_sel_coeff <- "log_sel_coeff" %in% colnames(group_df)
 
   reference <- build_reference(group_df$sequence[group_df$generation == first_gen])
 
@@ -120,7 +237,7 @@ classify_haplotypes <- function(group_df) {
   rows <- list()
   for (gen in generations) {
     gen_mask <- group_df$generation == gen & nchar(group_df$sequence) > 0
-    sel_all  <- if (has_sel_coeff) group_df$log_selection_coefficients[gen_mask] else NULL
+    sel_all  <- if (has_sel_coeff) group_df$log_sel_coeff[gen_mask] else NULL
     seqs_all <- group_df$sequence[gen_mask]
     n_total  <- length(seqs_all)
     if (n_total == 0) next
