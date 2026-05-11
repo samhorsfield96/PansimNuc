@@ -26,6 +26,8 @@ gff_dir <- if (length(args) >= 1) args[1] else "."
 outpref <- if (length(args) >= 2) args[2] else "haplotype_network"
 gen_arg <- if (length(args) >= 3) args[3] else "last"
 
+gff_dir <- "/Users/samhorsfield/OneDrive/Work/Postdoc_Unine/Analysis/PansimNuc_results/testing_high_mu_low_selection"
+outpref <- "/Users/samhorsfield/OneDrive/Work/Postdoc_Unine/Analysis/PansimNuc_results/haplotype_netowork_test"
 
 # ── GFF / FASTA reading (adapted from ld_analysis.R) ─────────────────────────
 
@@ -38,6 +40,9 @@ parse_attrs <- function(attr_str) {
   setNames(vals, keys)
 }
 
+# ── GFF reader ────────────────────────────────────────────────────────────────
+# Returns a data.frame with one row per feature (including selection coeff).
+# checked, all good
 read_sim_gff <- function(path) {
   lines <- readLines(path, warn = FALSE)
   lines <- lines[nchar(lines) > 0L & !startsWith(lines, "#")]
@@ -46,17 +51,18 @@ read_sim_gff <- function(path) {
     f <- strsplit(line, "\t", fixed = TRUE)[[1L]]
     if (length(f) < 9L) return(NULL)
     a <- parse_attrs(f[9L])
+    # contig_N in col-1 → 0-based index for FASTA lookup
     contig_name  <- f[1L]
     contig_index <- suppressWarnings(
       as.integer(sub("contig_", "", contig_name)) - 1L
     )
     data.frame(
-      contig_index  = contig_index,
-      start         = as.integer(f[4L]),
-      end           = as.integer(f[5L]),
-      strand        = f[7L],
-      element_id    = suppressWarnings(as.integer(a[["element_id"]])),
-      feature_type  = a[["feature_type"]],
+      contig_index = contig_index,
+      start        = as.integer(f[4L]),   # GFF is 1-based
+      end          = as.integer(f[5L]),
+      strand       = f[7L],
+      element_id   = suppressWarnings(as.integer(a[["element_id"]])),
+      feature_type = a[["feature_type"]],
       log_sel_coeff = suppressWarnings(as.numeric(a[["log_element_selection_coefficient"]])),
       stringsAsFactors = FALSE
     )
@@ -64,15 +70,18 @@ read_sim_gff <- function(path) {
   bind_rows(Filter(Negate(is.null), rows))
 }
 
+# ── FASTA reader ──────────────────────────────────────────────────────────────
+# checked, all good
 read_fasta <- function(path) {
   lines   <- readLines(path, warn = FALSE)
   headers <- which(startsWith(lines, ">"))
   seqs    <- vector("list", length(headers))
   for (i in seq_along(headers)) {
-    h_line <- lines[headers[i]]
+    h_line  <- lines[headers[i]]
+    # Extract suffix _contig<N> from the header
     m <- regmatches(h_line, regexpr("_contig(\\d+)", h_line, perl = TRUE))
     if (length(m) == 0L) next
-    idx        <- as.integer(sub("_contig", "", m))
+    idx <- as.integer(sub("_contig", "", m))
     body_start <- headers[i] + 1L
     body_end   <- if (i < length(headers)) headers[i + 1L] - 1L else length(lines)
     seq_str    <- paste(lines[body_start:body_end], collapse = "")
@@ -85,15 +94,18 @@ read_fasta <- function(path) {
   )
 }
 
+# ── Reverse complement ────────────────────────────────────────────────────────
+# checked, all good
 rev_comp <- function(seq) {
   comp <- chartr("ACGTN", "TGCAN", seq)
   paste(rev(strsplit(comp, "")[[1L]]), collapse = "")
 }
 
-extract_element_seq <- function(fasta_seqs, contig_index, start, end, strand) {
-  key   <- as.character(contig_index)
+# checked, all good
+extract_window <- function(fasta_seqs, contig_index, start, end, strand) {
+  key <- as.character(contig_index)
   if (!key %in% names(fasta_seqs)) return(NA_character_)
-  full  <- fasta_seqs[[key]]
+  full <- fasta_seqs[[key]]
   start <- max(1L, start)
   end   <- min(nchar(full), end)
   if (start > end) return(NA_character_)
@@ -142,7 +154,7 @@ df_rows <- lapply(seq_len(nrow(file_meta)), function(i) {
   fasta <- read_fasta(row$fasta_path)
 
   gff$sequence <- mapply(
-    extract_element_seq,
+    extract_window,
     contig_index = gff$contig_index,
     start        = gff$start,
     end          = gff$end,
@@ -162,7 +174,7 @@ if (nrow(df) == 0L) stop("No element sequences could be extracted.")
 message(sprintf("Extracted sequences for %d element × genome records.", nrow(df)))
 
 # ── Helper functions ──────────────────────────────────────────────────────────
-
+# checked, all good
 build_reference <- function(seqs) {
   valid <- seqs[nchar(seqs) > 0]
   if (length(valid) == 0) return(character(0))
@@ -175,6 +187,8 @@ build_reference <- function(seqs) {
   })
 }
 
+# determine mutated sites between reference and sequences
+# checked, all good
 get_mutation_sig <- function(seq, reference) {
   chars <- toupper(strsplit(seq, "")[[1]])
   len   <- min(length(chars), length(reference))
@@ -183,6 +197,7 @@ get_mutation_sig <- function(seq, reference) {
   paste(paste0(idx, ":", chars[idx]), collapse = ";")
 }
 
+# checked, all good
 parse_sig <- function(s) if (nchar(s) == 0) character(0) else strsplit(s, ";")[[1]]
 
 is_recombinant <- function(h_muts, known_muts_list) {
@@ -221,6 +236,7 @@ hamming <- function(a, b) {
 }
 
 # ── Classify haplotypes for a single group ────────────────────────────────────
+# TODO test this
 classify_haplotypes <- function(group_df) {
   generations   <- sort(unique(group_df$generation))
   first_gen     <- generations[1]
@@ -242,6 +258,7 @@ classify_haplotypes <- function(group_df) {
     n_total  <- length(seqs_all)
     if (n_total == 0) next
 
+    # generates unique sequences and labels them
     seq_tbl    <- table(seqs_all)
     sel_by_seq <- if (has_sel_coeff) split(sel_all, seqs_all) else NULL
 
@@ -443,6 +460,9 @@ build_network_plot <- function(snap_df, title = "") {
 
 # ── Classify all groups ───────────────────────────────────────────────────────
 message("Classifying haplotypes across all groups...")
+
+#testing
+group_df <- subset(df, element_id == 8 & feature_type == "exon" & population_id == 0)
 
 hap_data <- df %>%
   group_by(element_id, feature_type, population_id) %>%
