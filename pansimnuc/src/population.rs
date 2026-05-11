@@ -1017,10 +1017,9 @@ impl Population {
             for (contig_id, indices) in sorted_contig_groups {
                 writeln!(
                     writer,
-                    ">{id}_contig{contig_id} parent={parent} generation={generation}",
-                    id = genome.identifier,
+                    ">{id}_contig{contig_id} generation={generation}",
+                    id = genome.genome_id,
                     contig_id = contig_id,
-                    parent = genome.parent,
                     generation = self.generation
                 )?;
 
@@ -1129,13 +1128,12 @@ impl Population {
                 let strand = if element.strand { "+" } else { "-" };
 
                 let attributes = format!(
-                    "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};genome_identifier={};parent={};multiplier={:.6};sequence_length={};log_genome_selection_coefficient={:.6};log_element_selection_coefficient={:.6}",
+                    "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};parent={};multiplier={:.6};sequence_length={};log_genome_selection_coefficient={:.6};log_element_selection_coefficient={:.6}",
                     genome.genome_id,
                     element.element_id,
                     element.feature_type,
                     element.feature_id,
                     element.contig_id,
-                    genome.identifier,
                     genome.parent,
                     element.multiplier,
                     element.seq.len(),
@@ -1353,7 +1351,7 @@ mod tests {
             .read_to_string(&mut content)
             .expect("failed to read test FASTA file");
 
-        assert!(content.contains(">0_contig0 parent=root generation=0"));
+        assert!(content.contains(">0_contig0 generation=0"));
         assert!(content.contains("ACGT"));
 
         let _ = fs::remove_file(genome_output_path);
