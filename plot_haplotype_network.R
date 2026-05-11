@@ -225,46 +225,46 @@ assign_element_sigs <- function(group_df) {
 }
 
 # Genome-level recombinant detection.
-# profile_c      : named character vector  element_key -> mut_sig  for one genome
-# unnamed_known_profiles : list of such vectors for all previously seen genome haplotypes
-# C is a recombinant of A and B when every element allele matches A or B, and
-# both parents each contribute at least one element the other doesn't.
-# Checked, all good
-is_recombinant_genome <- function(profile_c, unnamed_known_profiles) {
-  if (length(unnamed_known_profiles) < 2) return(FALSE)
-  
+# profile_c           : parsed character vector of mutation tokens for one genome
+# all_profiles_named  : named list (profile_str -> parsed vec) of all known profiles
+# Returns a length-2 character vector of the two parent profile strings when C
+# is a recombinant (union of their mutation sets equals C's, each contributes
+# at least one exclusive mutation), or NULL otherwise.
+# TODO
+find_recombinant_parents <- function(profile_c, all_profiles_named) {
+  if (length(all_profiles_named) < 2) return(NULL)
+
   profile_c_len <- length(profile_c)
-  # Pre-filter: a valid parent must be a non-empty strict subset of h_muts
-  candidates <- Filter(
-    function(a) length(a) > 0 && length(a) < profile_c_len && all(a %in% profile_c_len),
-    unnamed_known_profiles
+  # Valid parent: non-empty strict subset of profile_c's mutations
+  candidate_names <- Filter(
+    function(nm) {
+      a <- all_profiles_named[[nm]]
+      length(a) > 0 && length(a) < profile_c_len && all(a %in% profile_c)
+    },
+    names(all_profiles_named)
   )
-  if (length(candidates) < 2) return(FALSE)
-  n <- length(candidates)
-  
+  if (length(candidate_names) < 2) return(NULL)
+
+  n <- length(candidate_names)
   for (i in seq_len(n - 1)) {
-    a <- candidates[[i]]
-    # ignore direct matches
-    if (setequal(a, profile_c)) next
-    
+    a_name <- candidate_names[[i]]
+    a      <- all_profiles_named[[a_name]]
     for (j in seq(i + 1, n)) {
-      b <- candidates[[j]]
-      # ignore direct matches
-      if (setequal(b, profile_c)) next
-      
-      # Both parents must each contribute at least one mutation the other lacks.
+      b_name <- candidate_names[[j]]
+      b      <- all_profiles_named[[b_name]]
       if (!any(!a %in% b) || !any(!b %in% a)) next
       ab <- union(a, b)
-      if (length(ab) == profile_c_len && setequal(ab, profile_c)) return(TRUE)
+      if (length(ab) == profile_c_len && setequal(ab, profile_c))
+        return(c(a_name, b_name))
     }
   }
-  FALSE
+  NULL
 }
 
 # Classify whole-genome haplotypes for one population.
 # pop_df must have mut_sig (from assign_element_sigs) and log_sel_coeff columns.
 # Returns: generation, haplotype_id, profile_str, sequence (concatenated), freq, type, sel_coeff
-# Checked, all good
+# TODO
 classify_genome_haplotypes <- function(pop_df) {
   generations <- sort(unique(pop_df$generation))
 
@@ -277,11 +277,18 @@ classify_genome_haplotypes <- function(pop_df) {
       .groups     = "drop"
     )
   
-  # add all profiles to known_profiles to all determination of recombinants, not reliant on order of reading
-  all_profiles <- lapply(names(table(genome_profiles$profile_str)), parse_sig)
-  known_profiles <- list()
-  known_types    <- list()
-  hap_labels     <- list()
+  # Build a named list of all profiles (across all generations) for recombinant
+  # detection – not reliant on the order in which generations are processed.
+  all_profile_names  <- names(table(genome_profiles$profile_str))
+  all_profiles_named <- setNames(
+    lapply(all_profile_names, parse_sig),
+    all_profile_names
+  )
+
+  known_profiles <- list()   # profile_str -> parsed vec  (profiles seen so far)
+  known_types    <- list()   # profile_str -> haplotype type string
+  known_parents  <- list()   # profile_str -> "P1,P2" or NA
+  hap_labels     <- list()   # profile_str -> short label
   counter        <- 0L
   new_label <- function(prefix) { counter <<- counter + 1L; paste0(prefix, counter) }
 
@@ -295,21 +302,27 @@ classify_genome_haplotypes <- function(pop_df) {
     sel_by_prof <- split(gen_data$sel_coeff, gen_data$profile_str)
 
     for (prof_str in names(prof_tbl)) {
-      freq       <- prof_tbl[[prof_str]] / n_total
-      sel_coeff  <- mean(unlist(sel_by_prof[[prof_str]]), na.rm = TRUE)
+      freq      <- prof_tbl[[prof_str]] / n_total
+      sel_coeff <- mean(unlist(sel_by_prof[[prof_str]]), na.rm = TRUE)
 
       if (!prof_str %in% names(known_profiles)) {
-        prof_vec <- parse_sig(prof_str)
+        prof_vec       <- parse_sig(prof_str)
+        parent_str     <- NA_character_
         if (gen == 0) {
           htype <- "founder"; prefix <- "F"
-        } else
-          if (is_recombinant_genome(prof_vec, unname(all_profiles))) {
-          htype <- "recombinant"; prefix <- "R"
         } else {
-          htype <- "mutant"; prefix <- "M"
+          parent_profiles <- find_recombinant_parents(prof_vec, all_profiles_named)
+          if (!is.null(parent_profiles)) {
+            # Store parent profile strings now; labels are resolved after the loop.
+            parent_str <- paste(parent_profiles, collapse = "||")
+            htype  <- "recombinant"; prefix <- "R"
+          } else {
+            htype  <- "mutant"; prefix <- "M"
+          }
         }
         known_profiles[[prof_str]] <- prof_vec
         known_types[[prof_str]]    <- htype
+        known_parents[[prof_str]]  <- parent_str
         hap_labels[[prof_str]]     <- new_label(prefix)
       }
 
@@ -319,12 +332,27 @@ classify_genome_haplotypes <- function(pop_df) {
         profile_str  = prof_str,
         freq         = freq,
         type         = known_types[[prof_str]],
+        parents      = known_parents[[prof_str]],
         sel_coeff    = sel_coeff,
         stringsAsFactors = FALSE
       )
     }
   }
-  bind_rows(rows)
+  result <- bind_rows(rows)
+
+  # Resolve parent profile strings to haplotype labels now that all labels are assigned.
+  result$parents <- vapply(result$parents, function(ps) {
+    if (is.na(ps) || nchar(ps) == 0) return(NA_character_)
+
+    profs  <- strsplit(ps, "\\|\\|")[[1]]
+    labels <- vapply(profs, function(p) {
+      lbl <- hap_labels[[p]]
+      if (is.null(lbl)) NA_character_ else lbl
+    }, character(1L))
+    paste(labels[!is.na(labels)], collapse = ",")
+  }, character(1L))
+
+  result
 }
 
 # ── Build haplotype network for one generation snapshot ──────────────────────
@@ -402,6 +430,22 @@ build_network_plot <- function(snap_df, title = "") {
   # Node radius proportional to frequency (sqrt for area)
   node_df$size <- 4 + 10 * sqrt(node_df$freq)
 
+  # ── Recombinant parent edges (dashed) ─────────────────────────────────────
+  recomb_nodes <- node_df[node_df$type == "recombinant" &
+                           !is.na(node_df$parents) &
+                           nchar(node_df$parents) > 0, , drop = FALSE]
+  recomb_edge_df <- do.call(rbind, lapply(seq_len(nrow(recomb_nodes)), function(k) {
+    parent_ids <- strsplit(recomb_nodes$parents[k], ",")[[1]]
+    parent_ids <- parent_ids[parent_ids %in% node_df$haplotype_id]
+    if (length(parent_ids) == 0) return(NULL)
+    rx <- recomb_nodes$x[k]; ry <- recomb_nodes$y[k]
+    do.call(rbind, lapply(parent_ids, function(pid) {
+      pm <- node_df[node_df$haplotype_id == pid, ]
+      data.frame(x = rx, y = ry, xend = pm$x, yend = pm$y,
+                 stringsAsFactors = FALSE)
+    }))
+  }))
+
   p <- ggplot() +
     # Edges
     geom_segment(
@@ -410,6 +454,18 @@ build_network_plot <- function(snap_df, title = "") {
       colour    = "grey50",
       linewidth = 0.8
     ) +
+    # Dashed recombinant–parent links
+    {
+      if (!is.null(recomb_edge_df) && nrow(recomb_edge_df) > 0) {
+        geom_segment(
+          data      = recomb_edge_df,
+          aes(x = x, y = y, xend = xend, yend = yend),
+          colour    = "#00A087",
+          linewidth = 0.7,
+          linetype  = "dashed"
+        )
+      } else NULL
+    } +
     # Edge weight tick marks – small cross-ticks every mutational step along each edge
     {
       # Build tick-mark data: for each step along an edge, one small perpendicular segment
@@ -483,7 +539,7 @@ build_network_plot <- function(snap_df, title = "") {
 # ── Classify whole-genome haplotypes ─────────────────────────────────────────
 message("Assigning per-element mutation signatures...")
 
-group_df <- subset(df, element_id == 8 & population_id == 0) # TESTING
+#group_df <- subset(df, element_id == 8 & population_id == 0) # TESTING
 element_sig_df <- df %>%
   mutate(element_id_tmp = element_id) %>%
   group_by(element_id, feature_type, population_id) %>%
@@ -493,7 +549,7 @@ element_sig_df <- df %>%
 
 message("Classifying whole-genome haplotypes per population...")
 
-pop_df <- subset(element_sig_df, population_id == 0) # TESTING
+#pop_df <- subset(element_sig_df, population_id == 0) # TESTING
 hap_data <- element_sig_df %>%
   group_by(population_id) %>%
   group_modify(~ classify_genome_haplotypes(.x)) %>%
