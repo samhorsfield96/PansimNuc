@@ -26,7 +26,7 @@ gff_dir <- if (length(args) >= 1) args[1] else "."
 outpref <- if (length(args) >= 2) args[2] else "haplotype_network"
 gen_arg <- if (length(args) >= 3) args[3] else "last"
 
-gff_dir <- "/Users/samhorsfield/OneDrive/Work/Postdoc_Unine/Analysis/PansimNuc_results/testing_high_mu_low_selection"
+gff_dir <- "/Users/samhorsfield/OneDrive/Work/Postdoc_Unine/Analysis/PansimNuc_results/testing_simple_haplotype"
 outpref <- "/Users/samhorsfield/OneDrive/Work/Postdoc_Unine/Analysis/PansimNuc_results/haplotype_netowork_test"
 
 # ── GFF / FASTA reading (adapted from ld_analysis.R) ─────────────────────────
@@ -264,7 +264,7 @@ find_recombinant_parents <- function(profile_c, all_profiles_named) {
 # Classify whole-genome haplotypes for one population.
 # pop_df must have mut_sig (from assign_element_sigs) and log_sel_coeff columns.
 # Returns: generation, haplotype_id, profile_str, sequence (concatenated), freq, type, sel_coeff
-# TODO
+# checked, all good
 classify_genome_haplotypes <- function(pop_df) {
   generations <- sort(unique(pop_df$generation))
 
