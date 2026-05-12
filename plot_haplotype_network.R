@@ -379,11 +379,19 @@ build_network_plot <- function(snap_df, title = "") {
   snap_df$profile_str[snap_df$profile_str == "NA"] <- ""
   n <- nrow(snap_df)
 
+  # ── Build binary mutation-presence vectors ────────────────────────────────
+  # Union of all mutation tokens across haplotypes defines the vector dimensions
+  all_mutations <- unique(unlist(lapply(snap_df$profile_str, parse_sig)))
+  mut_vectors   <- lapply(snap_df$profile_str, function(ps) {
+    muts <- parse_sig(ps)
+    as.integer(all_mutations %in% muts)
+  })
+
   # ── Build pairwise distance matrix (Hamming steps) ───────────────────────
   dist_mat <- matrix(0L, n, n, dimnames = list(snap_df$haplotype_id, snap_df$haplotype_id))
   for (i in seq_len(n - 1)) {
     for (j in seq(i + 1, n)) {
-      d <- jaccard_distance(snap_df$profile_str[i], snap_df$profile_str[j])
+      d <- sum(mut_vectors[[i]] != mut_vectors[[j]])
       dist_mat[i, j] <- d
       dist_mat[j, i] <- d
     }
