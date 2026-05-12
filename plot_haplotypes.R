@@ -29,6 +29,9 @@ outpref <- if (length(args) >= 2) args[2] else "haplotypes"
 gen_arg <- if (length(args) >= 3) args[3] else "all"
 top_n   <- if (length(args) >= 3) as.integer(args[3]) else 5L  # 0 = keep all
 
+gff_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_no_recomb_all_gens"
+outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_recomb_all_gens_haploypes"
+
 # ── GFF / FASTA reading (adapted from ld_analysis.R) ─────────────────────────
 
 parse_attrs <- function(attr_str) {
@@ -143,32 +146,39 @@ file_meta <- bind_rows(Filter(Negate(is.null), file_meta))
 # ── Extract element sequences from each genome ────────────────────────────────
 message("Extracting element sequences from GFF + FASTA files...")
 
-df_rows <- lapply(seq_len(nrow(file_meta)), function(i) {
-  row <- file_meta[i, ]
-  if (!file.exists(row$fasta_path)) {
-    message("  FASTA not found, skipping: ", row$fasta_path)
-    return(NULL)
-  }
-  gff   <- read_sim_gff(row$gff_path)
-  if (is.null(gff) || nrow(gff) == 0L) return(NULL)
-  fasta <- read_fasta(row$fasta_path)
-
-  gff$sequence <- mapply(
-    extract_window,
-    contig_index = gff$contig_index,
-    start        = gff$start,
-    end          = gff$end,
-    strand       = gff$strand,
-    MoreArgs     = list(fasta_seqs = fasta)
-  )
-
-  gff$generation   <- row$gen_id
-  gff$population_id <- row$pop_id
-  gff$genome_id    <- row$genome_id
-  gff[!is.na(gff$sequence) & !is.na(gff$element_id), ]
-})
-
-df <- bind_rows(Filter(Negate(is.null), df_rows))
+# read existing dataset if present
+gff_df_rds_file <- paste0(outpref, "_gff_df.rds")
+if (!file.exists(gff_df_rds_file)) {
+  df_rows <- lapply(seq_len(nrow(file_meta)), function(i) {
+    row <- file_meta[i, ]
+    if (!file.exists(row$fasta_path)) {
+      message("  FASTA not found, skipping: ", row$fasta_path)
+      return(NULL)
+    }
+    gff   <- read_sim_gff(row$gff_path)
+    if (is.null(gff) || nrow(gff) == 0L) return(NULL)
+    fasta <- read_fasta(row$fasta_path)
+    
+    gff$sequence <- mapply(
+      extract_window,
+      contig_index = gff$contig_index,
+      start        = gff$start,
+      end          = gff$end,
+      strand       = gff$strand,
+      MoreArgs     = list(fasta_seqs = fasta)
+    )
+    
+    gff$generation   <- row$gen_id
+    gff$population_id <- row$pop_id
+    gff$genome_id    <- row$genome_id
+    gff[!is.na(gff$sequence) & !is.na(gff$element_id), ]
+  })
+  
+  df <- bind_rows(Filter(Negate(is.null), df_rows))
+  saveRDS(df, gff_df_rds_file)
+} else {
+  df <- readRDS(gff_df_rds_file)
+}
 
 if (nrow(df) == 0L) stop("No element sequences could be extracted.")
 message(sprintf("Extracted sequences for %d element × genome records.", nrow(df)))
@@ -368,20 +378,47 @@ classify_genome_haplotypes <- function(pop_df) {
 message("Assigning per-element mutation signatures...")
 
 #group_df <- subset(df, element_id == 8 & population_id == 0) # TESTING
-element_sig_df <- df %>%
-  mutate(element_id_tmp = element_id) %>%
-  group_by(element_id, feature_type, population_id) %>%
-  group_modify(~ assign_element_sigs(.x)) %>%
-  mutate(element_id_tmp = NULL) %>%
-  ungroup()
+element_sig_df_rds_file <- paste0(outpref, "_element_sig_df.rds")
+if (!file.exists(element_sig_df_rds_file)) { 
+  element_sig_df <- df %>%
+    mutate(element_id_tmp = element_id) %>%
+    group_by(element_id, feature_type, population_id) %>%
+    group_modify(~ assign_element_sigs(.x)) %>%
+    mutate(element_id_tmp = NULL) %>%
+    ungroup()
+  
+  saveRDS(element_sig_df, element_sig_df_rds_file)
+} else {
+  element_sig_df <- readRDS(element_sig_df_rds_file)
+}
 
 message("Classifying whole-genome haplotypes per population...")
 
 #pop_df <- subset(element_sig_df, population_id == 0) # TESTING
-hap_data <- element_sig_df %>%
-  group_by(population_id) %>%
-  group_modify(~ classify_genome_haplotypes(.x)) %>%
-  ungroup()
+hap_data_rds_file <- paste0(outpref, "_hap_data.rds")
+if (!file.exists(hap_data_rds_file)) { 
+  hap_data <- element_sig_df %>%
+    group_by(population_id) %>%
+    group_modify(~ classify_genome_haplotypes(.x)) %>%
+    ungroup()
+  
+  # Fill in zero-frequency rows so that every haplotype appears in every
+  # generation (needed for correct stacked areas and unbroken lines).
+  hap_data <- hap_data %>%
+    group_by(population_id) %>%
+    complete(
+      generation   = unique(generation),
+      haplotype_id = unique(haplotype_id),
+      fill         = list(freq = 0)
+    ) %>%
+    group_by(population_id, haplotype_id) %>%
+    fill(type, profile_str, sel_coeff, .direction = "downup") %>%
+    ungroup()
+  
+  saveRDS(hap_data, hap_data_rds_file)
+} else {
+  hap_data <- readRDS(hap_data_rds_file)
+}
 
 # ── Resolve requested generations ────────────────────────────────────────────
 all_gens <- sort(unique(hap_data$generation))
@@ -396,19 +433,6 @@ if (tolower(gen_arg) == "all") {
   if (!g %in% all_gens) stop("Generation ", g, " not found in data.")
   target_gens <- g
 }
-
-# Fill in zero-frequency rows so that every haplotype appears in every
-# generation (needed for correct stacked areas and unbroken lines).
-hap_data <- hap_data %>%
-  group_by(population_id) %>%
-  complete(
-    generation   = unique(generation),
-    haplotype_id = unique(haplotype_id),
-    fill         = list(freq = 0)
-  ) %>%
-  group_by(population_id, haplotype_id) %>%
-  fill(type, profile_str, sel_coeff, .direction = "downup") %>%
-  ungroup()
 
 # ── Summary table ─────────────────────────────────────────────────────────────
 hap_summary <- hap_data %>%
