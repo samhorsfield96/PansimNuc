@@ -8,26 +8,25 @@ library(ggpattern)
 #   Rscript plot_haplotype_network.R [gff_dir] [output_prefix] [generation]
 #
 # Arguments:
-#   gff_dir        – directory containing GFF + FASTA files (default: .)
-#   output_prefix  – prefix for output files       (default: haplotypes)
-#   generation     – generation to plot; "all" plots one PDF per generation,
-#                    "last" plots the final generation (default: "last")
+#   gff_dir                 – directory containing GFF + FASTA files (default: .)
+#   output_prefix           – prefix for output files       (default: haplotypes)
+#   top_n                   - Number of top-changing haplotypes to return. 0 keeps all.
+#  recombinant_threshold    - proportion of mutations in a haplotype that must be present to 
+#                             identify a new haplotype as being a recombinant. Default 0.9 (90%). 
+#                             Set to 0 to disable recombinant detection and classification.
 #
 # GFF files must match: pop_<pop>_gen_<gen>_genome_<id>.gff
 # FASTA files must share the same basename with a .fasta extension.
 #
-# Output: one PDF per (element_id, feature_type, population_id) group, per
-#         requested generation. Nodes are sized by frequency, coloured by
-#         haplotype type (reference / founder / mutant / recombinant), and
-#         edge weights reflect the number of mutational steps between
-#         haplotypes.
+# Output: multiple PDFs per population_id group, describing the changes in haplotypes
+#         across generations.
 
 args    <- commandArgs(trailingOnly = TRUE)
 args    <- args[!grepl("^--", args)]
 gff_dir <- if (length(args) >= 1) args[1] else "."
 outpref <- if (length(args) >= 2) args[2] else "haplotypes"
-gen_arg <- if (length(args) >= 3) args[3] else "all"
 top_n   <- if (length(args) >= 3) as.integer(args[3]) else 5L  # 0 = keep all
+recombination_threshold <- if (length(args) >= 4) as.numeric(args[4]) else 0.9  # 0 = keep all
 
 gff_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_no_recomb_all_gens"
 outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_recomb_all_gens_haploypes"
@@ -237,19 +236,22 @@ assign_element_sigs <- function(group_df) {
 # Genome-level recombinant detection.
 # profile_c           : parsed character vector of mutation tokens for one genome
 # all_profiles_named  : named list (profile_str -> parsed vec) of all known profiles
+# threshold           : proportion of mutations in a haplotype that must be present to 
+#                       identify a new haplotype as being a recombinant. Default 0.9 (90%). 
+#                       Set to 0 to disable recombinant detection and classification.
 # Returns a length-2 character vector of the two parent profile strings when C
 # is a recombinant (union of their mutation sets equals C's, each contributes
 # at least one exclusive mutation), or NULL otherwise.
 # checked, all good
-find_recombinant_parents <- function(profile_c, all_profiles_named) {
-  if (length(all_profiles_named) < 2) return(NULL)
+find_recombinant_parents <- function(profile_c, all_profiles_named, threshold = 0.9) {
+  if (threshold <= 0 || length(all_profiles_named) < 2) return(NULL)
 
   profile_c_len <- length(profile_c)
-  # Valid parent: non-empty strict subset of profile_c's mutations
   candidate_names <- Filter(
     function(nm) {
       a <- all_profiles_named[[nm]]
-      length(a) > 0 && length(a) < profile_c_len && all(a %in% profile_c)
+      length(a) > 0 &&
+        (sum(a %in% profile_c) / length(a)) >= threshold
     },
     names(all_profiles_named)
   )
@@ -263,9 +265,8 @@ find_recombinant_parents <- function(profile_c, all_profiles_named) {
       b_name <- candidate_names[[j]]
       b      <- all_profiles_named[[b_name]]
       if (!any(!a %in% b) || !any(!b %in% a)) next
-      ab <- union(a, b)
-      if (length(ab) == profile_c_len && setequal(ab, profile_c))
-        return(c(a_name, b_name))
+      # A and B each contribute >= threshold proportion of their mutations to C
+      return(c(a_name, b_name))
     }
   }
   NULL
@@ -325,7 +326,7 @@ classify_genome_haplotypes <- function(pop_df) {
         } else if (gen == 0) {
           htype <- "founder"; prefix <- "F"
         } else {
-          parent_profiles <- find_recombinant_parents(prof_vec, all_profiles_named)
+          parent_profiles <- find_recombinant_parents(prof_vec, all_profiles_named, threshold = recombination_threshold)
           if (!is.null(parent_profiles)) {
             # Store parent profile strings now; labels are resolved after the loop.
             parent_str <- paste(parent_profiles, collapse = "||")
@@ -418,20 +419,6 @@ if (!file.exists(hap_data_rds_file)) {
   saveRDS(hap_data, hap_data_rds_file)
 } else {
   hap_data <- readRDS(hap_data_rds_file)
-}
-
-# ── Resolve requested generations ────────────────────────────────────────────
-all_gens <- sort(unique(hap_data$generation))
-
-if (tolower(gen_arg) == "all") {
-  target_gens <- all_gens
-} else if (tolower(gen_arg) == "last") {
-  target_gens <- max(all_gens)
-} else {
-  g <- suppressWarnings(as.integer(gen_arg))
-  if (is.na(g)) stop("generation argument must be an integer, 'all', or 'last'.")
-  if (!g %in% all_gens) stop("Generation ", g, " not found in data.")
-  target_gens <- g
 }
 
 # ── Summary table ─────────────────────────────────────────────────────────────

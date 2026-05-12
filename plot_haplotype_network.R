@@ -10,6 +10,8 @@ library(igraph)
 #   output_prefix  – prefix for output files       (default: haplotype_network)
 #   generation     – generation to plot; "all" plots one PDF per generation,
 #                    "last" plots the final generation (default: "last")
+#   recombination_threshold – proportion of mutations in a haplotype that must be present to 
+#                             identify a new haplotype as being a recombinant. Default 0.9 (90%). 
 #
 # GFF files must match: pop_<pop>_gen_<gen>_genome_<id>.gff
 # FASTA files must share the same basename with a .fasta extension.
@@ -25,6 +27,7 @@ args    <- args[!grepl("^--", args)]
 gff_dir <- if (length(args) >= 1) args[1] else "."
 outpref <- if (length(args) >= 2) args[2] else "haplotype_network"
 gen_arg <- if (length(args) >= 3) args[3] else "last"
+recombination_threshold <- if (length(args) >= 4) as.numeric(args[4]) else 0.9
 
 gff_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_no_recomb_all_gens"
 outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_no_recomb_all_gens_hapnet"
@@ -207,15 +210,6 @@ get_mutation_sig <- function(seq, reference, element_id) {
 # checked, all good
 parse_sig <- function(s) if (nchar(s) == 0) character(0) else strsplit(s, ";")[[1]]
 
-# Jaccard distance between two sequences (character vectors or strings).
-jaccard_distance <- function(a, b) {
-  ca <- parse_sig(a)
-  cb <- parse_sig(b)
-  intersection = length(intersect(ca, cb))
-  union = (length(ca) + length(cb)) - intersection
-  return (1 - (intersection/union))
-}
-
 # ── Whole-genome haplotype functions ─────────────────────────────────────────
 
 # Assign per-element mutation signatures relative to each element's founding
@@ -238,15 +232,15 @@ assign_element_sigs <- function(group_df) {
 # is a recombinant (union of their mutation sets equals C's, each contributes
 # at least one exclusive mutation), or NULL otherwise.
 # checked, all good
-find_recombinant_parents <- function(profile_c, all_profiles_named) {
-  if (length(all_profiles_named) < 2) return(NULL)
+find_recombinant_parents <- function(profile_c, all_profiles_named, threshold = 0.9) {
+  if (threshold <= 0 || length(all_profiles_named) < 2) return(NULL)
 
   profile_c_len <- length(profile_c)
-  # Valid parent: non-empty strict subset of profile_c's mutations
   candidate_names <- Filter(
     function(nm) {
       a <- all_profiles_named[[nm]]
-      length(a) > 0 && length(a) < profile_c_len && all(a %in% profile_c)
+      length(a) > 0 &&
+        (sum(a %in% profile_c) / length(a)) >= threshold
     },
     names(all_profiles_named)
   )
@@ -260,9 +254,8 @@ find_recombinant_parents <- function(profile_c, all_profiles_named) {
       b_name <- candidate_names[[j]]
       b      <- all_profiles_named[[b_name]]
       if (!any(!a %in% b) || !any(!b %in% a)) next
-      ab <- union(a, b)
-      if (length(ab) == profile_c_len && setequal(ab, profile_c))
-        return(c(a_name, b_name))
+      # A and B each contribute >= threshold proportion of their mutations to C
+      return(c(a_name, b_name))
     }
   }
   NULL
@@ -322,7 +315,7 @@ classify_genome_haplotypes <- function(pop_df) {
         } else if (gen == 0) {
           htype <- "founder"; prefix <- "F"
         } else {
-          parent_profiles <- find_recombinant_parents(prof_vec, all_profiles_named)
+          parent_profiles <- find_recombinant_parents(prof_vec, all_profiles_named, threshold = recombination_threshold)
           if (!is.null(parent_profiles)) {
             # Store parent profile strings now; labels are resolved after the loop.
             parent_str <- paste(parent_profiles, collapse = "||")
