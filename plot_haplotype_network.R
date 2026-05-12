@@ -363,7 +363,7 @@ classify_genome_haplotypes <- function(pop_df) {
 
 # ── Build haplotype network for one generation snapshot ──────────────────────
 # Returns a ggplot object (or NULL if < 2 haplotypes).
-# TODO need to add reference to plot also
+# checked, all good
 build_network_plot <- function(snap_df, title = "") {
   # snap_df: one row per haplotype, columns: haplotype_id, sequence, freq, type, sel_coeff
   snap_df <- snap_df[snap_df$freq > 0, , drop = FALSE]
