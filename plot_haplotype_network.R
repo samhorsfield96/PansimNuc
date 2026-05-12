@@ -29,8 +29,8 @@ outpref <- if (length(args) >= 2) args[2] else "haplotype_network"
 gen_arg <- if (length(args) >= 3) args[3] else "last"
 recombination_threshold <- if (length(args) >= 4) as.numeric(args[4]) else 0.9
 
-gff_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_no_recomb_all_gens"
-outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_no_recomb_all_gens_hapnet"
+gff_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/testing_simple_haplotype"
+outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/testing_simple_haplotype_hapnet"
 
 # ── GFF / FASTA reading (adapted from ld_analysis.R) ─────────────────────────
 
@@ -265,9 +265,10 @@ find_recombinant_parents <- function(profile_c, all_profiles_named, threshold = 
 # pop_df must have mut_sig (from assign_element_sigs) and log_sel_coeff columns.
 # Returns: generation, haplotype_id, profile_str, sequence (concatenated), freq, type, sel_coeff
 # checked, all good
+# checked, all good
 classify_genome_haplotypes <- function(pop_df) {
   generations <- sort(unique(pop_df$generation))
-
+  
   genome_profiles <- pop_df %>%
     group_by(genome_id, generation) %>%
     summarise(
@@ -281,32 +282,42 @@ classify_genome_haplotypes <- function(pop_df) {
   
   # Build a named list of all profiles (across all generations) for recombinant
   # detection – not reliant on the order in which generations are processed.
-  all_profile_names  <- names(table(genome_profiles$profile_str))
-  all_profiles_named <- setNames(
-    lapply(all_profile_names, parse_sig),
-    all_profile_names
-  )
-
+  
   known_profiles <- list()   # profile_str -> parsed vec  (profiles seen so far)
   known_types    <- list()   # profile_str -> haplotype type string
   known_parents  <- list()   # profile_str -> "P1,P2" or NA
   hap_labels     <- list()   # profile_str -> short label
   counter        <- 0L
   new_label <- function(prefix) { counter <<- counter + 1L; paste0(prefix, counter) }
-
+  
+  # determine how many generations present, adjust which generation to look for recombinants
+  if (length(generations) > 1)
+  {
+    adjustment = 1
+  } else {
+    adjustment = 0
+  }
+  
   rows <- list()
   for (gen in generations) {
     gen_data <- genome_profiles[genome_profiles$generation == gen, ]
     n_total  <- nrow(gen_data)
     if (n_total == 0) next
-
+    
+    # look for recombinants in the context of profiles only in prior generation
+    all_profile_names  <- names(table(genome_profiles[genome_profiles$generation == (gen - adjustment), ]$profile_str))
+    all_profiles_named <- setNames(
+      lapply(all_profile_names, parse_sig),
+      all_profile_names
+    )
+    
     prof_tbl    <- table(gen_data$profile_str)
     sel_by_prof <- split(gen_data$sel_coeff, gen_data$profile_str)
-
+    
     for (prof_str in names(prof_tbl)) {
       freq      <- prof_tbl[[prof_str]] / n_total
       sel_coeff <- mean(unlist(sel_by_prof[[prof_str]]), na.rm = TRUE)
-
+      
       if (!prof_str %in% names(known_profiles)) {
         prof_vec       <- parse_sig(prof_str)
         parent_str     <- NA_character_
@@ -332,9 +343,8 @@ classify_genome_haplotypes <- function(pop_df) {
         } else {
           hap_labels[[prof_str]] <- "REF"
         }
-        
       }
-
+      
       rows[[length(rows) + 1]] <- data.frame(
         generation   = gen,
         haplotype_id = hap_labels[[prof_str]],
@@ -348,11 +358,11 @@ classify_genome_haplotypes <- function(pop_df) {
     }
   }
   result <- bind_rows(rows)
-
+  
   # Resolve parent profile strings to haplotype labels now that all labels are assigned.
   result$parents <- vapply(result$parents, function(ps) {
     if (is.na(ps) || nchar(ps) == 0) return(NA_character_)
-
+    
     profs  <- strsplit(ps, "\\|\\|")[[1]]
     labels <- vapply(profs, function(p) {
       lbl <- hap_labels[[p]]
@@ -360,7 +370,7 @@ classify_genome_haplotypes <- function(pop_df) {
     }, character(1L))
     paste(labels[!is.na(labels)], collapse = ",")
   }, character(1L))
-
+  
   result
 }
 
@@ -612,36 +622,33 @@ if (tolower(gen_arg) == "all") {
 # ── Generate plots ────────────────────────────────────────────────────────────
 populations <- sort(unique(hap_data$population_id))
 
-for (gen in target_gens) {
-  message(sprintf("Plotting generation %d ...", gen))
+# plot for all generations specified on one graph
+gen_plots  <- list()
+gen_titles <- character(0)
 
-  gen_plots  <- list()
-  gen_titles <- character(0)
+for (pid in populations) {
+  snap <- hap_data %>%
+    filter(population_id == pid, generation %in% target_gens) %>%
+    distinct(haplotype_id, .keep_all = TRUE)
 
-  for (pid in populations) {
-    snap <- hap_data %>%
-      filter(population_id == pid, generation == gen) %>%
-      distinct(haplotype_id, .keep_all = TRUE)
-
-    title_str <- sprintf("pop %s | gen %d", pid, gen)
-    p <- build_network_plot(snap, title = title_str)
-    if (!is.null(p)) {
-      gen_plots[[length(gen_plots) + 1]] <- p
-      gen_titles <- c(gen_titles, title_str)
-    }
+  title_str <- sprintf("pop %s | gens %s", pid, paste(target_gens, sep = ","))
+  p <- build_network_plot(snap, title = title_str)
+  if (!is.null(p)) {
+    gen_plots[[length(gen_plots) + 1]] <- p
+    gen_titles <- c(gen_titles, title_str)
   }
-
-  if (length(gen_plots) == 0) {
-    message("  No plottable groups for generation ", gen)
-    next
-  }
-
-  # Write one PDF per generation with one page per group
-  out_pdf <- sprintf("%s_gen%04d.pdf", outpref, gen)
-  pdf(out_pdf, width = 8, height = 7)
-  for (p in gen_plots) print(p)
-  dev.off()
-  message("  Saved: ", out_pdf)
 }
+
+if (length(gen_plots) == 0) {
+  message("  No plottable groups ")
+  next
+}
+
+# Write one PDF  with one page per group
+out_pdf <- sprintf("%s.pdf", outpref)
+pdf(out_pdf, width = 8, height = 7)
+for (p in gen_plots) print(p)
+dev.off()
+message("  Saved: ", out_pdf)
 
 message("Done.")
