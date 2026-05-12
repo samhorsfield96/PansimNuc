@@ -25,10 +25,6 @@ outpref    <- if (length(args) >= 2) args[2] else "ld_analysis"
 flank_bp   <- if (length(args) >= 3) as.integer(args[3]) else 100000L
 gen_arg    <- if (length(args) >= 4) args[4] else "last"
 
-gff_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_recomb_all_gens"
-outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_recomb_all_gens_ld_analysis"
-
-
 message(sprintf("Parameters:  flank_bp=%d  generation=%s", flank_bp, gen_arg))
 
 # ── Attribute parser ──────────────────────────────────────────────────────────
