@@ -4,7 +4,7 @@ library(tidyr)
 library(ggsci)
 
 # Usage:
-#   Rscript ld_analysis.R [gff_dir] [output_prefix] [top_n] [flank_bp]
+#   Rscript ld_analysis.R [gff_dir] [output_prefix] [flank_bp]
 #
 # For each (population, generation) group, reads all matching GFF + FASTA files
 # (pop_<pop>_gen_<gen>_genome_<id>.gff / .fasta), identifies the N elements with
@@ -21,11 +21,10 @@ library(ggsci)
 args       <- commandArgs(trailingOnly = TRUE)
 args       <- args[!grepl("^--", args)]
 gff_dir    <- if (length(args) >= 1) args[1] else "."
-out_prefix <- if (length(args) >= 2) args[2] else "ld_analysis"
-top_n      <- if (length(args) >= 3) as.integer(args[3]) else 5L
-flank_bp   <- if (length(args) >= 4) as.integer(args[4]) else 10000L
+outpref <- if (length(args) >= 2) args[2] else "ld_analysis"
+flank_bp   <- if (length(args) >= 3) as.integer(args[3]) else 100000L
 
-message(sprintf("Parameters: top_n=%d  flank_bp=%d", top_n, flank_bp))
+message(sprintf("Parameters:  flank_bp=%d", flank_bp))
 
 # ── Attribute parser ──────────────────────────────────────────────────────────
 # checked, all good
@@ -144,41 +143,74 @@ file_meta <- bind_rows(Filter(Negate(is.null), file_meta))
 
 # ── Read all GFF features (with selection coefficients) ───────────────────────
 message("Reading GFF files to extract selection coefficients...")
-
-all_gff <- lapply(seq_len(nrow(file_meta)), function(i) {
-  row <- file_meta[i, ]
-  gff <- read_sim_gff(row$gff_path)
-  if (is.null(gff) || nrow(gff) == 0L) return(NULL)
-  gff$pop_id    <- row$pop_id
-  gff$gen_id    <- row$gen_id
-  gff$genome_id <- row$genome_id
-  gff
-})
-all_gff <- bind_rows(Filter(Negate(is.null), all_gff))
-
-if (nrow(all_gff) == 0L) stop("No GFF records could be parsed.")
+gff_df_rds_file <- paste0(outpref, "_gff_df.rds")
+if (!file.exists(gff_df_rds_file)) {
+  all_gff <- lapply(seq_len(nrow(file_meta)), function(i) {
+    row <- file_meta[i, ]
+    gff <- read_sim_gff(row$gff_path)
+    if (is.null(gff) || nrow(gff) == 0L) return(NULL)
+    gff$pop_id    <- row$pop_id
+    gff$gen_id    <- row$gen_id
+    gff$genome_id <- row$genome_id
+    gff
+  })
+  all_gff <- bind_rows(Filter(Negate(is.null), all_gff))
+  
+  if (nrow(all_gff) == 0L) stop("No GFF records could be parsed.")
+  saveRDS(all_gff, gff_df_rds_file)
+} else {
+  all_gff <- readRDS(gff_df_rds_file)
+}
 
 # ── Identify top-N elements per (pop, gen) by mean log selection coefficient ──
 # Higher (less negative) log_sel_coeff → stronger positive selection.
 # We rank by mean across genomes to get population-level signal.
 message(sprintf("Identifying top %d elements per (pop, gen) group by selection coefficient...", top_n))
 
-element_sel <- all_gff |>
-  filter(!is.na(log_sel_coeff), !is.na(element_id)) |>
-  group_by(pop_id, gen_id, element_id, feature_type,
-           contig_index, start, end, strand) |>
-  summarise(mean_log_sel = mean(log_sel_coeff, na.rm = TRUE), .groups = "drop")
-
-top_elements <- element_sel |>
-  group_by(pop_id, gen_id) |>
-  slice_max(order_by = mean_log_sel, n = top_n, with_ties = FALSE) |>
-  ungroup()
-
-message(sprintf("Selected %d element × (pop,gen) combinations total.", nrow(top_elements)))
-print(top_elements)
-
 # ── For each top element, extract per-genome sequences for element + flanks ───
 message("Extracting sequences for focal elements and flanking regions...")
+
+get_variable_sites <- function(genomes, locus_start, locus_end, contig_idx)
+{
+  # then read whole region
+  seqs_per_genome <- lapply(seq_len(nrow(genomes)), function(i) {
+    row <- genomes[i, ]
+    if (!file.exists(row$fasta_path)) return(NA)
+    fasta <- read_fasta(row$fasta_path)
+    seq   <- extract_window(fasta, contig_idx,
+                            locus_start, locus_end, "+")  # always + strand for LD window
+    if (is.na(seq)) return(NA)
+    seq
+  })
+  
+  valid <- Filter(Negate(is.null), seqs_per_genome)
+  if (length(valid) < 2L) return(NA)
+  
+  # Pad / trim to common length (should all be the same unless near contig edge)
+  lens   <- nchar(valid)
+  min_l  <- min(lens)
+  valid  <- lapply(valid, substr, 1L, min_l)
+  actual_end <- locus_start + min_l - 1L
+  
+  # Build nucleotide matrix  (n_genomes × min_l)
+  nuc_mat <- do.call(rbind, strsplit(unlist(valid), ""))
+  
+  # Filter to ACGT-only columns
+  valid_col <- apply(nuc_mat, 2L, function(col) all(col %in% c("A","C","G","T")))
+  nuc_mat   <- nuc_mat[, valid_col, drop = FALSE]
+  positions <- (locus_start:actual_end)[valid_col]
+  
+  if (ncol(nuc_mat) == 0L) return(NA)
+  
+  # Keep only variable sites
+  is_var <- apply(nuc_mat, 2L, function(col) length(unique(col)) > 1L)
+  nuc_mat   <- nuc_mat[, is_var, drop = FALSE]
+  positions <- positions[is_var]
+  
+  if (ncol(nuc_mat) == 0L) return(NA)
+  
+  return(list(nuc_mat = nuc_mat, positions = positions))
+}
 
 # Build site matrix for a locus (element ± flank_bp) across all genomes.
 # Returns a list with:
@@ -196,51 +228,21 @@ build_site_matrix <- function(pop_id_val, gen_id_val, el_row, file_meta, flank_b
   locus_start <- max(1L, el_start - flank_bp)
   locus_end   <- el_end + flank_bp
 
-  i <- 1
-  seqs_per_genome <- lapply(seq_len(nrow(genomes)), function(i) {
-    row <- genomes[i, ]
-    if (!file.exists(row$fasta_path)) return(NULL)
-    fasta <- read_fasta(row$fasta_path)
-    seq   <- extract_window(fasta, contig_idx,
-                            locus_start, locus_end, "+")  # always + strand for LD window
-    if (is.na(seq)) return(NULL)
-    seq
-  })
-
-  valid <- Filter(Negate(is.null), seqs_per_genome)
-  if (length(valid) < 2L) return(NULL)
-
-  # Pad / trim to common length (should all be the same unless near contig edge)
-  lens   <- nchar(valid)
-  min_l  <- min(lens)
-  valid  <- lapply(valid, substr, 1L, min_l)
-  actual_end <- locus_start + min_l - 1L
-
-  # Build nucleotide matrix  (n_genomes × min_l)
-  nuc_mat <- do.call(rbind, strsplit(unlist(valid), ""))
-
-  # Filter to ACGT-only columns
-  valid_col <- apply(nuc_mat, 2L, function(col) all(col %in% c("A","C","G","T")))
-  nuc_mat   <- nuc_mat[, valid_col, drop = FALSE]
-  positions <- (locus_start:actual_end)[valid_col]
-
-  if (ncol(nuc_mat) == 0L) return(NULL)
-
-  # Keep only variable sites
-  is_var <- apply(nuc_mat, 2L, function(col) length(unique(col)) > 1L)
-  nuc_mat   <- nuc_mat[, is_var, drop = FALSE]
-  positions <- positions[is_var]
-
-  if (ncol(nuc_mat) == 0L) return(NULL)
+  # first read just locus, determine if any variation
+  return_vector <- get_variable_sites(genomes, el_start, el_end, contig_idx)
+  if (is.na(return_vector)) return(NULL)
+  
+  # then run on full locus
+  return_vector <- get_variable_sites(genomes, locus_start, locus_end, contig_idx)
 
   # Convert to biallelic 0/1 (major allele = 0)
-  site_mat <- apply(nuc_mat, 2L, function(col) {
+  site_mat <- apply(return_vector$nuc_mat, 2L, function(col) {
     tbl    <- table(col)
     major  <- names(which.max(tbl))
     as.integer(col != major)
   })
 
-  in_element <- positions >= el_start & positions <= el_end
+  in_element <- return_vector$positions >= el_start & return_vector$positions <= el_end
 
   list(
     site_matrix    = site_mat,
@@ -254,10 +256,8 @@ build_site_matrix <- function(pop_id_val, gen_id_val, el_row, file_meta, flank_b
   )
 }
 
-
 # function for R-squared
 rsq <- function (x, y) cor(x, y) ^ 2
-
 
 # ── Compute r² between each focal-element site and every locus site ───────────
 #checked, all good
@@ -297,19 +297,21 @@ compute_r2 <- function(site_mat, in_element, positions) {
 ld_results <- list()
 
 # checked, all good
-for (row_i in seq_len(nrow(top_elements))) {
-  el_row <- top_elements[row_i, ]
+# Initialise a progress bar
+pb <- txtProgressBar(min = 1, max = nrow(all_gff), style = 3)
+for (row_i in seq_len(nrow(all_gff))) {
+  setTxtProgressBar(pb, row_i)
+  el_row <- all_gff[row_i, ]
   pg_label <- sprintf("pop=%s gen=%s element_id=%s (%s)",
                       el_row$pop_id, el_row$gen_id,
                       el_row$element_id, el_row$feature_type)
-  message("Processing: ", pg_label)
 
   pop_id_val <- el_row$pop_id
   gen_id_val <- el_row$gen_id
   sm <- build_site_matrix(pop_id_val, gen_id_val, el_row,
                            file_meta, flank_bp)
   if (is.null(sm)) {
-    message("  → skipped (insufficient data)")
+    #message("  → skipped (insufficient data)")
     next
   }
 
@@ -319,7 +321,7 @@ for (row_i in seq_len(nrow(top_elements))) {
 
   ld <- compute_r2(sm$site_matrix, sm$in_element, sm$site_positions)
   if (is.null(ld) || nrow(ld) == 0L) {
-    message("  → no variable focal sites")
+    #message("  → no variable focal sites")
     next
   }
 
@@ -336,7 +338,9 @@ for (row_i in seq_len(nrow(top_elements))) {
   ld$n_genomes     <- sm$n_genomes
 
   ld_results[[row_i]] <- ld
+  message("Adding: ", pg_label)
 }
+close(pb)
 
 all_ld <- bind_rows(Filter(Negate(is.null), ld_results))
 
@@ -435,19 +439,19 @@ pdf_h_decay <- max(4, 3.5 * nrow(top_elements))
 pdf_h_heat  <- max(6, 4  * ceiling(n_elements / 2))
 pdf_w       <- 10
 
-out_decay <- paste0(out_prefix, "_ld_decay.pdf")
+out_decay <- paste0(outpref, "_ld_decay.pdf")
 ggsave(out_decay, plot = p_ld, width = pdf_w, height = pdf_h_decay, limitsize = FALSE)
 message("Saved: ", out_decay)
 
-out_heat <- paste0(out_prefix, "_ld_heatmap.pdf")
+out_heat <- paste0(outpref, "_ld_heatmap.pdf")
 ggsave(out_heat, plot = p_heat, width = pdf_w, height = pdf_h_heat, limitsize = FALSE)
 message("Saved: ", out_heat)
 
-out_csv_ld  <- paste0(out_prefix, "_ld_pairwise.csv")
+out_csv_ld  <- paste0(outpref, "_ld_pairwise.csv")
 write.csv(all_ld, out_csv_ld, row.names = FALSE)
 message("Saved: ", out_csv_ld)
 
-out_csv_top <- paste0(out_prefix, "_top_elements.csv")
+out_csv_top <- paste0(outpref, "_top_elements.csv")
 write.csv(top_elements, out_csv_top, row.names = FALSE)
 message("Saved: ", out_csv_top)
 
