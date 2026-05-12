@@ -4,7 +4,7 @@ library(tidyr)
 library(ggsci)
 
 # Usage:
-#   Rscript ld_analysis.R [gff_dir] [output_prefix] [flank_bp]
+#   Rscript ld_analysis.R [gff_dir] [output_prefix] [flank_bp] [generation]
 #
 # For each (population, generation) group, reads all matching GFF + FASTA files
 # (pop_<pop>_gen_<gen>_genome_<id>.gff / .fasta), identifies the N elements with
@@ -21,10 +21,11 @@ library(ggsci)
 args       <- commandArgs(trailingOnly = TRUE)
 args       <- args[!grepl("^--", args)]
 gff_dir    <- if (length(args) >= 1) args[1] else "."
-outpref <- if (length(args) >= 2) args[2] else "ld_analysis"
+outpref    <- if (length(args) >= 2) args[2] else "ld_analysis"
 flank_bp   <- if (length(args) >= 3) as.integer(args[3]) else 100000L
+gen_arg    <- if (length(args) >= 4) args[4] else "last"
 
-message(sprintf("Parameters:  flank_bp=%d", flank_bp))
+message(sprintf("Parameters:  flank_bp=%d  generation=%s", flank_bp, gen_arg))
 
 # ── Attribute parser ──────────────────────────────────────────────────────────
 # checked, all good
@@ -141,6 +142,20 @@ file_meta <- lapply(gff_files, function(fp) {
 })
 file_meta <- bind_rows(Filter(Negate(is.null), file_meta))
 
+# ── Filter file_meta to requested generation(s) ───────────────────────────────
+all_gens <- sort(unique(file_meta$gen_id))
+if (tolower(gen_arg) == "all") {
+  # keep all generations (no filtering)
+} else if (tolower(gen_arg) == "last") {
+  file_meta <- file_meta[file_meta$gen_id == max(all_gens), ]
+} else {
+  g <- suppressWarnings(as.integer(gen_arg))
+  if (is.na(g)) stop("generation argument must be an integer, 'all', or 'last'.")
+  if (!g %in% all_gens) stop("Generation ", g, " not found in data.")
+  file_meta <- file_meta[file_meta$gen_id == g, ]
+}
+message(sprintf("Retaining %d file(s) after generation filter.", nrow(file_meta)))
+
 # ── Read all GFF features (with selection coefficients) ───────────────────────
 message("Reading GFF files to extract selection coefficients...")
 gff_df_rds_file <- paste0(outpref, "_gff_df.rds")
@@ -161,11 +176,6 @@ if (!file.exists(gff_df_rds_file)) {
 } else {
   all_gff <- readRDS(gff_df_rds_file)
 }
-
-# ── Identify top-N elements per (pop, gen) by mean log selection coefficient ──
-# Higher (less negative) log_sel_coeff → stronger positive selection.
-# We rank by mean across genomes to get population-level signal.
-message(sprintf("Identifying top %d elements per (pop, gen) group by selection coefficient...", top_n))
 
 # ── For each top element, extract per-genome sequences for element + flanks ───
 message("Extracting sequences for focal elements and flanking regions...")
@@ -209,7 +219,7 @@ get_variable_sites <- function(genomes, locus_start, locus_end, contig_idx)
   
   if (ncol(nuc_mat) == 0L) return(NA)
   
-  return(list(nuc_mat = nuc_mat, positions = positions))
+  return(list(nuc_mat = nuc_mat, positions = positions, actual_end = actual_end))
 }
 
 # Build site matrix for a locus (element ± flank_bp) across all genomes.
@@ -230,7 +240,7 @@ build_site_matrix <- function(pop_id_val, gen_id_val, el_row, file_meta, flank_b
 
   # first read just locus, determine if any variation
   return_vector <- get_variable_sites(genomes, el_start, el_end, contig_idx)
-  if (is.na(return_vector)) return(NULL)
+  if (length(return_vector) < 2) return(NULL)
   
   # then run on full locus
   return_vector <- get_variable_sites(genomes, locus_start, locus_end, contig_idx)
@@ -246,10 +256,10 @@ build_site_matrix <- function(pop_id_val, gen_id_val, el_row, file_meta, flank_b
 
   list(
     site_matrix    = site_mat,
-    site_positions = positions,
+    site_positions = return_vector$positions,
     in_element     = in_element,
     locus_start    = locus_start,
-    locus_end      = actual_end,
+    locus_end      = return_vector$actual_end,
     el_start       = el_start,
     el_end         = el_end,
     n_genomes      = nrow(site_mat)
@@ -298,51 +308,57 @@ ld_results <- list()
 
 # checked, all good
 # Initialise a progress bar
-pb <- txtProgressBar(min = 1, max = nrow(all_gff), style = 3)
-for (row_i in seq_len(nrow(all_gff))) {
-  setTxtProgressBar(pb, row_i)
-  el_row <- all_gff[row_i, ]
-  pg_label <- sprintf("pop=%s gen=%s element_id=%s (%s)",
-                      el_row$pop_id, el_row$gen_id,
-                      el_row$element_id, el_row$feature_type)
-
-  pop_id_val <- el_row$pop_id
-  gen_id_val <- el_row$gen_id
-  sm <- build_site_matrix(pop_id_val, gen_id_val, el_row,
-                           file_meta, flank_bp)
-  if (is.null(sm)) {
-    #message("  → skipped (insufficient data)")
-    next
+all_ld_rds_file <- paste0(outpref, "_gff_df.rds")
+if (!file.exists(all_ld_rds_file)) {
+  pb <- txtProgressBar(min = 1, max = nrow(all_gff), style = 3)
+  for (row_i in seq_len(nrow(all_gff))) {
+    setTxtProgressBar(pb, row_i)
+    el_row <- all_gff[row_i, ]
+    pg_label <- sprintf("pop=%s gen=%s element_id=%s (%s)",
+                        el_row$pop_id, el_row$gen_id,
+                        el_row$element_id, el_row$feature_type)
+    
+    pop_id_val <- el_row$pop_id
+    gen_id_val <- el_row$gen_id
+    sm <- build_site_matrix(pop_id_val, gen_id_val, el_row,
+                            file_meta, flank_bp)
+    if (is.null(sm)) {
+      #message("  → skipped (insufficient data)")
+      next
+    }
+    
+    message(sprintf("  Locus %d–%d  |  %d variable sites  |  %d genomes",
+                    sm$locus_start, sm$locus_end,
+                    ncol(sm$site_matrix), sm$n_genomes))
+    
+    ld <- compute_r2(sm$site_matrix, sm$in_element, sm$site_positions)
+    if (is.null(ld) || nrow(ld) == 0L) {
+      #message("  → no variable focal sites")
+      next
+    }
+    
+    ld$pop_id        <- el_row$pop_id
+    ld$gen_id        <- el_row$gen_id
+    ld$element_id    <- el_row$element_id
+    ld$feature_type  <- el_row$feature_type
+    ld$mean_log_sel  <- el_row$mean_log_sel
+    ld$contig_index  <- el_row$contig_index
+    ld$el_start      <- el_row$start
+    ld$el_end        <- el_row$end
+    ld$locus_start   <- sm$locus_start
+    ld$locus_end     <- sm$locus_end
+    ld$n_genomes     <- sm$n_genomes
+    
+    ld_results[[row_i]] <- ld
   }
-
-  message(sprintf("  Locus %d–%d  |  %d variable sites  |  %d genomes",
-                  sm$locus_start, sm$locus_end,
-                  ncol(sm$site_matrix), sm$n_genomes))
-
-  ld <- compute_r2(sm$site_matrix, sm$in_element, sm$site_positions)
-  if (is.null(ld) || nrow(ld) == 0L) {
-    #message("  → no variable focal sites")
-    next
-  }
-
-  ld$pop_id        <- el_row$pop_id
-  ld$gen_id        <- el_row$gen_id
-  ld$element_id    <- el_row$element_id
-  ld$feature_type  <- el_row$feature_type
-  ld$mean_log_sel  <- el_row$mean_log_sel
-  ld$contig_index  <- el_row$contig_index
-  ld$el_start      <- el_row$start
-  ld$el_end        <- el_row$end
-  ld$locus_start   <- sm$locus_start
-  ld$locus_end     <- sm$locus_end
-  ld$n_genomes     <- sm$n_genomes
-
-  ld_results[[row_i]] <- ld
-  message("Adding: ", pg_label)
+  close(pb)
+  
+  all_ld <- bind_rows(Filter(Negate(is.null), ld_results))
+  saveRDS(all_ld, all_ld_rds_file)
+} else {
+  all_ld <- readRDS(all_ld_rds_file)
 }
-close(pb)
 
-all_ld <- bind_rows(Filter(Negate(is.null), ld_results))
 
 if (nrow(all_ld) == 0L) stop("No LD data computed.")
 
