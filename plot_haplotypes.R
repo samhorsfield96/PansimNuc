@@ -28,9 +28,6 @@ outpref <- if (length(args) >= 2) args[2] else "haplotypes"
 top_n   <- if (length(args) >= 3) as.integer(args[3]) else 5L  # 0 = keep all
 recombination_threshold <- if (length(args) >= 4) as.numeric(args[4]) else 0.9  # 0 = keep all
 
-gff_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_no_recomb_all_gens"
-outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_recomb_all_gens_haploypes"
-
 # ── GFF / FASTA reading (adapted from ld_analysis.R) ─────────────────────────
 
 parse_attrs <- function(attr_str) {
@@ -209,15 +206,6 @@ get_mutation_sig <- function(seq, reference, element_id) {
 # checked, all good
 parse_sig <- function(s) if (nchar(s) == 0) character(0) else strsplit(s, ";")[[1]]
 
-# Jaccard distance between two sequences (character vectors or strings).
-jaccard_distance <- function(a, b) {
-  ca <- parse_sig(a)
-  cb <- parse_sig(b)
-  intersection = length(intersect(ca, cb))
-  union = (length(ca) + length(cb)) - intersection
-  return (1 - (intersection/union))
-}
-
 # ── Whole-genome haplotype functions ─────────────────────────────────────────
 
 # Assign per-element mutation signatures relative to each element's founding
@@ -292,11 +280,6 @@ classify_genome_haplotypes <- function(pop_df) {
   
   # Build a named list of all profiles (across all generations) for recombinant
   # detection – not reliant on the order in which generations are processed.
-  all_profile_names  <- names(table(genome_profiles$profile_str))
-  all_profiles_named <- setNames(
-    lapply(all_profile_names, parse_sig),
-    all_profile_names
-  )
 
   known_profiles <- list()   # profile_str -> parsed vec  (profiles seen so far)
   known_types    <- list()   # profile_str -> haplotype type string
@@ -304,12 +287,27 @@ classify_genome_haplotypes <- function(pop_df) {
   hap_labels     <- list()   # profile_str -> short label
   counter        <- 0L
   new_label <- function(prefix) { counter <<- counter + 1L; paste0(prefix, counter) }
+  
+  # determine how many generations present, adjust which generation to look for recombinants
+  if (length(generations) > 1)
+  {
+    adjustment = 1
+  } else {
+    adjustment = 0
+  }
 
   rows <- list()
   for (gen in generations) {
     gen_data <- genome_profiles[genome_profiles$generation == gen, ]
     n_total  <- nrow(gen_data)
     if (n_total == 0) next
+
+    # look for recombinants in the context of profiles only in prior generation
+    all_profile_names  <- names(table(genome_profiles[genome_profiles$generation == (gen - adjustment), ]$profile_str))
+    all_profiles_named <- setNames(
+      lapply(all_profile_names, parse_sig),
+      all_profile_names
+    )
 
     prof_tbl    <- table(gen_data$profile_str)
     sel_by_prof <- split(gen_data$sel_coeff, gen_data$profile_str)
@@ -343,7 +341,6 @@ classify_genome_haplotypes <- function(pop_df) {
         } else {
           hap_labels[[prof_str]] <- "REF"
         }
-        
       }
 
       rows[[length(rows) + 1]] <- data.frame(
