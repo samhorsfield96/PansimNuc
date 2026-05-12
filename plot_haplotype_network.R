@@ -26,11 +26,8 @@ args    <- commandArgs(trailingOnly = TRUE)
 args    <- args[!grepl("^--", args)]
 gff_dir <- if (length(args) >= 1) args[1] else "."
 outpref <- if (length(args) >= 2) args[2] else "haplotype_network"
-gen_arg <- if (length(args) >= 3) args[3] else "last"
+gen_arg <- if (length(args) >= 3) args[3] else "all"
 recombination_threshold <- if (length(args) >= 4) as.numeric(args[4]) else 0.9
-
-gff_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/testing_simple_haplotype"
-outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/testing_simple_haplotype_hapnet"
 
 # ── GFF / FASTA reading (adapted from ld_analysis.R) ─────────────────────────
 
@@ -380,6 +377,21 @@ classify_genome_haplotypes <- function(pop_df) {
 build_network_plot <- function(snap_df, title = "") {
   # snap_df: one row per haplotype, columns: haplotype_id, sequence, freq, type, sel_coeff
   snap_df <- snap_df[snap_df$freq > 0, , drop = FALSE]
+
+  # Collapse multiple generations in the window to one row per haplotype,
+  # averaging frequency. profile_str / type / parents / sel_coeff are
+  # constant per haplotype_id so take the first value.
+  snap_df <- snap_df %>%
+    group_by(haplotype_id) %>%
+    summarise(
+      freq        = mean(freq),
+      profile_str = first(profile_str),
+      type        = first(type),
+      parents     = first(parents),
+      sel_coeff   = mean(sel_coeff, na.rm = TRUE),
+      .groups     = "drop"
+    )
+
   if (nrow(snap_df) < 2) {
     message("  Fewer than 2 haplotypes — skipping network for: ", title)
     return(NULL)
@@ -609,46 +621,49 @@ if (!file.exists(hap_data_rds_file)) {
 all_gens <- sort(unique(hap_data$generation))
 
 if (tolower(gen_arg) == "all") {
-  target_gens <- all_gens
+  # One window per consecutive pair of generations
+  if (length(all_gens) < 2) {
+    gen_windows <- list(all_gens)
+  } else {
+    gen_windows <- lapply(seq(2L, length(all_gens)), function(i) all_gens[c(i - 1L, i)])
+  }
 } else if (tolower(gen_arg) == "last") {
-  target_gens <- max(all_gens)
+  gen_windows <- list(max(all_gens))
 } else {
   g <- suppressWarnings(as.integer(gen_arg))
   if (is.na(g)) stop("generation argument must be an integer, 'all', or 'last'.")
   if (!g %in% all_gens) stop("Generation ", g, " not found in data.")
-  target_gens <- g
+  gen_windows <- list(g)
 }
 
-# ── Generate plots ────────────────────────────────────────────────────────────
+# ── Generate and save plots ───────────────────────────────────────────────────
 populations <- sort(unique(hap_data$population_id))
 
-# plot for all generations specified on one graph
-gen_plots  <- list()
-gen_titles <- character(0)
+for (target_gens in gen_windows) {
+  window_plots <- list()
 
-for (pid in populations) {
-  snap <- hap_data %>%
-    filter(population_id == pid, generation %in% target_gens) %>%
-    distinct(haplotype_id, .keep_all = TRUE)
+  for (pid in populations) {
+    snap <- hap_data %>%
+      filter(population_id == pid, generation %in% target_gens)
 
-  title_str <- sprintf("pop %s | gens %s", pid, paste(target_gens, sep = ","))
-  p <- build_network_plot(snap, title = title_str)
-  if (!is.null(p)) {
-    gen_plots[[length(gen_plots) + 1]] <- p
-    gen_titles <- c(gen_titles, title_str)
+    title_str <- sprintf("pop %s | gens %s", pid, paste(target_gens, collapse = ","))
+    p <- build_network_plot(snap, title = title_str)
+    if (!is.null(p)) {
+      window_plots[[length(window_plots) + 1]] <- p
+    }
   }
-}
 
-if (length(gen_plots) == 0) {
-  message("  No plottable groups ")
-  next
-}
+  if (length(window_plots) == 0) {
+    message("  No plottable groups for gens: ", paste(target_gens, collapse = ","))
+    next
+  }
 
-# Write one PDF  with one page per group
-out_pdf <- sprintf("%s.pdf", outpref)
-pdf(out_pdf, width = 8, height = 7)
-for (p in gen_plots) print(p)
-dev.off()
-message("  Saved: ", out_pdf)
+  gen_label <- paste(target_gens, collapse = "-")
+  out_pdf   <- sprintf("%s_gen%s_hapnet.pdf", outpref, gen_label)
+  pdf(out_pdf, width = 8, height = 7)
+  for (p in window_plots) print(p)
+  dev.off()
+  message("  Saved: ", out_pdf)
+}
 
 message("Done.")
