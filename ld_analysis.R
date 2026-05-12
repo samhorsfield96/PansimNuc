@@ -25,6 +25,10 @@ outpref    <- if (length(args) >= 2) args[2] else "ld_analysis"
 flank_bp   <- if (length(args) >= 3) as.integer(args[3]) else 100000L
 gen_arg    <- if (length(args) >= 4) args[4] else "last"
 
+gff_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_recomb_all_gens"
+outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_recomb_all_gens_ld_analysis"
+
+
 message(sprintf("Parameters:  flank_bp=%d  generation=%s", flank_bp, gen_arg))
 
 # ── Attribute parser ──────────────────────────────────────────────────────────
@@ -327,9 +331,9 @@ if (!file.exists(all_ld_rds_file)) {
       next
     }
     
-    message(sprintf("  Locus %d–%d  |  %d variable sites  |  %d genomes",
-                    sm$locus_start, sm$locus_end,
-                    ncol(sm$site_matrix), sm$n_genomes))
+    # message(sprintf("  Locus %d–%d  |  %d variable sites  |  %d genomes",
+    #                 sm$locus_start, sm$locus_end,
+    #                 ncol(sm$site_matrix), sm$n_genomes))
     
     ld <- compute_r2(sm$site_matrix, sm$in_element, sm$site_positions)
     if (is.null(ld) || nrow(ld) == 0L) {
