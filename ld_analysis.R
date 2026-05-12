@@ -308,7 +308,7 @@ ld_results <- list()
 
 # checked, all good
 # Initialise a progress bar
-all_ld_rds_file <- paste0(outpref, "_gff_df.rds")
+all_ld_rds_file <- paste0(outpref, "_all_ld.rds")
 if (!file.exists(all_ld_rds_file)) {
   pb <- txtProgressBar(min = 1, max = nrow(all_gff), style = 3)
   for (row_i in seq_len(nrow(all_gff))) {
@@ -358,7 +358,6 @@ if (!file.exists(all_ld_rds_file)) {
 } else {
   all_ld <- readRDS(all_ld_rds_file)
 }
-
 
 if (nrow(all_ld) == 0L) stop("No LD data computed.")
 
