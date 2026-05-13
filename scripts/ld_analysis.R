@@ -202,6 +202,7 @@ message("Extracting sequences for focal elements and flanking regions...")
 # el_rows:          all GFF rows for this element across genomes (for el length).
 # flank_bp:         flanking region size used during extraction.
 # Positions are element-relative (0 = first base of element).
+# checked, all good
 build_site_matrix <- function(seqs_per_element, el_rows, flank_bp) {
   valid <- Filter(function(s) !is.null(s) && length(s) == 1L && !is.na(s),
                   seqs_per_element)
