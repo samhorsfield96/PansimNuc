@@ -25,10 +25,6 @@ outpref    <- if (length(args) >= 2) args[2] else "ld_analysis"
 flank_bp   <- if (length(args) >= 3) as.integer(args[3]) else 100000L
 gen_arg    <- if (length(args) >= 4) args[4] else "last"
 
-
-gff_dir <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_recomb_all_gens"
-outpref <- "/Users/samhorsfield/Library/CloudStorage/OneDrive-Personal/Work/Postdoc_Unine/Analysis/PansimNuc_results/baseline_uniform_selection_no_demography_recomb_all_gens_ld_analysis"
-
 message(sprintf("Parameters:  flank_bp=%d  generation=%s", flank_bp, gen_arg))
 
 # ── Attribute parser ──────────────────────────────────────────────────────────
@@ -226,13 +222,16 @@ build_site_matrix <- function(seqs_per_element, el_rows, flank_bp) {
   nuc_mat <- nuc_mat[, is_var, drop = FALSE]
   if (ncol(nuc_mat) == 0L) return(NULL)
 
-  # Element-relative positions: window index j (1-based) → j - 1 - flank_bp
-  all_pos   <- seq_len(min_l) - 1L - flank_bp
+  # Chromosomal positions: window index j (1-based) maps to
+  #   median_el_start - flank_bp + j - 1  (GFF 1-based)
+  el_lens         <- el_rows$end - el_rows$start + 1L
+  median_len      <- as.integer(median(el_lens))
+  median_el_start <- as.integer(median(el_rows$start))
+  all_pos   <- (median_el_start - flank_bp) + seq_len(min_l) - 1L
   positions <- all_pos[valid_col][is_var]
 
-  el_lens    <- el_rows$end - el_rows$start + 1L
-  median_len <- as.integer(median(el_lens))
-  in_element <- positions >= 0L & positions < median_len
+  in_element <- positions >= median_el_start &
+                positions < (median_el_start + median_len)
 
   # Convert to biallelic 0/1 (major allele = 0)
   site_mat <- apply(nuc_mat, 2L, function(col) {
@@ -246,10 +245,10 @@ build_site_matrix <- function(seqs_per_element, el_rows, flank_bp) {
     site_matrix    = site_mat,
     site_positions = positions,
     in_element     = in_element,
-    locus_start    = -flank_bp,
-    locus_end      = median_len + flank_bp - 1L,
-    el_start       = 0L,
-    el_end         = median_len - 1L,
+    locus_start    = median_el_start - flank_bp,
+    locus_end      = median_el_start + median_len - 1L + flank_bp,
+    el_start       = median_el_start,
+    el_end         = median_el_start + median_len - 1L,
     n_genomes      = nrow(site_mat)
   )
 }
@@ -384,49 +383,48 @@ if (!file.exists(all_ld_rds_file)) {
 
 if (nrow(all_ld) == 0L) stop("No LD data computed.")
 
-# ── Summary: mean r² per (pop, gen, element_id) × partner position ───────────
+# ── Element intervals per contig (for annotation) ────────────────────────────
+el_intervals <- all_ld |>
+  distinct(pop_id, gen_id, contig_index, element_id, el_start, el_end)
+
+# ── Summary: mean r² per (pop, gen, contig, partner_pos) ─────────────────────
+# in_any_element: TRUE if the partner position falls inside any focal element
+# on this contig (as recorded across all pairings at this position).
 ld_summary <- all_ld |>
-  group_by(pop_id, gen_id, element_id, feature_type,
-           mean_log_sel, partner_pos, in_partner_el,
-           el_start, el_end, locus_start, locus_end) |>
-  summarise(mean_r2 = mean(r2, na.rm = TRUE), .groups = "drop")
+  group_by(pop_id, gen_id, contig_index, partner_pos) |>
+  summarise(
+    mean_r2        = mean(r2, na.rm = TRUE),
+    in_any_element = any(in_partner_el),
+    .groups = "drop"
+  )
 
-# ── Plot: r² decay across locus for each top element ─────────────────────────
-make_ld_label <- function(pop, gen, eid, ftype, sel) {
-  sprintf("pop=%s  gen=%s  |  element %s (%s)  |  mean log-s=%.3f",
-          pop, gen, eid, ftype, sel)
+# ── Facet label: one panel per (pop, gen, contig) ────────────────────────────
+make_chr_label <- function(pop, gen, contig) {
+  sprintf("pop=%s  gen=%s  |  contig %s", pop, gen, contig)
 }
+ld_summary$facet_label  <- mapply(make_chr_label,
+                                   ld_summary$pop_id,
+                                   ld_summary$gen_id,
+                                   ld_summary$contig_index)
+el_intervals$facet_label <- mapply(make_chr_label,
+                                    el_intervals$pop_id,
+                                    el_intervals$gen_id,
+                                    el_intervals$contig_index)
 
-ld_summary$facet_label <- mapply(
-  make_ld_label,
-  ld_summary$pop_id, ld_summary$gen_id,
-  ld_summary$element_id, ld_summary$feature_type,
-  ld_summary$mean_log_sel
-)
-
-locus_x_limits <- ld_summary |>
-  distinct(facet_label, locus_start, locus_end) |>
-  tidyr::pivot_longer(c(locus_start, locus_end),
-                      names_to = "bound", values_to = "partner_pos") |>
-  mutate(mean_r2 = 0)
-
+# ── Plot: mean r² across each chromosome ─────────────────────────────────────
 p_ld <- ggplot(ld_summary,
                aes(x = partner_pos, y = mean_r2,
-                   colour = in_partner_el)) +
-  geom_blank(data = locus_x_limits,
-             aes(x = partner_pos, y = mean_r2),
-             inherit.aes = FALSE) +
+                   colour = in_any_element)) +
   geom_point(size = 0.8, alpha = 0.6) +
-  geom_smooth(data    = ld_summary |> filter(!in_partner_el),
+  geom_smooth(data    = ld_summary |> filter(!in_any_element),
               aes(group = 1),
-              method  = "loess", span = 0.3, se = FALSE,
+              method  = "loess", span = 0.1, se = FALSE,
               colour  = "grey40", linewidth = 0.6, linetype = "dashed") +
   geom_rect(aes(xmin = el_start, xmax = el_end,
                 ymin = -Inf,     ymax = Inf),
             fill = "yellow", alpha = 0.006, colour = NA,
             inherit.aes = FALSE,
-            data = ld_summary |>
-              distinct(facet_label, el_start, el_end)) +
+            data = el_intervals |> distinct(facet_label, el_start, el_end)) +
   facet_wrap(~ facet_label, ncol = 1, scales = "free_x") +
   scale_colour_manual(
     values = c("TRUE" = "#E64B35", "FALSE" = "#4DBBD5"),
@@ -435,7 +433,7 @@ p_ld <- ggplot(ld_summary,
   ) +
   scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
   labs(
-    x = "Genomic position (bp, 1-based GFF coords)",
+    x = "Chromosomal position (bp, 1-based GFF coords)",
     y = expression(Mean~r^2)
   ) +
   theme_light(base_size = 11) +
@@ -443,20 +441,11 @@ p_ld <- ggplot(ld_summary,
         legend.position = "right")
 p_ld
 
-# ── Heatmap: pairwise r² within each locus (focal × all sites) ───────────────
-heat_xy_limits <- all_ld |>
-  distinct(pop_id, gen_id, element_id, locus_start, locus_end) |>
-  tidyr::pivot_longer(c(locus_start, locus_end),
-                      names_to = "bound", values_to = "pos") |>
-  mutate(focal_pos = pos, partner_pos = pos, r2 = NA_real_)
-
+# ── Heatmap: pairwise r² per chromosome (focal × partner, chromosomal coords) ─
 p_heat <- ggplot(all_ld |> filter(!is.na(r2)),
                  aes(x = focal_pos, y = partner_pos, fill = r2)) +
-  geom_blank(data = heat_xy_limits,
-             aes(x = focal_pos, y = partner_pos),
-             inherit.aes = FALSE) +
   geom_tile() +
-  facet_wrap(~interaction(pop_id, gen_id, element_id, sep = " / "),
+  facet_wrap(~interaction(pop_id, gen_id, contig_index, sep = " / "),
              scales = "free", ncol = 2) +
   scale_fill_gradientn(
     colours = c("white", "#4DBBD5", "#E64B35"),
@@ -464,17 +453,19 @@ p_heat <- ggplot(all_ld |> filter(!is.na(r2)),
     name    = expression(r^2)
   ) +
   labs(
-    x     = "Focal-element site position",
-    y     = "Partner site position",
+    x = "Focal-element site position (chromosomal bp)",
+    y = "Partner site position (chromosomal bp)",
   ) +
-  theme_light(base_size = 10) +
+  theme_dark(base_size = 10) +
   theme(strip.text = element_text(size = 7))
 p_heat
 
 # ── Save ──────────────────────────────────────────────────────────────────────
-n_elements <- n_distinct(ld_summary$element_id)
-pdf_h_decay <- max(4, 3.5 * n_elements)
-pdf_h_heat  <- max(6, 4  * ceiling(n_elements / 2))
+n_chr_panels <- n_distinct(interaction(ld_summary$pop_id,
+                                        ld_summary$gen_id,
+                                        ld_summary$contig_index))
+pdf_h_decay <- max(4, 3.5 * n_chr_panels)
+pdf_h_heat  <- max(6, 4  * ceiling(n_chr_panels / 2))
 pdf_w       <- 10
 
 out_decay <- paste0(outpref, "_ld_decay.pdf")
