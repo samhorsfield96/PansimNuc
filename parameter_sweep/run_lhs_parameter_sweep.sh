@@ -1,43 +1,47 @@
 python lhs_parameter_sweep.py \
-    --config /data/sam/analysis/PansimNuc/lhs_configs/baseline_uniform_selection_no_demography.conf \
-    --samples 1000 \
-    --output N1000_uniform_selection_no_demography_lhs_samples.csv \
-    --configs-dir /data/sam/analysis/PansimNuc/lhs_configs/uniform_selection_no_demography \
-    --outdir-base /scratch/sam_simulations/uniform_selection_no_demography \
+    --config /data/sam/analysis/PansimNuc/lhs_configs/baseline_exon_doubexp_selection_one_split_gen_500.conf \
+    --samples 100 \
+    --output N100_exon_doubexp_selection_one_split_gen_500_lhs_samples.csv \
+    --configs-dir /data/sam/analysis/PansimNuc/lhs_configs/exon_doubexp_selection_one_split_gen_500 \
+    --outdir-base /scratch/sam_simulations/lhs_parameter_sweep/exon_doubexp_selection_one_split_gen_500 \
     --seed 42 \
     -p population.n_individuals:10:10000 \
-    -p population.n_generations:10:10000 \
+    -p population.n_generations:510:10000 \
     -p population.recombination_rate:1e-10:1e-7:log \
     -p population.recombination_size_mean:100:100000 \
     -p population.recombination_threshold:0.1:0.9 \
+    -p population.migration_rate:0:0.5 \
     -p population.max_multiplier_dist:0:5000 \
+    -p population.genome_size_penalty_per_bp:1e-12:1e-5:log \
     -p exons.mutation_rate:1e-20:1e-7:log \
     -p exons.indel_rate:1e-20:1e-7:log \
     -p exons.selection_low:-1e0:-1e-20:log \
     -p exons.selection_high:1e-20:1e2:log \
-    -p exons.duplication_rate:1e-20:1e-2:log \
-    -p exons.deletion_rate:1e-20:1e-2:log \
-    -p exons.inversion_rate:1e-20:1e-2:log \
+    -p exons.duplication_rate:1e-20:1e-5:log \
+    -p exons.deletion_rate:1e-20:1e-5:log \
+    -p exons.inversion_rate:1e-20:1e-5:log \
     -p introns.mutation_rate:1e-20:1e-7:log \
     -p introns.indel_rate:1e-20:1e-7:log \
     -p introns.selection_low:-1e0:-1e-20:log \
     -p introns.selection_high:1e-20:1e2:log \
-    -p introns.duplication_rate:1e-20:1e-2:log \
-    -p introns.deletion_rate:1e-20:1e-2:log \
-    -p introns.inversion_rate:1e-20:1e-2:log \
+    -p introns.duplication_rate:1e-20:1e-5:log \
+    -p introns.deletion_rate:1e-20:1e-5:log \
+    -p introns.inversion_rate:1e-20:1e-5:log \
     -p intergenic.mutation_rate:1e-20:1e-7:log \
     -p intergenic.indel_rate:1e-20:1e-7:log \
     -p intergenic.selection_low:-1e0:-1e-20:log \
     -p intergenic.selection_high:1e-20:1e2:log \
-    -p intergenic.duplication_rate:1e-20:1e-2:log \
-    -p intergenic.deletion_rate:1e-20:1e-2:log \
-    -p intergenic.inversion_rate:1e-20:1e-2:log \
+    -p intergenic.duplication_rate:1e-20:1e-5:log \
+    -p intergenic.deletion_rate:1e-20:1e-5:log \
+    -p intergenic.inversion_rate:1e-20:1e-5:log \
     -p TE-CUT.mutation_rate:1e-20:1e-7:log \
     -p TE-CUT.indel_rate:1e-20:1e-7:log \
     -p TE-CUT.selection_low:-1e0:-1e-20:log \
     -p TE-CUT.selection_high:1e-20:1e2:log \
-    -p TE-CUT.duplication_rate:1e-20:1e-2:log \
-    -p TE-CUT.deletion_rate:1e-20:1e-2:log \
+    -p TE-CUT.duplication_rate:1e-5:1e-2:log \
+    -p TE-CUT.duplication_variance:1e-2:1e3:log \
+    -p TE-CUT.deletion_rate:1e-5:1e-2:log \
+    -p TE-CUT.deletion_variance:1e-2:1e3:log \
     -p TE-CUT.inversion_rate:1e-20:1e-2:log \
     -p TE-CUT.multiplier_rate:1e-20:1e2:log \
     -p TE-CUT.multiplier_scale:1e-20:1e2:log \
@@ -45,8 +49,10 @@ python lhs_parameter_sweep.py \
     -p TE-COPY.indel_rate:1e-20:1e-7:log \
     -p TE-COPY.selection_low:-1e0:-1e-20:log \
     -p TE-COPY.selection_high:1e-20:1e2:log \
-    -p TE-COPY.duplication_rate:1e-20:1e-2:log \
-    -p TE-COPY.deletion_rate:1e-20:1e-2:log \
+    -p TE-COPY.duplication_rate:1e-5:1e-2:log \
+    -p TE-COPY.duplication_variance:1e-2:1e3:log \
+    -p TE-COPY.deletion_rate:1e-5:1e-2:log \
+    -p TE-COPY.deletion_variance:1e-2:1e3:log \
     -p TE-COPY.inversion_rate:1e-20:1e-2:log \
     -p TE-COPY.multiplier_rate:1e-20:1e2:log \
     -p TE-COPY.multiplier_scale:1e-20:1e2:log
