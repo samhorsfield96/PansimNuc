@@ -301,6 +301,24 @@ for (.i in seq_len(nrow(file_meta))) {
 }
 message(sprintf("Loaded %d FASTA file(s) into memory.", length(fasta_cache)))
 
+# ── Compute chromosome lengths from FASTA cache ──────────────────────────────
+contig_lengths <- bind_rows(lapply(seq_len(nrow(file_meta)), function(i) {
+  row       <- file_meta[i, ]
+  cache_key <- paste(row$pop_id, row$gen_id, row$genome_id, sep = "_")
+  fasta     <- fasta_cache[[cache_key]]
+  if (is.null(fasta)) return(NULL)
+  data.frame(
+    pop_id       = row$pop_id,
+    gen_id       = row$gen_id,
+    contig_index = as.integer(names(fasta)),
+    chrom_len    = nchar(unname(fasta)),
+    stringsAsFactors = FALSE
+  )
+}))
+contig_lengths <- contig_lengths |>
+  group_by(pop_id, gen_id, contig_index) |>
+  summarise(chrom_len = as.integer(max(chrom_len)), .groups = "drop")
+
 # ── Main loop ─────────────────────────────────────────────────────────────────
 ld_results <- list()
 
@@ -411,10 +429,31 @@ el_intervals$facet_label <- mapply(make_chr_label,
                                     el_intervals$gen_id,
                                     el_intervals$contig_index)
 
+# x/y axis extents: 1 → chromosome length per (pop, gen, contig) panel
+.cl <- contig_lengths |>
+  inner_join(distinct(ld_summary, pop_id, gen_id, contig_index, facet_label),
+             by = c("pop_id", "gen_id", "contig_index"))
+chr_xlimits <- data.frame(
+  facet_label = c(.cl$facet_label, .cl$facet_label),
+  partner_pos = c(rep(1L, nrow(.cl)), .cl$chrom_len),
+  mean_r2     = 0
+)
+chr_heat_limits <- data.frame(
+  pop_id       = c(.cl$pop_id,       .cl$pop_id),
+  gen_id       = c(.cl$gen_id,       .cl$gen_id),
+  contig_index = c(.cl$contig_index, .cl$contig_index),
+  focal_pos    = c(rep(1L, nrow(.cl)), .cl$chrom_len),
+  partner_pos  = c(rep(1L, nrow(.cl)), .cl$chrom_len),
+  r2           = NA_real_
+)
+
 # ── Plot: mean r² across each chromosome ─────────────────────────────────────
 p_ld <- ggplot(ld_summary,
                aes(x = partner_pos, y = mean_r2,
                    colour = in_any_element)) +
+  geom_blank(data = chr_xlimits,
+             aes(x = partner_pos, y = mean_r2),
+             inherit.aes = FALSE) +
   geom_point(size = 0.8, alpha = 0.6) +
   geom_smooth(data    = ld_summary |> filter(!in_any_element),
               aes(group = 1),
@@ -444,6 +483,9 @@ p_ld
 # ── Heatmap: pairwise r² per chromosome (focal × partner, chromosomal coords) ─
 p_heat <- ggplot(all_ld |> filter(!is.na(r2)),
                  aes(x = focal_pos, y = partner_pos, fill = r2)) +
+  geom_blank(data = chr_heat_limits,
+             aes(x = focal_pos, y = partner_pos),
+             inherit.aes = FALSE) +
   geom_tile() +
   facet_wrap(~interaction(pop_id, gen_id, contig_index, sep = " / "),
              scales = "free", ncol = 2) +
