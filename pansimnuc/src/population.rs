@@ -1017,10 +1017,9 @@ impl Population {
             for (contig_id, indices) in sorted_contig_groups {
                 writeln!(
                     writer,
-                    ">{id}_contig{contig_id} generation={generation}",
-                    id = genome.genome_id,
-                    contig_id = contig_id,
-                    generation = self.generation
+                    ">{id}_contig{contig_id}",
+                    id = genome.identifier,
+                    contig_id = contig_id
                 )?;
 
                 let mut wrapped_line_len = 0usize;
