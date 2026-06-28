@@ -1,6 +1,12 @@
 # PansimNuc
 A nucleotide-level pangenome simulator.
 
+## Summary
+
+PansimNuc takes a root genome and simulates mutation (SNPs and indels), selection, recombination, gene and transposable element (TE) mobility and gain and loss, and demography using a Wright-Fisher simulation framework.
+
+All simulation is done at the nucelotide level, providing annotated sequences of all members of the population throughout the simulation.
+
 ## Installation
 
 First clone this repository: 
