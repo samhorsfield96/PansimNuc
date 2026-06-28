@@ -219,7 +219,9 @@ PansimNuc outputs:
 | `[tracking.csv]` | Tracking information for elements within specifie regions in `tracking` section |
 
 
-### Explanation of the GFF files
+### Explanation of the FASTA and GFF files
+
+The FASTA file header desribe the genome identifier in the form `population_id-generation-genome_id` followed by the contig ID.
 
 Each line in the GFF output follows standard GFF3 column layout, with PansimNuc-specific attributes in the final column:
 
