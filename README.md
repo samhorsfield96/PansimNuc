@@ -23,7 +23,7 @@ micromamba install conda-forge::rust
 
 ### with pixi
 
-Install [pixi] (https://pixi.prefix.dev/latest/installation/) and activate the environment:
+Install [pixi](https://pixi.prefix.dev/latest/installation/) and activate the environment:
 
 ```
 curl -fsSL https://pixi.sh/install.sh | sh
