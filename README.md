@@ -41,16 +41,24 @@ If the environment set up correctly, you should see this in your terminal:
 With the environment set up, build PansimNuc:
 
 ```
-cd PansimNuc && cargo build --release && cd ..
+cd pansimnuc && cargo build --release && cd ../..
 ```
 
-The executable will be in `PansimNuc/PansimNuc/target/release/pansim`. You can add this to your path to allow running at anytime:
+The executable will be in `PansimNuc/pansimnuc/target/release`. You can add this to your path to allow running at anytime:
 
 ```
-export PATH="PansimNuc/PansimNuc/target/release:$PATH"
+export PATH="absolute/path/to/PansimNuc/pansimnuc/target/release:$PATH"
 ```
 
 To make this permanent, add the above line to your `~/.bashrc` or `~/.zshrc` file.
+
+To run the exectuable, use the command:
+
+```
+PansimNuc/pansimnuc/target/release/PansimNuc --config path/to/config.conf
+```
+
+See below for setting up your `config.conf` file.
 
 ## Configuration
 
@@ -160,6 +168,8 @@ The `[tracking]` section defines one or more genomic regions to monitor over tim
 | `end` | Comma-separated list of region end coordinates (must match length of `contig`) |
 | `augmentation` | If `true`, augmented tracking is enabled (boolean) |
 
+WARNING: specifying too large of a region in your root genome will result in very large output files.
+
 ---
 
 ## Miscellaneous parameters
@@ -188,3 +198,54 @@ PansimNuc models the following distinct genomic feature types. Each has its own 
 | `[TE-CUT]` | Cut-and-paste transposable elements. When duplicated, the element is immediately deleted from its original location (transposition only) |
 | `[TE-COPY]` | Copy-and-paste transposable elements. Duplications retain the element at the original location |
 | `[tracking]` | User-defined regions to track allele frequencies and mutations over time. Supports multiple comma-separated regions via `contig`, `start`, and `end` |
+
+## Output
+
+PansimNuc outputs:
+
+| File | Description |
+|---|---|
+| `[pop_X_gen_Y_genome_Z.gff]` | GFF file containing function annotations of all elements for genome Z of population X, generation Y |
+| `[pop_X_gen_Y_genome_Z.fasta]` | Fasta file containing sequence for genome Z of population X, generation Y |
+| `[root.gff]` | GFF file containing function annotations of all elements in the root genome for the simulation |
+| `[root.fasta]` | Fasta file containing sequence for root genome for the simulation |
+| `[selection_samples.csv]` | Sample of selection coefficients for all elements used in the simulation |
+| `[tracking.csv]` | Tracking information for elements within specifie regions in `tracking` section |
+
+
+### Explanation of the GFF files
+
+Each line in the GFF output follows standard GFF3 column layout, with PansimNuc-specific attributes in the final column:
+
+```
+contig_0	PansimNuc	TE-COPY	1	838	.	-	.	genome_id=4;element_id=0;...
+```
+
+**Standard GFF3 columns (tab-separated):**
+
+| Column | Example | Description |
+|---|---|---|
+| seqname | `contig_0` | Contig/chromosome name |
+| source | `PansimNuc` | Always `PansimNuc` |
+| feature | `TE-COPY` | Feature type (see [Functional region sections](#functional-region-sections)) |
+| start | `1` | 1-based start coordinate of the element on the contig |
+| end | `838` | 1-based end coordinate of the element on the contig |
+| score | `.` | Not used (always `.`) |
+| strand | `-` | Strand: `+` for forward, `-` for reverse |
+| frame | `.` | Not used (always `.`) |
+| attributes | `genome_id=4;...` | Semicolon-separated key=value attributes (see below) |
+
+**Attributes:**
+
+| Attribute | Description |
+|---|---|
+| `genome_id` | Integer ID of the genome within the population |
+| `element_id` | Integer ID of this element within the genome |
+| `feature_type` | Feature type, matching column 3 |
+| `feature_id` | Integer ID of this element in the root genome (shared across all genomes for the same ancestral element) |
+| `contig_id` | Integer ID of the contig on which this element resides |
+| `parent` | Hyphen-separated list of generation indices tracing the lineage of this element back to the root |
+| `multiplier` | Gamma-distributed copy-number multiplier (TE elements and tracking regions only) |
+| `sequence_length` | Current length of the element sequence (bp); may differ from `end - start + 1` if indels have occurred |
+| `log_genome_selection_coefficient` | Log-sum of per-site selection coefficients across the entire genome |
+| `log_element_selection_coefficient` | Log-sum of per-site selection coefficients for this element only |
