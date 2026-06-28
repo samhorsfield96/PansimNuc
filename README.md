@@ -250,7 +250,7 @@ contig_0	PansimNuc	TE-COPY	1	838	.	-	.	genome_id=4;element_id=0;...
 | `feature_type` | Feature type, matching column 3 |
 | `feature_id` | Integer ID of this element in the root genome (shared across all genomes for the same ancestral element) |
 | `contig_id` | Integer ID of the contig on which this element resides |
-| `parent` | Hyphen-separated list of generation indices tracing the lineage of this element back to the root |
+| `parent` | Integer `population_id-generation-genome_id` of the direct parent genome from the previous generation (or `root` for the initial population) |
 | `multiplier` | Gamma-distributed copy-number multiplier (TE elements and tracking regions only) |
 | `sequence_length` | Current length of the element sequence (bp); may differ from `end - start + 1` if indels have occurred |
 | `log_genome_selection_coefficient` | Log-sum of per-site selection coefficients across the entire genome |

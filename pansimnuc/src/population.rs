@@ -955,10 +955,10 @@ impl Population {
             .map(|(genome_id, &selected_index)| {
                 let selected_genome = &self.pop[selected_index];
                 Genome {
-                    identifier: format!("{}-{}", self.generation + 1, selected_genome.identifier),
+                    identifier: format!("{}-{}-{}", self.id, self.generation + 1, genome_id.to_string()),
                     genome_id,
                     contig_starts: selected_genome.contig_starts.clone(),
-                    parent: selected_genome.identifier.clone(),
+                    parent: selected_genome.identifier.to_string(),
                     seq: selected_genome.seq.clone(),
                     seq_length: selected_genome.seq_length,
                     total_exon_length: selected_genome.total_exon_length,
