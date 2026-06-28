@@ -1,34 +1,190 @@
 # PansimNuc
 A nucleotide-level pangenome simulator.
 
-## Nucleotide mutation rates
+## Installation
 
-Each genome feature has it's own average nucleotide mutation rate, where the number of mutations is sampled from a Poisson distribution.
+First clone this repository: 
 
-This is described by `mutation_rate`, and is measured in events per site per genome per generation.
+```
+git clone https://github.com/samhorsfield96/PansimNuc.git && cd PansimNuc
+```
 
-## Nucleotide selection distributions
+Then set up for environment...
 
-Each genome feature in the config can define its selection distribution with `selection_distribution`.
-Supported values are `normal`, `uniform`, `exp`, `double_exp`, and `poisson`.
+### with mamba/conda
 
-Each selection coefficient has a multiplicative effect of 1 + X on fitness, where X >= -1. 
+Install rust (>=1.89.0) using [micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html), and activate the environment:
+
+```
+micromamba create -n PansimNuc
+micromamba activate PansimNuc
+micromamba install conda-forge::rust
+```
+
+### with pixi
+
+Install [pixi] (https://pixi.prefix.dev/latest/installation/) and activate the environment:
+
+```
+curl -fsSL https://pixi.sh/install.sh | sh
+pixi shell
+```
+
+### Building the executable
+
+If the environment set up correctly, you should see this in your terminal:
+
+```
+(PansimNuc) PansimNuc %
+```
+
+With the environment set up, build PansimNuc:
+
+```
+cd PansimNuc && cargo build --release && cd ..
+```
+
+The executable will be in `PansimNuc/PansimNuc/target/release/pansim`. You can add this to your path to allow running at anytime:
+
+```
+export PATH="PansimNuc/PansimNuc/target/release:$PATH"
+```
+
+To make this permanent, add the above line to your `~/.bashrc` or `~/.zshrc` file.
+
+## Configuration
+
+PansimNuc is configured via a `.conf` file passed with `--config`. The file uses INI-style sections (`[section]`) with `key=value` pairs. Lines beginning with `#` are comments. See `example.conf` and files in `testing` directory for examples with setup.
+
+---
+
+## Input / Output parameters
+
+### `[input]`
+
+| Parameter | Description |
+|---|---|
+| `gff_file` | Path to the input GFF annotation file |
+| `fasta_file` | Path to the input FASTA genome file |
+| `earlgrey_gff_file` | (Optional) Path to an EarlGrey TE annotation GFF file |
+
+### `[output]`
+
+| Parameter | Description |
+|---|---|
+| `outdir` | Directory where all output files are written |
+
+---
+
+## Population-level parameters
+
+### `[population]`
+
+| Parameter | Description |
+|---|---|
+| `n_individuals` | Number of haploid individuals in the population |
+| `n_generations` | Number of generations to simulate |
+| `recombination_rate` | Number of recombination events per base per generation |
+| `recombination_size_mean` | Mean recombination tract length (bp); tract lengths are Poisson-distributed |
+| `recombination_threshold` | Minimum sequence homology (0–1) required for two sequences to recombine |
+| `max_multiplier_dist` | Maximum distance (bp) between elements for TE multiplier/recombination pairing |
+| `population_splits` | Comma-separated list of population sizes after each split event |
+| `generation_splits` | Comma-separated list of generations at which population split events occur (must match length of `population_splits`) |
+| `migration_rate` | Per-genome probability of migration between sub-populations each generation |
+| `genome_size_penalty_per_bp` | (Optional) Fitness penalty per bp of genome size; applied as a multiplicative factor `(1 - penalty)^genome_size` |
+
+---
+
+## Per-region mutation, indel, selection and structural variation parameters
+
+The following parameters apply independently to each functional region section (`[exons]`, `[introns]`, `[intergenic]`, `[TE-CUT]`, `[TE-COPY]`, and `[tracking]`).
+
+### Nucleotide mutation and indels
+
+| Parameter | Description |
+|---|---|
+| `mutation_rate` | Mean number of nucleotide substitutions per site per genome per generation (Poisson-distributed) |
+| `indel_rate` | Mean number of insertion/deletion events per site per genome per generation (Poisson-distributed) |
+
+### Selection
+
+Each site's selection coefficient has a multiplicative effect of `1 + X` on fitness, where `X >= -1`. The distribution of selection coefficients is set with `selection_distribution`.
+
+| Parameter | Description |
+|---|---|
+| `selection_distribution` | Distribution to draw selection coefficients from. One of: `normal`, `uniform`, `exp`, `double_exp`, `poisson`, `gamma` |
 
 Required parameters by distribution:
 
-- `normal`: `selection_mean`, `selection_std_dev`
-- `uniform`: `selection_low`, `selection_high`
-- `exp`: `selection_lambda`
-- `double_exp`: `selection_lambda1` (strenght of negative selection), `selection_lambda2` (strength of positive selection), `selection_cutoff` (proportion of positively selected genes)
-- `poisson`: `selection_lambda`
-- `gamma`: `selection_lamba`, `selection_shape`
+| Distribution | Required parameters |
+|---|---|
+| `normal` | `selection_mean`, `selection_std_dev` |
+| `uniform` | `selection_low`, `selection_high` |
+| `exp` | `selection_lambda` |
+| `double_exp` | `selection_lambda1` (rate of negative selection), `selection_lambda2` (rate of positive selection), `selection_cutoff` (proportion of positively selected mutations, 0–1) |
+| `poisson` | `selection_lambda` |
+| `gamma` | `selection_lambda` (scale), `selection_shape` |
 
-## Intra-genomic variation
+### Intra-genomic structural variation
 
-Each genome feature has it's own probability for duplications, deletions and inversions. Rates for each event are given in events per element per genome per generation.
+Rates are given in events per element per genome per generation. By default, counts are Poisson-distributed; if a `*_variance` key is also provided, a negative binomial distribution is used instead (allowing overdispersion).
 
-Note that `TE-CUT` are only transposed, meaning that if they are duplicated, they are immediately deleted at their old location.
+| Parameter | Description |
+|---|---|
+| `duplication_rate` | Mean rate of element duplications |
+| `duplication_variance` | (Optional) Variance of duplication counts; enables negative binomial sampling |
+| `deletion_rate` | Mean rate of element deletions |
+| `deletion_variance` | (Optional) Variance of deletion counts; enables negative binomial sampling |
+| `inversion_rate` | Mean rate of element inversions |
+| `inversion_variance` | (Optional) Variance of inversion counts; enables negative binomial sampling |
 
-## Inter-genomic variation
+### TE copy-number multiplier (TE regions and `[tracking]` only)
 
-Recombination is governed by the rate of recombinations, mean recombination length and sequence homology threshold. The rate of recombination in the population is governed by the number of SNPs, with `recombination_rate` giving the number of recombination events per base per generation. The `recombination_size_mean` dictates how long the recombination tracts are on average. The `recombination_threshold` dictates the lower limit of sequence homology for two sequences to recombine.
+The multiplier controls the relative transposition activity and is drawn from a gamma distribution.
+
+| Parameter | Description |
+|---|---|
+| `multiplier_rate` | Rate (mean) parameter of the gamma distribution for the TE copy-number multiplier |
+| `multiplier_scale` | Scale parameter of the gamma distribution for the TE copy-number multiplier |
+
+---
+
+## Tracking parameters
+
+The `[tracking]` section defines one or more genomic regions to monitor over time. It accepts all per-region parameters above, plus:
+
+| Parameter | Description |
+|---|---|
+| `contig` | Comma-separated list of contig identifiers to track |
+| `start` | Comma-separated list of region start coordinates (must match length of `contig`) |
+| `end` | Comma-separated list of region end coordinates (must match length of `contig`) |
+| `augmentation` | If `true`, augmented tracking is enabled (boolean) |
+
+---
+
+## Miscellaneous parameters
+
+### `[misc]`
+
+| Parameter | Description |
+|---|---|
+| `threads` | Number of threads to use (parallelised with Rayon) |
+| `seed` | Integer seed for the random number generator (required for reproducibility) |
+| `verbose` | If `true`, print detailed progress information (boolean) |
+| `print_DFE` | If `true`, write 1000 samples from each selection distribution to `<outdir>/selection_samples.csv` (boolean) |
+| `print_all_generations` | If `true`, write GFF and FASTA output at every generation rather than only at the end (boolean) |
+
+---
+
+## Functional region sections
+
+PansimNuc models the following distinct genomic feature types. Each has its own independent set of mutation, indel, selection and structural variation parameters as described above.
+
+| Section | Description |
+|---|---|
+| `[exons]` | Protein-coding exonic regions |
+| `[introns]` | Intronic (non-coding, spliced) regions |
+| `[intergenic]` | Intergenic (non-coding, non-spliced) regions |
+| `[TE-CUT]` | Cut-and-paste transposable elements. When duplicated, the element is immediately deleted from its original location (transposition only) |
+| `[TE-COPY]` | Copy-and-paste transposable elements. Duplications retain the element at the original location |
+| `[tracking]` | User-defined regions to track allele frequencies and mutations over time. Supports multiple comma-separated regions via `contig`, `start`, and `end` |
