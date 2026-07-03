@@ -24,14 +24,16 @@
 #   sbatch run_lhs_sweep.slurm
 # =============================================================================
 
-#SBATCH --job-name=pansimnuc_lhs
-#SBATCH --output=logs/%A_%a.out
-#SBATCH --error=logs/%A_%a.err
-#SBATCH --array=0-99%5              # <-- Set to 0-(N_SAMPLES-1)
+#SBATCH --job-name=pansimnuc_grid
+#SBATCH --output=/scratch/sam_simulations/logs/%A_%a.out
+#SBATCH --error=/scratch/sam_simulations/logs/%A_%a.err
+#SBATCH --array=0-242%10             # <-- Set to 0-(N_SAMPLES-1)
+##SBATCH --array=0-2915%10             # <-- Set to 0-(N_SAMPLES-1)
+##SBATCH --array=0-728%10             # <-- Set to 0-(N_SAMPLES-1)
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16        # Should match threads= in your .conf
 #SBATCH --mem=32G
-#SBATCH --time=24:00:00
+#SBATCH --time=12:00:00
 #SBATCH --partition=normal.168h   # Uncomment and set if required
 ##SBATCH --mail-user=samuel.horsfield@unine.ch       # Uncomment and set if required
 ##SBATCH --mail-type=END,FAIL
@@ -41,12 +43,18 @@
 # =============================================================================
 EXECUTABLE="/home/sam/Software/PansimNuc/pansimnuc/target/release/PansimNuc"
 
+#change for each simulation
+RELATIVE_SOURCE_PATH="mu_vs_selection_vs_recombination_grid"
+#RELATIVE_SOURCE_PATH="mu_vs_selection_vs_recombination_vs_TE_grid"
+#RELATIVE_SOURCE_PATH="mu_vs_selection_vs_recombination_vs_migration_grid"
+
 # Directory containing run_0.conf, run_1.conf, … (--configs-dir from lhs script)
-CONFIGS_DIR="/data/sam/analysis/PansimNuc/lhs_configs/exon_doubexp_selection_one_split_gen_500"
+CONFIGS_DIR="/data/sam/analysis/PansimNuc/grid_parameter_sweep/${RELATIVE_SOURCE_PATH}"
 
 # Base output directory for PansimNuc results (--outdir-base from lhs script)
 # Each run writes to $OUTDIR_BASE/run_<id>/
-OUTDIR_BASE="/scratch/sam_simulations/lhs_parameter_sweep/exon_doubexp_selection_one_split_gen_500"
+OUTDIR_BASE="/scratch/sam_simulations/grid_parameter_sweep/${RELATIVE_SOURCE_PATH}"
+
 mkdir -p $OUTDIR_BASE
 # =============================================================================
 
