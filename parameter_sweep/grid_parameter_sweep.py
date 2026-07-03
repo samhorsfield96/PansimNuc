@@ -17,10 +17,13 @@ Usage
 
 Parameter spec format
 ---------------------
-    SECTION.KEY:VAL1,VAL2,VAL3,...
+    SECTION.KEY:VAL1,VAL2,VAL3,...   (set key only in the named section)
+    KEY:VAL1,VAL2,VAL3,...           (set key in every section that contains it)
 
 SECTION and KEY must match the section headers and option names in the
-PansimNuc .conf file exactly (case-sensitive).
+PansimNuc .conf file exactly (case-sensitive).  Omitting the SECTION prefix
+is useful for parameters like ``mutation_rate`` that appear in multiple
+sections and should be swept together.
 
 All combinations of all parameter values are generated (full Cartesian product).
 """
@@ -50,13 +53,11 @@ def parse_param_spec(spec: str) -> dict[str, Any]:
 
     key_path, values_str = spec.split(":", 1)
 
-    if "." not in key_path:
-        raise ValueError(
-            f"Parameter {key_path!r} must be in SECTION.KEY format "
-            "(e.g. exons.mutation_rate)"
-        )
-
-    section, key = key_path.split(".", 1)
+    if "." in key_path:
+        section, key = key_path.split(".", 1)
+    else:
+        section = None  # broadcast: apply to every section that has this key
+        key = key_path
     values = [v.strip() for v in values_str.split(",") if v.strip()]
 
     if not values:
@@ -129,6 +130,10 @@ def write_config(
 
             if current_section and (current_section, key) in param_overrides:
                 result.append(f"{key}={param_overrides[(current_section, key)]}\n")
+                continue
+
+            if current_section and (None, key) in param_overrides:
+                result.append(f"{key}={param_overrides[(None, key)]}\n")
                 continue
 
         result.append(line)
@@ -213,7 +218,14 @@ def main(argv: list[str] | None = None) -> None:
 
     for param in params:
         sec, key = param["section"], param["key"]
-        if sec not in known:
+        if sec is None:
+            # broadcast: check that the key exists in at least one section
+            if not any(key in keys for keys in known.values()):
+                print(
+                    f"Warning: key '{key}' not found in any section of base config.",
+                    file=sys.stderr,
+                )
+        elif sec not in known:
             print(
                 f"Warning: section [{sec}] not found in base config.",
                 file=sys.stderr,
