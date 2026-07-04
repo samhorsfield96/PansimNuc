@@ -33,7 +33,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16        # Should match threads= in your .conf
 #SBATCH --mem=32G
-#SBATCH --time=12:00:00
+#SBATCH --time=11:00:00
 #SBATCH --partition=normal.168h   # Uncomment and set if required
 ##SBATCH --mail-user=samuel.horsfield@unine.ch       # Uncomment and set if required
 ##SBATCH --mail-type=END,FAIL
