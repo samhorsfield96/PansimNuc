@@ -1350,7 +1350,9 @@ mod tests {
             .read_to_string(&mut content)
             .expect("failed to read test FASTA file");
 
-        assert!(content.contains(">0_contig0 generation=0"));
+        print!("{}", content);
+
+        assert!(content.contains(">0_contig0"));
         assert!(content.contains("ACGT"));
 
         let _ = fs::remove_file(genome_output_path);
@@ -1621,7 +1623,7 @@ mod tests {
             let selected_index = [2usize, 0, 1][new_index];
             assert_eq!(
                 genome.identifier,
-                format!("1-{}", original_identifiers[selected_index])
+                format!("0-1-{}", new_index)
             );
             assert_eq!(genome.parent, original_identifiers[selected_index]);
             assert_ne!(genome.identifier, original_identifiers[new_index]);

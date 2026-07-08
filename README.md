@@ -173,6 +173,7 @@ The `[tracking]` section defines one or more genomic regions to monitor over tim
 | `start` | Comma-separated list of region start coordinates (must match length of `contig`) |
 | `end` | Comma-separated list of region end coordinates (must match length of `contig`) |
 | `augmentation` | If `true`, augmented tracking is enabled (boolean) |
+| `write_file` | If `true`, write all tracking output to file (boolean) |
 
 WARNING: specifying too large of a region in your root genome will result in very large output files.
 

@@ -41,6 +41,7 @@ fn main() {
     let mut population_split_config = PopulationSplitConfig::new();
     let mut tracking_regions: Vec<(String, usize, usize)> = Vec::new(); // vector of (contig_id, start, end) tuples for regions to track
     let mut augment_tracking = false;
+    let mut write_file_tracking = false;
     let mut genome_size_penalty_per_bp = 0.0;
     let mut print_dfe = false;
 
@@ -83,6 +84,12 @@ fn main() {
                     augment_tracking = augment_str
                         .parse::<bool>()
                         .expect("Tracking augmentation must be a boolean (true/false).");
+                }
+
+                if let Some(tracking_write_file_str) = configuration.get("tracking.write_file") {
+                    write_file_tracking = tracking_write_file_str
+                        .parse::<bool>()
+                        .expect("Tracking write_file must be a boolean (true/false).");
                 }
 
                 if let Some(genome_size_penalty_str) = configuration.get("population.genome_size_penalty_per_bp") {
@@ -358,9 +365,8 @@ fn main() {
                             panic!("Failed to write root genome FASTA file: {err}");
                         });
 
-                        // add tracking regions to population struct so we can track mutations in these regions over time
-
-                        if !tracking_regions.is_empty() {
+                        // add tracking regions to population struct so we can track mutations in these regions over time, only write if specified
+                        if !tracking_regions.is_empty() && write_file_tracking {
                             is_tracking = true;
                             let tracking_out_path = format!("{}/tracking.csv", outdir);
                             write_tracking_header(&tracking_out_path);
