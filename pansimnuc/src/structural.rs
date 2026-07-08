@@ -95,48 +95,27 @@ pub fn mutate_intra_genome(
         for _ in 0..num_dups {
             dup_count += 1;
 
-            // for non-TEs sample from poisson distribution to determine where duplication goes
-            let duplication_pos = if feature_type.contains("TE") {
-                // determine what is max dist to end from current position
-                let max_dist = (genome.seq.len() - current_pos).max(current_pos);
-
+            let genome_len = genome.seq.len() as i64;
+            let mut new_pos = if feature_type.contains("TE") {
                 if feature_type == "TE-CUT" {
                     te_cut_duplications += 1;
                 } else {
                     te_copy_duplications += 1;
                 }
-                // for TEs, sample from uniform distribution to determine where duplication goes, with equal probability of anywhere in genome
-                thread_rng.gen_range(0..=max_dist) as f64
+                // For TEs, sample a uniform absolute insertion position across the genome.
+                thread_rng.gen_range(0..genome_len)
             } else {
                 total_non_te_duplications += 1;
-                pos_dist.sample(&mut thread_rng)
+                // For non-TEs, sample a displacement around the current position and
+                // wrap around contig boundaries to avoid start/end clamping bias.
+                let displacement = pos_dist.sample(&mut thread_rng) as i64;
+                let pos_order: i64 = if thread_rng.gen_bool(0.5) { -1 } else { 1 };
+                current_pos as i64 + (displacement * pos_order)
             };
-            let duplication_pos = duplication_pos as i64;
 
-            // determine if position is before or after gene, adjust if too large
-            let pos_rand_val = thread_rng.gen_range(0..=9);
-            let pos_order: i64 =
-                if pos_rand_val < 5 {
-                    -1
-                } else {
-                    1
-                };
-            let mut new_pos = current_pos as i64 + (duplication_pos * pos_order);
+            // Wrap into valid genome index range [0, genome_len - 1].
+            new_pos = new_pos.rem_euclid(genome_len);
             let mut new_contig_id = 0;
-
-            // assign to 0 if before start of genome
-            if new_pos < 0 {
-                new_pos = 0;
-            }
-
-            // avoid adding to same position
-            if new_pos == current_pos as i64 {
-                if new_pos == 0 {
-                    new_pos = genome.seq.len() as i64; // if at start, move to end
-                } else {
-                    new_pos += 1;
-                }
-            }
 
             // determine contig position
             for (contig_id, contig_start) in contig_starts.iter().enumerate() {
