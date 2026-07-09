@@ -35,10 +35,10 @@ python grid_parameter_sweep.py \
     --param selection_cutoff:0.1,0.5,0.9 \
     --param misc.print_all_generations:false \
     --param population.recombination_rate:1e-8,1e-6,1e-4 \
-    --param TE-CUT.duplication_rate:1e-30,1e-5,1e-3 \
-    --param TE-CUT.deletion:1e-30,1e-5,1e-3 \
-    --param TE-CUT.duplication_rate:1e-30,1e-5,1e-3 \
-    --param TE-COPY.deletion:1e-30,1e-5,1e-3
+    --param TE-CUT.duplication_rate:1e-30,3e-2,4e-2 \
+    --param TE-CUT.deletion:1e-30,3e-2,4e-2 \
+    --param TE-CUT.duplication_rate:1e-30,3e-2,4e-2 \
+    --param TE-COPY.deletion:1e-30,3e-2,4e-2
 
 # multiple populations
 python grid_parameter_sweep.py \
