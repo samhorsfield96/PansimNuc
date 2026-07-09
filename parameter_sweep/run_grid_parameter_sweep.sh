@@ -85,4 +85,5 @@ python grid_parameter_sweep.py \
     --param TE-COPY.selection_low:-1e-15,-1e-5 \
     --param TE-COPY.selection_high:1e-15,1e-5 \
     --param TE-COPY.duplication_rate:3.5e-2,3.75e-2,4e-2 \
-    --param TE-COPY.deletion_rate:3.5e-2,3.75e-2,4e-2
+    --param TE-COPY.deletion_rate:3.5e-2,3.75e-2,4e-2 \
+    --param TE-COPY.multiplier_rate:1.0,10.0
