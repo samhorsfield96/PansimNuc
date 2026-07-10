@@ -1,0 +1,11 @@
+##gff-version 3
+1	RepeatMasker	MITE	5901	6900	1000	+	.	Tstart=1;Tend=1000;ID=TE_CUT_1;shortTE=F
+1	RepeatMasker	LTR	12901	13900	1000	+	.	Tstart=1;Tend=1000;ID=TE_COPY_1;shortTE=F
+1	RepeatMasker	MITE	19901	20900	1000	+	.	Tstart=1;Tend=1000;ID=TE_CUT_2;shortTE=F
+1	RepeatMasker	LTR	26901	27900	1000	+	.	Tstart=1;Tend=1000;ID=TE_COPY_2;shortTE=F
+1	RepeatMasker	MITE	33901	34900	1000	+	.	Tstart=1;Tend=1000;ID=TE_CUT_3;shortTE=F
+1	RepeatMasker	LTR	40901	41900	1000	+	.	Tstart=1;Tend=1000;ID=TE_COPY_3;shortTE=F
+1	RepeatMasker	MITE	47901	48900	1000	+	.	Tstart=1;Tend=1000;ID=TE_CUT_4;shortTE=F
+1	RepeatMasker	LTR	54901	55900	1000	+	.	Tstart=1;Tend=1000;ID=TE_COPY_4;shortTE=F
+1	RepeatMasker	MITE	61901	62900	1000	+	.	Tstart=1;Tend=1000;ID=TE_CUT_5;shortTE=F
+1	RepeatMasker	LTR	68901	69900	1000	+	.	Tstart=1;Tend=1000;ID=TE_COPY_5;shortTE=F
