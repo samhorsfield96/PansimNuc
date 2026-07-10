@@ -1101,7 +1101,8 @@ impl Population {
 
             writeln!(writer, "##gff-version 3")?;
 
-            let genome_selection_coefficient = selection_weights[genome_index].ln();
+            let log_genome_selection_probability = selection_weights[genome_index].ln();
+            let log_genome_selection_coefficient = self.genome_selection_coefficient(genome);
             let mut contig_offsets: HashMap<usize, usize> = HashMap::new();
 
             // Sort element indices by (contig_id, seq position) so GFF is grouped
@@ -1120,15 +1121,8 @@ impl Population {
                     continue;
                 }
 
-                // calculate element selection coefficient
-                let log_element_selection_coefficient =
-                    element.selection_coeff;
-                let element_selection_coefficient =
-                    if log_element_selection_coefficient == std::f64::NEG_INFINITY {
-                        0.0
-                    } else {
-                        log_element_selection_coefficient
-                    };
+                // Raw log element coefficient; preserve -inf for lethal elements.
+                let log_element_selection_coefficient = element.selection_coeff;
 
                 let seq_id = format!("contig_{}", element.contig_id);
                 let start_1based = start_0 + 1;
@@ -1136,7 +1130,7 @@ impl Population {
                 let strand = if element.strand { "+" } else { "-" };
 
                 let attributes = format!(
-                    "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};parent={};multiplier={:.6};sequence_length={};log_genome_selection_coefficient={:.6};log_element_selection_coefficient={:.6}",
+                    "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};parent={};multiplier={:.6};sequence_length={};log_genome_selection_coefficient={:.6};log_genome_selection_probability={:.6};log_element_selection_coefficient={:.6}",
                     genome.genome_id,
                     element.element_id,
                     element.feature_type,
@@ -1145,8 +1139,9 @@ impl Population {
                     genome.parent,
                     element.multiplier,
                     element.seq.len(),
-                    genome_selection_coefficient,
-                    element_selection_coefficient,
+                    log_genome_selection_coefficient,
+                    log_genome_selection_probability,
+                    log_element_selection_coefficient,
                 );
 
                 writeln!(
@@ -1451,8 +1446,9 @@ mod tests {
         assert!(content.contains("\tintergenic\t"));
         assert!(content.contains("feature_id=0"));
         assert!(content.contains("sequence_length=4"));
-        assert!(content.contains("genome_selection_coefficient="));
-        assert!(content.contains("element_selection_coefficient="));
+        assert!(content.contains("log_genome_selection_coefficient="));
+        assert!(content.contains("log_genome_selection_probability="));
+        assert!(content.contains("log_element_selection_coefficient="));
 
         let _ = fs::remove_file(genome_output_path);
     }
