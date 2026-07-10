@@ -1160,7 +1160,7 @@ impl Population {
                     log_element_selection_coefficient,
                     feature_broken,
                     feature_multiplier,
-                    log_element_selection_coefficient * feature_multiplier,
+                    log_element_selection_coefficient + feature_multiplier.ln(),
                 );
 
                 writeln!(
