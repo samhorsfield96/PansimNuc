@@ -156,10 +156,8 @@ def parse_config(config_path: Path, default_contig: str) -> List[FeatureRecord]:
     return records
 
 
-def is_te_feature(feature: str, explicit_te_features: set[str]) -> bool:
+def is_te_feature(feature: str) -> bool:
     lowered = feature.strip().lower()
-    if lowered in explicit_te_features:
-        return True
     return lowered.startswith(TE_PREFIX_GUESSES)
 
 
@@ -237,7 +235,6 @@ def write_coding_gff(path: Path, contig_lengths: Dict[str, int], records: List[F
 def write_earlgrey_gff(
     path: Path,
     te_records: List[FeatureRecord],
-    family_prefix: str,
 ) -> None:
     with path.open("w", encoding="utf-8") as handle:
         handle.write("##gff-version 3\n")
@@ -245,7 +242,7 @@ def write_earlgrey_gff(
             attrs = {
                 "Tstart": "1",
                 "Tend": str(record.length),
-                "ID": record.attributes.get("ID", f"{family_prefix}_{idx}"),
+                "ID": record.attributes.get("ID", f"{idx}"),
                 "shortTE": record.attributes.get("shortTE", "F"),
             }
             for key, value in record.attributes.items():
@@ -280,28 +277,7 @@ def main() -> None:
         type=Path,
         help="Output prefix, e.g. testing/synth_chr19 (creates .fasta, _coding.gff, _earlgrey.gff)",
     )
-    parser.add_argument(
-        "--contig",
-        default="contig_0",
-        help=(
-            "Default contig/chromosome name for config lines that do not include a leading "
-            "contig column"
-        ),
-    )
-    parser.add_argument("--seed", type=int, default=None, help="Optional random seed for reproducible DNA")
-    parser.add_argument(
-        "--te-features",
-        default="TE-CUT,TE-COPY",
-        help=(
-            "Comma-separated feature names to force-classify as TE in Earl Grey output. "
-            "Case-insensitive."
-        ),
-    )
-    parser.add_argument(
-        "--family-prefix",
-        default="SYNTE_FAMILY",
-        help="Prefix used when auto-generating Earl Grey TE IDs",
-    )
+    parser.add_argument("--seed", type=int, default=42, help="Optional random seed for reproducible DNA")
 
     args = parser.parse_args()
 
@@ -309,15 +285,12 @@ def main() -> None:
     if not config_path.exists():
         raise FileNotFoundError(f"Config not found: {config_path}")
 
-    records = parse_config(config_path, default_contig=args.contig)
-    explicit_te_features = {
-        item.strip().lower() for item in args.te_features.split(",") if item.strip()
-    }
+    records = parse_config(config_path, default_contig="1")
 
     te_records: List[FeatureRecord] = []
     coding_records: List[FeatureRecord] = []
     for record in records:
-        if is_te_feature(record.feature, explicit_te_features):
+        if is_te_feature(record.feature):
             te_records.append(record)
         else:
             coding_records.append(record)
@@ -339,7 +312,7 @@ def main() -> None:
 
     write_fasta(fasta_path, sequences)
     write_coding_gff(coding_gff_path, contig_lengths, coding_records)
-    write_earlgrey_gff(earlgrey_gff_path, te_records, args.family_prefix)
+    write_earlgrey_gff(earlgrey_gff_path, te_records)
 
     print(f"Wrote FASTA: {fasta_path}")
     print(f"Wrote coding GFF: {coding_gff_path} ({len(coding_records)} features)")
