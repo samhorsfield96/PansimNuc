@@ -68,9 +68,9 @@ python grid_parameter_sweep.py \
     --output /home/sam/Software/PansimNuc/parameter_sweep/AGR_grid.csv \
     --configs-dir /data/sam/analysis/PansimNuc/grid_parameter_sweep/AGR_grid \
     --outdir-base /scratch/sam_simulations/grid_parameter_sweep/AGR_grid \
-    --param input.gff_file:/home/sam/Software/PansimNuc/testing/Zymo_chr19.gff \
-    --param input.fasta_file:/home/sam/Software/PansimNuc/testing/Zymo_chr19.fasta \
-    --param input.earlgrey_gff_file:/home/sam/Software/PansimNuc/testing/Zymo_EarlGrey_chr19.gff \
+    --param input.gff_file:/home/sam/Software/PansimNuc/testing/synthetic_high_gene_density_coding.gff \
+    --param input.fasta_file:/home/sam/Software/PansimNuc/testing/synthetic_high_gene_density.fasta \
+    --param input.earlgrey_gff_file:/home/sam/Software/PansimNuc/testing/synthetic_high_gene_density_earlgrey.gff \
     --param population.n_individuals:50 \
     --param population.n_generations:500 \
     --param mutation_rate:1e-50 \
@@ -84,6 +84,6 @@ python grid_parameter_sweep.py \
     --param TE-COPY.selection_distribution:uniform \
     --param TE-COPY.selection_low:-1e-15,-1e-5 \
     --param TE-COPY.selection_high:1e-15,1e-5 \
-    --param TE-COPY.duplication_rate:3.5e-2,3.75e-2,4e-2 \
-    --param TE-COPY.deletion_rate:3.5e-2,3.75e-2,4e-2 \
+    --param TE-COPY.duplication_rate:2.25e0,2.5e0,2.75e0 \
+    --param TE-COPY.deletion_rate:2.25e0,2.5e0,2.75e0 \
     --param TE-COPY.multiplier_rate:0.1,10.0
