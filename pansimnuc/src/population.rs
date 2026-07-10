@@ -466,13 +466,15 @@ impl Population {
             .pop
             .par_iter()
             .map(|genome| {
-                let mut log_sum = self.genome_selection_coefficient(genome);
+                let log_sum = self.genome_selection_coefficient(genome);
 
-                if log_sum == std::f64::NEG_INFINITY {
-                    // if selection coefficient is zero, set log sum to -inf to prevent underflow issues when exponentiating later, and skip multiplier calculation to avoid unnecessary calculations and potential floating point issues
-                    log_sum = 0.0;
+                // Preserve -inf for lethal genomes so they map to zero probability after
+                // exp(log_w - logsumexp). Guard against NaNs from unexpected arithmetic.
+                if log_sum.is_nan() {
+                    std::f64::NEG_INFINITY
+                } else {
+                    log_sum
                 }
-                log_sum
             })
             .collect::<Vec<f64>>();
 
@@ -895,10 +897,15 @@ impl Population {
             eprintln!("Selection pre-norm weights: {:?}", selection_weights);
         }
 
-        selection_weights = selection_weights
-            .into_iter()
-            .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
-            .collect();
+        if logsumexp_value.is_finite() {
+            selection_weights = selection_weights
+                .into_iter()
+                .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
+                .collect();
+        } else {
+            // All log-weights are -inf (or degenerate), so fall back to uniform sampling.
+            selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+        }
 
         #[cfg(debug_assertions)]
         {
@@ -925,7 +932,7 @@ impl Population {
 
         let sum_weights: f64 = selection_weights.iter().sum();
         // account for all values being zero
-        if sum_weights == 0.0 {
+        if sum_weights == 0.0 || !sum_weights.is_finite() {
             // if all weights are zero, set all weights to equal probability to prevent issues with sampling, as all genomes are equally likely to be selected
             selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
         }
@@ -1067,22 +1074,24 @@ impl Population {
         // calculate selection coefficients for all genomes once to avoid redundant calculations when writing attributes
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
 
-        selection_weights = selection_weights
-            .into_iter()
-            .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
-            .collect();
+        if logsumexp_value.is_finite() {
+            selection_weights = selection_weights
+                .into_iter()
+                .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
+                .collect();
 
-        let sum_weights: f64 = selection_weights.iter().sum();
-        selection_weights = selection_weights
-            .iter()
-            .map(|&w| {
-                if w != std::f64::NEG_INFINITY {
-                    w / sum_weights
-                } else {
-                    0.0
-                }
-            })
-            .collect();
+            let sum_weights: f64 = selection_weights.iter().sum();
+            if sum_weights > 0.0 && sum_weights.is_finite() {
+                selection_weights = selection_weights
+                    .iter()
+                    .map(|&w| w / sum_weights)
+                    .collect();
+            } else {
+                selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+            }
+        } else {
+            selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+        }
 
         for (genome_index, genome) in self.pop.iter().enumerate() {
             let prefix = if root_genome { "root".to_string() } else { format!("pop_{}_gen_{}_genome_{}", self.id, self.generation, genome_index) };
@@ -1118,7 +1127,7 @@ impl Population {
                     if log_element_selection_coefficient == std::f64::NEG_INFINITY {
                         0.0
                     } else {
-                        ((log_element_selection_coefficient - logsumexp_value).exp() / sum_weights).ln() // exp(log(w) - logsumexp)
+                        log_element_selection_coefficient
                     };
 
                 let seq_id = format!("contig_{}", element.contig_id);
@@ -2124,6 +2133,85 @@ mod tests {
             expected_with_te as f32,
             "Expected e2 contribution to be scaled by TE multiplier"
         );
+    }
+
+    #[test]
+    fn test_log_sum_exp_matches_expected_value() {
+        let mut pop = make_check_feature_order_population();
+
+        // Build three genomes: two viable and one lethal.
+        let g1 = {
+            let mut e = make_test_element_with_coefficients(0, vec![1u8], &[(0, 1u8, 0.2)]);
+            e.feature_type = "intergenic".to_string();
+            genome_from_seq(vec![e])
+        };
+        let g2 = {
+            let mut e = make_test_element_with_coefficients(0, vec![2u8], &[(0, 2u8, 0.8)]);
+            e.feature_type = "intergenic".to_string();
+            genome_from_seq(vec![e])
+        };
+        let g3 = {
+            let mut e = make_test_element_with_coefficients(0, vec![4u8], &[(0, 4u8, 0.1)]);
+            e.feature_type = "intergenic".to_string();
+            genome_from_seq(vec![e])
+        };
+
+        pop.pop = vec![g1, g2, g3];
+
+        let (log_weights, logsumexp_value) = pop.log_sum_exp();
+
+        let log_w1 = (1.0_f64 + 0.2).ln();
+        let log_w2 = (1.0_f64 + 0.8).ln();
+        let log_w3 = (1.0_f64 + 0.1).ln();
+        let ln_vec = vec![log_w1, log_w2, log_w3];
+        let expected_logsumexp = ln_vec.iter().ln_sum_exp();
+
+        println!("expected_logsumexp {}", expected_logsumexp);
+        println!("logsumexp_value {}", logsumexp_value);
+
+        assert!(log_weights[0] == log_w1);
+        assert!(log_weights[1] == log_w2);
+        assert!(log_weights[2] == log_w3);
+        assert!(expected_logsumexp == logsumexp_value);
+    }
+
+    #[test]
+    fn test_log_sum_exp_preserves_neg_infinity() {
+        let mut pop = make_check_feature_order_population();
+
+        // Build three genomes: two viable and one lethal.
+        let g1 = {
+            let mut e = make_test_element_with_coefficients(0, vec![1u8], &[(0, 1u8, 0.2)]);
+            e.feature_type = "intergenic".to_string();
+            genome_from_seq(vec![e])
+        };
+        let g2 = {
+            let mut e = make_test_element_with_coefficients(0, vec![2u8], &[(0, 2u8, 0.8)]);
+            e.feature_type = "intergenic".to_string();
+            genome_from_seq(vec![e])
+        };
+        let g3 = {
+            let mut e = make_test_element_with_coefficients(0, vec![4u8], &[(0, 4u8, -1.0)]);
+            e.feature_type = "intergenic".to_string();
+            genome_from_seq(vec![e])
+        };
+
+        pop.pop = vec![g1, g2, g3];
+
+        let (log_weights, logsumexp_value) = pop.log_sum_exp();
+
+        let log_w1 = (1.0_f64 + 0.2).ln();
+        let log_w2 = (1.0_f64 + 0.8).ln();
+        let log_w3 = (1.0_f64 - 1.0).ln();
+        let expected_logsumexp = (log_w1.exp() + log_w2.exp() + log_w3.exp()).ln();
+
+        println!("expected_logsumexp {}", expected_logsumexp);
+        println!("logsumexp_value {}", logsumexp_value);
+
+        assert!(log_weights[0] == log_w1);
+        assert!(log_weights[1] == log_w2);
+        assert_eq!(log_weights[2], std::f64::NEG_INFINITY);
+        assert!((expected_logsumexp - logsumexp_value) < 1e-12);
     }
 
     // -----------------------------------------------------------------------
