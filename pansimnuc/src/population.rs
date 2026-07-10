@@ -255,7 +255,8 @@ impl Population {
         element: &NucElement,
     ) -> (bool, f64) {
         let mut feature_broken = false;
-        let mut feature_multiplier: f64 = 1.0;
+        let mut feature_multiplier: f64 = 0.0;
+        let mut feature_multiplier_updated: bool = false;
 
         let max_multiplier_dist = self.max_multiplier_dist;
 
@@ -370,10 +371,11 @@ impl Population {
                     let mut dist = 0usize;
                     let mut search_idx = element_idx - (position + 1);
                     loop {
-                        let elem = &genome.seq[search_idx];
+                        let elem: &NucElement = &genome.seq[search_idx];
                         if Self::is_te_feature(&elem.feature_type) {
                             if feature_multiplier.abs() < elem.multiplier.abs() {
                                 feature_multiplier = elem.multiplier;
+                                feature_multiplier_updated = true;
                             }
                             break;
                         }
@@ -395,6 +397,7 @@ impl Population {
                         if Self::is_te_feature(&elem.feature_type) {
                             if feature_multiplier.abs() < elem.multiplier.abs() {
                                 feature_multiplier = elem.multiplier;
+                                feature_multiplier_updated = true;
                             }
                             break;
                         }
@@ -405,7 +408,16 @@ impl Population {
                         search_idx += 1;
                     }
                 }
+            } else {
+                // feature broken, multiplier set as 0.0
+                feature_multiplier = 0.0;
+                feature_multiplier_updated = true;
             }
+        }
+
+        // reset feature_multiplier to 1.0 if not set to avoid 0.0 multiplier
+        if !feature_multiplier_updated {
+            feature_multiplier = 1.0;
         }
 
         (feature_broken, feature_multiplier)
@@ -1123,13 +1135,16 @@ impl Population {
                 // Raw log element coefficient; preserve -inf for lethal elements.
                 let log_element_selection_coefficient = element.selection_coeff;
 
+                let (feature_broken, feature_multiplier) =
+                    self.check_feature_order(genome, seq_idx, element);
+
                 let seq_id = format!("contig_{}", element.contig_id);
                 let start_1based = start_0 + 1;
                 let end_1based = end_0;
                 let strand = if element.strand { "+" } else { "-" };
 
                 let attributes = format!(
-                    "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};parent={};multiplier={:.6};sequence_length={};log_genome_selection_coefficient={:.6};log_genome_selection_probability={:.6};log_element_selection_coefficient={:.6}",
+                    "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};parent={};multiplier={:.6};sequence_length={};log_genome_selection_coefficient={:.6};log_genome_selection_probability={:.6};log_element_selection_coefficient={:.6};feature_broken={};multiplier_adj={:.6};multiplier_adj_selection_coefficient={:.6}",
                     genome.genome_id,
                     element.element_id,
                     element.feature_type,
@@ -1141,6 +1156,9 @@ impl Population {
                     log_genome_selection_coefficient,
                     log_genome_selection_probability,
                     log_element_selection_coefficient,
+                    feature_broken,
+                    feature_multiplier,
+                    log_element_selection_coefficient * feature_multiplier,
                 );
 
                 writeln!(
