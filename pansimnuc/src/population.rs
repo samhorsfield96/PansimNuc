@@ -451,23 +451,25 @@ impl Population {
         let mut log_sum = 0.0;
 
         for (element_idx, element) in genome.seq.iter().enumerate() {
-            let mut element_log_sum = 0.0;
-
             let (feature_broken, feature_multiplier) =
                 self.check_feature_order(genome, element_idx, element);
 
-            // if feature not broken, add up sites
-            if !feature_broken {
-                element_log_sum += element.selection_coeff; // add pre-calculated selection coefficient for element, which is sum of site coefficients
-                
-                // if any value is zero, product is zero so genome selection coefficient is zero
-                if element_log_sum == std::f64::NEG_INFINITY {
-                    log_sum = std::f64::NEG_INFINITY;
-                    break; // if no contribution to selection coefficient, skip multiplier calculation to avoid unnecessary calculations and potential floating point issues
-                }
+            // broken features contribute nothing to fitness
+            if feature_broken {
+                continue;
             }
 
-            log_sum += element_log_sum * feature_multiplier;
+            let element_log_sum = element.selection_coeff; // pre-calculated sum of ln(1 + s_i) across sites
+
+            // lethal element makes the whole genome lethal
+            if element_log_sum == std::f64::NEG_INFINITY {
+                log_sum = std::f64::NEG_INFINITY;
+                break;
+            }
+
+            // Apply multiplier in log space: ln(W * m) = ln(W) + ln(m)
+            // feature_multiplier == 1.0 for elements with no nearby TE, so ln(1.0) == 0 (no effect)
+            log_sum += element_log_sum + feature_multiplier.ln();
         }
         log_sum
     }
@@ -2206,7 +2208,10 @@ mod tests {
             e
         };
         let e2 = {
-            let mut e = make_test_element_with_coefficients(1, vec![4u8], &[(0, 4u8, 0.2)]);
+            let mut e = make_test_element_with_coefficients(
+                1, 
+                vec![4u8], 
+                &[(0, 4u8, 0.2)]);
             e.feature_type = "exon".to_string();
             e.element_id = 1;
             e
@@ -2236,7 +2241,10 @@ mod tests {
             e.multiplier = 2.0;
             e
         };
-        let seq_with_te = vec![e1.clone(), te, e2.clone()];
+
+        // check with te upstream
+        println!("upsteam");
+        let seq_with_te = vec![te.clone(), e1.clone(), e2.clone()];
         // feature_map is unchanged: feature_id=1 still maps to [element_id=1]
         let genome_with_te = genome_from_seq(seq_with_te);
 
@@ -2246,11 +2254,30 @@ mod tests {
         let coeff_with_te = pop.genome_selection_coefficient(&genome_with_te);
 
         // te_coeff = ln(1.0) = 0.0; e2 is scaled by 2.0
-        let expected_with_te = e1_val + 0.0 + e2_val * 2.0 + te_val;
+        let expected_with_te = e1_val + 0.0 + e2_val + (2.0_f64).ln() + te_val;
         assert_eq!(
             coeff_with_te as f32,
             expected_with_te as f32,
-            "Expected e2 contribution to be scaled by TE multiplier"
+            "Expected e2 contribution to be scaled by upstream TE multiplier"
+        );
+
+        // check with te downstream
+        println!("downstream");
+        let seq_with_te = vec![e1.clone(), e2.clone(), te.clone()];
+        // feature_map is unchanged: feature_id=1 still maps to [element_id=1]
+        let genome_with_te = genome_from_seq(seq_with_te);
+
+        let te_val1: f64 = 1.0 + 1.0; // TE-CUT with coeff=1.0
+        let te_val = te_val1.ln(); // ln(2.0)
+
+        let coeff_with_te = pop.genome_selection_coefficient(&genome_with_te);
+
+        // te_coeff = ln(1.0) = 0.0; e2 is scaled by 2.0
+        let expected_with_te = e1_val + 0.0 + e2_val + (2.0_f64).ln() + te_val;
+        assert_eq!(
+            coeff_with_te as f32,
+            expected_with_te as f32,
+            "Expected e2 contribution to be scaled by downstream TE multiplier"
         );
     }
 
