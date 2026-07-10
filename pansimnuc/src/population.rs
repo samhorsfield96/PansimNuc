@@ -608,9 +608,6 @@ impl Population {
                     selection_coeff: 0.0 // placeholder
                 };
 
-                // generate selection coefficient
-                element.calculate_element_selection_coefficient();
-
                 // determine if element is tracked and if so update mutation map accordingly
                 if is_tracking {
                     identify_tracked_element(&mut element, current_start, &tracking_regions, &contig_name_to_id);
@@ -626,6 +623,9 @@ impl Population {
                         element.multiplier = multiplier_dists[5].sample(rng);
                     }
                 }
+
+                // generate selection coefficient
+                element.calculate_element_selection_coefficient();
 
                 genome.push(element);
                 element_id += 1;
