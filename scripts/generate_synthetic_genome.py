@@ -3,12 +3,15 @@
 
 Config format (CSV-like, one feature per line):
     feature,start,end[,strand][,attributes]
+or:
+    contig,feature,start,end[,strand][,attributes]
 
 Examples:
     gene,1,200,+,ID=gene1
     exon,1,20,+
     intron,21,180,+
     TE-COPY,300,650,-,ID=my_te_1
+    chr2,LINE,1000,1500,-,ID=te_chr2_1
 
 Rules:
 - Blank lines and lines starting with '#' are ignored.
@@ -41,6 +44,7 @@ TE_PREFIX_GUESSES = (
 
 @dataclass
 class FeatureRecord:
+    contig: str
     feature: str
     start: int
     end: int
@@ -67,7 +71,7 @@ def parse_attributes(raw: str) -> Dict[str, str]:
     return attrs
 
 
-def parse_config(config_path: Path) -> List[FeatureRecord]:
+def parse_config(config_path: Path, default_contig: str) -> List[FeatureRecord]:
     records: List[FeatureRecord] = []
     with config_path.open("r", encoding="utf-8") as handle:
         for line_no, raw_line in enumerate(handle, start=1):
@@ -82,13 +86,35 @@ def parse_config(config_path: Path) -> List[FeatureRecord]:
                     f"(feature,start,end), got: {raw_line.rstrip()}"
                 )
 
-            feature = parts[0]
+            contig = default_contig
+            feature = ""
+            coords_offset = 0
+
+            has_leading_contig = False
+            if len(parts) >= 4:
+                try:
+                    int(parts[2])
+                    int(parts[3])
+                    has_leading_contig = True
+                except ValueError:
+                    has_leading_contig = False
+
+            if has_leading_contig:
+                contig = parts[0]
+                feature = parts[1]
+                coords_offset = 2
+            else:
+                feature = parts[0]
+                coords_offset = 1
+
+            if not contig:
+                raise ValueError(f"Invalid config at line {line_no}: contig name is empty")
             if not feature:
                 raise ValueError(f"Invalid config at line {line_no}: feature name is empty")
 
             try:
-                start = int(parts[1])
-                end = int(parts[2])
+                start = int(parts[coords_offset])
+                end = int(parts[coords_offset + 1])
             except ValueError as exc:
                 raise ValueError(
                     f"Invalid config at line {line_no}: start/end must be integers"
@@ -103,15 +129,18 @@ def parse_config(config_path: Path) -> List[FeatureRecord]:
             strand = "+"
             attributes: Dict[str, str] = {}
 
-            if len(parts) >= 4 and parts[3] in {"+", "-"}:
-                strand = parts[3]
-                if len(parts) >= 5:
-                    attributes = parse_attributes(",".join(parts[4:]))
-            elif len(parts) >= 4:
-                attributes = parse_attributes(",".join(parts[3:]))
+            strand_idx = coords_offset + 2
+            attrs_idx = coords_offset + 3
+            if len(parts) > strand_idx and parts[strand_idx] in {"+", "-"}:
+                strand = parts[strand_idx]
+                if len(parts) > attrs_idx:
+                    attributes = parse_attributes(",".join(parts[attrs_idx:]))
+            elif len(parts) > strand_idx:
+                attributes = parse_attributes(",".join(parts[strand_idx:]))
 
             records.append(
                 FeatureRecord(
+                    contig=contig,
                     feature=feature,
                     start=start,
                     end=end,
@@ -144,11 +173,23 @@ def wrap_sequence(sequence: str, width: int = 80) -> List[str]:
     return [sequence[i : i + width] for i in range(0, len(sequence), width)]
 
 
-def write_fasta(path: Path, contig: str, sequence: str) -> None:
+def build_sequences(contig_lengths: Dict[str, int], seed: int | None) -> Dict[str, str]:
+    rng = random.Random(seed)
+    bases = "ACGT"
+    sequences: Dict[str, str] = {}
+    for contig in sorted(contig_lengths):
+        length = contig_lengths[contig]
+        sequences[contig] = "".join(rng.choice(bases) for _ in range(length))
+    return sequences
+
+
+def write_fasta(path: Path, sequences: Dict[str, str]) -> None:
     with path.open("w", encoding="utf-8") as handle:
-        handle.write(f">{contig} synthetic_dna length={len(sequence)}\n")
-        for line in wrap_sequence(sequence):
-            handle.write(f"{line}\n")
+        for contig in sorted(sequences):
+            sequence = sequences[contig]
+            handle.write(f">{contig} synthetic_dna length={len(sequence)}\n")
+            for line in wrap_sequence(sequence):
+                handle.write(f"{line}\n")
 
 
 def format_attrs(attrs: Dict[str, str]) -> str:
@@ -164,10 +205,11 @@ def format_attrs(attrs: Dict[str, str]) -> str:
     return ";".join(chunks)
 
 
-def write_coding_gff(path: Path, contig: str, contig_len: int, records: List[FeatureRecord]) -> None:
+def write_coding_gff(path: Path, contig_lengths: Dict[str, int], records: List[FeatureRecord]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         handle.write("##gff-version 3\n")
-        handle.write(f"##sequence-region {contig} 1 {contig_len}\n")
+        for contig in sorted(contig_lengths):
+            handle.write(f"##sequence-region {contig} 1 {contig_lengths[contig]}\n")
         for idx, record in enumerate(records, start=1):
             attrs = {
                 "ID": record.attributes.get("ID", f"{record.feature}_{idx}"),
@@ -179,7 +221,7 @@ def write_coding_gff(path: Path, contig: str, contig_len: int, records: List[Fea
                     attrs[key] = value
 
             cols = [
-                contig,
+                record.contig,
                 "Synthetic",
                 record.feature,
                 str(record.start),
@@ -194,7 +236,6 @@ def write_coding_gff(path: Path, contig: str, contig_len: int, records: List[Fea
 
 def write_earlgrey_gff(
     path: Path,
-    contig: str,
     te_records: List[FeatureRecord],
     family_prefix: str,
 ) -> None:
@@ -212,7 +253,7 @@ def write_earlgrey_gff(
                     attrs[key] = value
 
             cols = [
-                contig,
+                record.contig,
                 "RepeatMasker",
                 record.feature,
                 str(record.start),
@@ -239,7 +280,14 @@ def main() -> None:
         type=Path,
         help="Output prefix, e.g. testing/synth_chr19 (creates .fasta, _coding.gff, _earlgrey.gff)",
     )
-    parser.add_argument("--contig", default="contig_0", help="Contig/chromosome name for outputs")
+    parser.add_argument(
+        "--contig",
+        default="contig_0",
+        help=(
+            "Default contig/chromosome name for config lines that do not include a leading "
+            "contig column"
+        ),
+    )
     parser.add_argument("--seed", type=int, default=None, help="Optional random seed for reproducible DNA")
     parser.add_argument(
         "--te-features",
@@ -261,7 +309,7 @@ def main() -> None:
     if not config_path.exists():
         raise FileNotFoundError(f"Config not found: {config_path}")
 
-    records = parse_config(config_path)
+    records = parse_config(config_path, default_contig=args.contig)
     explicit_te_features = {
         item.strip().lower() for item in args.te_features.split(",") if item.strip()
     }
@@ -274,8 +322,13 @@ def main() -> None:
         else:
             coding_records.append(record)
 
-    contig_len = max(record.end for record in records)
-    sequence = random_dna(contig_len, args.seed)
+    contig_lengths: Dict[str, int] = {}
+    for record in records:
+        current = contig_lengths.get(record.contig, 0)
+        if record.end > current:
+            contig_lengths[record.contig] = record.end
+
+    sequences = build_sequences(contig_lengths, args.seed)
 
     output_prefix = args.output_prefix
     output_prefix.parent.mkdir(parents=True, exist_ok=True)
@@ -284,9 +337,9 @@ def main() -> None:
     coding_gff_path = output_prefix.parent / f"{output_prefix.name}_coding.gff"
     earlgrey_gff_path = output_prefix.parent / f"{output_prefix.name}_earlgrey.gff"
 
-    write_fasta(fasta_path, args.contig, sequence)
-    write_coding_gff(coding_gff_path, args.contig, contig_len, coding_records)
-    write_earlgrey_gff(earlgrey_gff_path, args.contig, te_records, args.family_prefix)
+    write_fasta(fasta_path, sequences)
+    write_coding_gff(coding_gff_path, contig_lengths, coding_records)
+    write_earlgrey_gff(earlgrey_gff_path, te_records, args.family_prefix)
 
     print(f"Wrote FASTA: {fasta_path}")
     print(f"Wrote coding GFF: {coding_gff_path} ({len(coding_records)} features)")
