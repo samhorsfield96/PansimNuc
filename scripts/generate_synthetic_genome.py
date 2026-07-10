@@ -275,7 +275,7 @@ def main() -> None:
         "--output-prefix",
         required=True,
         type=Path,
-        help="Output prefix, e.g. testing/synth_chr19 (creates .fasta, _coding.gff, _earlgrey.gff)",
+        help="Output prefix (creates .fasta, _coding.gff, _earlgrey.gff)",
     )
     parser.add_argument("--seed", type=int, default=42, help="Optional random seed for reproducible DNA")
 
