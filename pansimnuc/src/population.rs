@@ -255,7 +255,7 @@ impl Population {
         element: &NucElement,
     ) -> (bool, f64) {
         let mut feature_broken = false;
-        let mut feature_multiplier = 1.0;
+        let mut feature_multiplier: f64 = 1.0;
 
         let max_multiplier_dist = self.max_multiplier_dist;
 
@@ -362,48 +362,47 @@ impl Population {
                 }
             }
 
-            // check if TE is present upstream or downstream, if so increase multiplier, as likely to increase expression of gene, and thus fitness contribution
+            // check if TE is present upstream or downstream within max_multiplier_dist bp,
+            // if so increase multiplier, as likely to increase expression of gene, and thus fitness contribution
             if !feature_broken {
-                // check not at beginning of genome
+                // walk upstream from just outside the gene, accumulating non-TE element sizes
                 if element_idx >= position + 1 {
-                    let upstream_element = &genome.seq[element_idx - (position + 1)];
-                    let upstream_size = upstream_element.seq.len();
-                    if Self::is_te_feature(&upstream_element.feature_type) {
-                        feature_multiplier = upstream_element.multiplier;
-                    }
-                    // check two down and see if TE
-                    else if element_idx >= position + 2 && upstream_size <= max_multiplier_dist {
-                        let upstream_element2 = &genome.seq[element_idx - (position + 2)];
-                        if Self::is_te_feature(&upstream_element2.feature_type) {
-                            if feature_multiplier.abs() < upstream_element2.multiplier.abs() {
-                                feature_multiplier = upstream_element2.multiplier;
+                    let mut dist = 0usize;
+                    let mut search_idx = element_idx - (position + 1);
+                    loop {
+                        let elem = &genome.seq[search_idx];
+                        if Self::is_te_feature(&elem.feature_type) {
+                            if feature_multiplier.abs() < elem.multiplier.abs() {
+                                feature_multiplier = elem.multiplier;
                             }
+                            break;
                         }
+                        dist += elem.seq.len();
+                        if dist > max_multiplier_dist || search_idx == 0 {
+                            break;
+                        }
+                        search_idx -= 1;
                     }
                 }
 
-                // check not at end of genome
-                if element_idx + (feature_map_entry_len - position) < genome.seq.len() {
-                    let downstream_element =
-                        &genome.seq[element_idx + (feature_map_entry_len - position)];
-                    let downstream_size = downstream_element.seq.len();
-                    if Self::is_te_feature(&downstream_element.feature_type) {
-                        if feature_multiplier.abs() < downstream_element.multiplier.abs() {
-                            feature_multiplier = downstream_element.multiplier;
-                        }
-                    }
-                    // check two down and see if TE
-                    else if element_idx + ((feature_map_entry_len - position) + 1)
-                        < genome.seq.len()
-                        && downstream_size <= max_multiplier_dist
-                    {
-                        let downstream_element2 =
-                            &genome.seq[element_idx + ((feature_map_entry_len - position) + 1)];
-                        if Self::is_te_feature(&downstream_element2.feature_type) {
-                            if feature_multiplier.abs() < downstream_element2.multiplier.abs() {
-                                feature_multiplier = downstream_element2.multiplier;
+                // walk downstream from just outside the gene, accumulating non-TE element sizes
+                let downstream_start = element_idx + (feature_map_entry_len - position);
+                if downstream_start < genome.seq.len() {
+                    let mut dist = 0usize;
+                    let mut search_idx = downstream_start;
+                    loop {
+                        let elem = &genome.seq[search_idx];
+                        if Self::is_te_feature(&elem.feature_type) {
+                            if feature_multiplier.abs() < elem.multiplier.abs() {
+                                feature_multiplier = elem.multiplier;
                             }
+                            break;
                         }
+                        dist += elem.seq.len();
+                        if dist > max_multiplier_dist || search_idx + 1 >= genome.seq.len() {
+                            break;
+                        }
+                        search_idx += 1;
                     }
                 }
             }
@@ -1684,10 +1683,19 @@ mod tests {
             },
             FeaturePos {
                 contig_id: 0,
+                feature_id: 2,
+                feature_type: "exon".to_string(),
+                start: 16,
+                end: 18,
+                strand: true,
+                seq: vec![8, 8, 8, 8],
+            },
+            FeaturePos {
+                contig_id: 0,
                 feature_id: 0,
                 feature_type: "intergenic".to_string(),
-                start: 16,
-                end: 20,
+                start: 18,
+                end: 22,
                 strand: true,
                 seq: vec![1, 1, 1, 1],
             },
@@ -1772,6 +1780,15 @@ mod tests {
         pop.check_feature_order(genome, idx, &genome.seq[idx])
     }
 
+    fn check_feature_one_exon(pop: &Population, feature_id: usize, genome: &Genome) -> (bool, f64) {
+        let idx = genome
+            .seq
+            .iter()
+            .position(|element| element.feature_id == feature_id && element.feature_type == "exon")
+            .expect("expected exon in feature block");
+        pop.check_feature_order(genome, idx, &genome.seq[idx])
+    }
+
     #[test]
     fn test_check_feature_order_identifies_unbroken_gene() {
         let pop = make_check_feature_order_population();
@@ -1845,6 +1862,13 @@ mod tests {
         let mut seq = vec![left_flank];
         seq.extend(reversed_gene);
         seq.push(right_flank);
+
+        println!(
+            "Sequence: {:?}",
+            seq.iter()
+                .map(|e| format!("{}-{}-{}", e.feature_type, e.feature_id, e.strand))
+                .collect::<Vec<String>>()
+        );
 
         let genome = genome_from_seq(seq);
         let (broken, multiplier) = check_feature_one_intron(&pop, &genome);
@@ -1941,6 +1965,87 @@ mod tests {
 
         let genome = genome_from_seq(seq);
         let (broken, multiplier) = check_feature_one_intron(&pop, &genome);
+        assert!(!broken);
+        assert!(multiplier == 1.0);
+    }
+
+      #[test]
+    fn test_check_feature_order_non_identifies_te_3_upstream_and_downstream() {
+        let mut pop = make_check_feature_order_population();
+        let mut seq = pop.pop[0].seq.clone();
+
+        let mut upstream_intergenic = seq[0].clone();
+        upstream_intergenic.feature_type = "intergenic".to_string();
+        upstream_intergenic.feature_id = 0;
+        upstream_intergenic.multiplier = 1.5;
+        upstream_intergenic.element_id = 10_000;
+        seq.insert(0, upstream_intergenic);
+
+        let mut upstream_te = seq[0].clone();
+        upstream_te.feature_type = "TE-CUT".to_string();
+        upstream_te.feature_id = 0;
+        upstream_te.multiplier = 2.0;
+        upstream_te.element_id = 20_000;
+        seq.insert(0, upstream_te);
+
+        let mut downstream_intergenic = seq[0].clone();
+        downstream_intergenic.feature_type = "intergenic".to_string();
+        downstream_intergenic.feature_id = 0;
+        downstream_intergenic.multiplier = 0.5;
+        downstream_intergenic.element_id = 15_000;
+        seq.push(downstream_intergenic);
+
+        let mut downstream_te = seq[0].clone();
+        downstream_te.feature_type = "TE-COPY".to_string();
+        downstream_te.feature_id = 0;
+        downstream_te.multiplier = 3.5;
+        downstream_te.element_id = 20_001;
+        seq.push(downstream_te);
+
+        println!(
+            "Sequence: {:?}",
+            seq.iter()
+                .map(|e| format!("{}-{}-{}", e.feature_type, e.feature_id, e.multiplier))
+                .collect::<Vec<String>>()
+        );
+
+        let genome = genome_from_seq(seq);
+
+        pop.max_multiplier_dist = 20; // ensure both TEs we add are within the max multiplier distance
+        let (broken, multiplier) = check_feature_one_exon(&pop, 1, &genome);
+        println!("broke: {} multiplier: {}", broken, multiplier);
+        assert!(!broken);
+        assert!(multiplier == 3.5);
+
+        pop.max_multiplier_dist = 10; // ensure one TEs we add are within the max multiplier distance
+        let (broken, multiplier) = check_feature_one_exon(&pop, 1, &genome);
+        println!("broke: {} multiplier: {}", broken, multiplier);
+        assert!(!broken);
+        assert!(multiplier == 2.0);
+
+
+        pop.max_multiplier_dist = 4; // ensure no TEs we add are within the max multiplier distance
+        let (broken, multiplier) = check_feature_one_exon(&pop, 1, &genome);
+        println!("broke: {} multiplier: {}", broken, multiplier);
+        assert!(!broken);
+        assert!(multiplier == 1.0);
+
+        pop.max_multiplier_dist = 20; // ensure both TEs we add are within the max multiplier distance
+        let (broken, multiplier) = check_feature_one_exon(&pop, 2, &genome);
+        println!("broke: {} multiplier: {}", broken, multiplier);
+        assert!(!broken);
+        assert!(multiplier == 3.5);
+
+        pop.max_multiplier_dist = 10; // ensure one TEs we add are within the max multiplier distance
+        let (broken, multiplier) = check_feature_one_exon(&pop, 2, &genome);
+        println!("broke: {} multiplier: {}", broken, multiplier);
+        assert!(!broken);
+        assert!(multiplier == 3.5);
+
+
+        pop.max_multiplier_dist = 4; // ensure no TEs we add are within the max multiplier distance
+        let (broken, multiplier) = check_feature_one_exon(&pop, 2, &genome);
+        println!("broke: {} multiplier: {}", broken, multiplier);
         assert!(!broken);
         assert!(multiplier == 1.0);
     }
