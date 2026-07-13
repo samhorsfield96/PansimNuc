@@ -33,6 +33,10 @@ pub struct NucElement {
     pub selection_coeff: f64
 }
 
+fn extremeness(x: f64) -> f64 {
+    x.max(1.0 / x)
+}
+
 impl NucElement {
     fn calculate_element_selection_coefficient(&mut self) {
         let mut element_log_sum = 0.0;
@@ -255,8 +259,7 @@ impl Population {
         element: &NucElement,
     ) -> (bool, f64) {
         let mut feature_broken = false;
-        let mut feature_multiplier: f64 = 0.0;
-        let mut feature_multiplier_updated: bool = false;
+        let mut feature_multiplier: f64 = 1.0;
 
         let max_multiplier_dist = self.max_multiplier_dist;
 
@@ -373,9 +376,12 @@ impl Population {
                     loop {
                         let elem: &NucElement = &genome.seq[search_idx];
                         if Self::is_te_feature(&elem.feature_type) {
-                            if feature_multiplier.abs() < elem.multiplier.abs() {
+                            // get most extreme value for elem.multiplier
+                            let mut new_feature_multiplier = extremeness(elem.multiplier);
+                            let mut old_feature_multiplier = extremeness(feature_multiplier);
+
+                            if old_feature_multiplier < new_feature_multiplier {
                                 feature_multiplier = elem.multiplier;
-                                feature_multiplier_updated = true;
                             }
                             break;
                         }
@@ -395,9 +401,12 @@ impl Population {
                     loop {
                         let elem = &genome.seq[search_idx];
                         if Self::is_te_feature(&elem.feature_type) {
-                            if feature_multiplier.abs() < elem.multiplier.abs() {
+                            // get most extreme value for elem.multiplier
+                            let mut new_feature_multiplier = extremeness(elem.multiplier);
+                            let mut old_feature_multiplier = extremeness(feature_multiplier);
+
+                            if old_feature_multiplier < new_feature_multiplier {
                                 feature_multiplier = elem.multiplier;
-                                feature_multiplier_updated = true;
                             }
                             break;
                         }
@@ -411,13 +420,7 @@ impl Population {
             } else {
                 // feature broken, multiplier set as 0.0
                 feature_multiplier = 0.0;
-                feature_multiplier_updated = true;
             }
-        }
-
-        // reset feature_multiplier to 1.0 if not set to avoid 0.0 multiplier
-        if !feature_multiplier_updated {
-            feature_multiplier = 1.0;
         }
 
         (feature_broken, feature_multiplier)
@@ -2004,7 +2007,7 @@ mod tests {
         let mut upstream_te = seq[0].clone();
         upstream_te.feature_type = "TE-CUT".to_string();
         upstream_te.feature_id = 0;
-        upstream_te.multiplier = 2.0;
+        upstream_te.multiplier = 0.25;
         upstream_te.element_id = 20_000;
         seq.insert(0, upstream_te);
 
@@ -2035,14 +2038,13 @@ mod tests {
         let (broken, multiplier) = check_feature_one_exon(&pop, 1, &genome);
         println!("broke: {} multiplier: {}", broken, multiplier);
         assert!(!broken);
-        assert!(multiplier == 3.5);
+        assert!(multiplier == 0.25);
 
         pop.max_multiplier_dist = 10; // ensure one TEs we add are within the max multiplier distance
         let (broken, multiplier) = check_feature_one_exon(&pop, 1, &genome);
         println!("broke: {} multiplier: {}", broken, multiplier);
         assert!(!broken);
-        assert!(multiplier == 2.0);
-
+        assert!(multiplier == 0.25);
 
         pop.max_multiplier_dist = 4; // ensure no TEs we add are within the max multiplier distance
         let (broken, multiplier) = check_feature_one_exon(&pop, 1, &genome);
@@ -2054,14 +2056,13 @@ mod tests {
         let (broken, multiplier) = check_feature_one_exon(&pop, 2, &genome);
         println!("broke: {} multiplier: {}", broken, multiplier);
         assert!(!broken);
-        assert!(multiplier == 3.5);
+        assert!(multiplier == 0.25);
 
         pop.max_multiplier_dist = 10; // ensure one TEs we add are within the max multiplier distance
         let (broken, multiplier) = check_feature_one_exon(&pop, 2, &genome);
         println!("broke: {} multiplier: {}", broken, multiplier);
         assert!(!broken);
         assert!(multiplier == 3.5);
-
 
         pop.max_multiplier_dist = 4; // ensure no TEs we add are within the max multiplier distance
         let (broken, multiplier) = check_feature_one_exon(&pop, 2, &genome);
