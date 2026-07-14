@@ -44,6 +44,7 @@ fn main() {
     let mut write_file_tracking = false;
     let mut genome_size_penalty_per_bp = 0.0;
     let mut print_dfe = false;
+    let mut compress_output = false;
 
     // Load config if provided
     let mut verbose = false;
@@ -102,6 +103,12 @@ fn main() {
                     print_dfe = print_dfe_str
                         .parse::<bool>()
                         .expect("print_DFE must be a boolean (true/false).");
+                }
+
+                if let Some(compress_str) = configuration.get("output.compress") {
+                    compress_output = compress_str
+                        .parse::<bool>()
+                        .expect("compress must be a boolean (true/false).");
                 }
 
                 if let Some(outdir) = configuration.get("output.outdir") {
@@ -350,6 +357,7 @@ fn main() {
                         &tracking_regions,
                         augment_tracking,
                         genome_size_penalty_per_bp,
+                        compress_output
                     );
 
                     let mut is_tracking = false;

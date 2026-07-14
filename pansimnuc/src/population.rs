@@ -15,6 +15,9 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use flate2::write::GzEncoder;
+use flate2::Compression;
+use flate2::read::GzDecoder;
 
 #[derive(Clone)]
 pub struct NucElement {
@@ -191,6 +194,7 @@ pub struct Population {
     pub augment_tracking: bool,
     pub genome_size_penalty_per_bp: f64,
     pub optimal_genome_size: usize,
+    pub compress_output: bool
 }
 
 impl Population {
@@ -426,7 +430,7 @@ impl Population {
         (feature_broken, feature_multiplier)
     }
 
-    fn genome_output_path(output_path: &str, prefix: &str) -> io::Result<PathBuf> {
+    fn genome_output_path(output_path: &str, prefix: &str, compress_output: bool) -> io::Result<PathBuf> {
         let path = Path::new(output_path);
         let file_name = path.file_name().ok_or_else(|| {
             io::Error::new(
@@ -435,7 +439,10 @@ impl Population {
             )
         })?;
 
-        let prefixed_name = format!("{}{}", prefix, file_name.to_string_lossy());
+        let mut prefixed_name = format!("{}{}", prefix, file_name.to_string_lossy());
+        if compress_output {
+            prefixed_name += ".gz";
+        }
         Ok(path.with_file_name(prefixed_name))
     }
 
@@ -534,6 +541,7 @@ impl Population {
         tracking_regions: &Vec<(String, usize, usize)>,
         augment_tracking: bool,
         genome_size_penalty_per_bp: f64,
+        compress_output: bool
     ) -> Self {
         // initialise population
         let mut population: Vec<Genome> = Vec::new();
@@ -727,6 +735,7 @@ impl Population {
             augment_tracking,
             genome_size_penalty_per_bp,
             optimal_genome_size,
+            compress_output,
         }
     }
 
@@ -1021,9 +1030,18 @@ impl Population {
     pub fn write_fasta(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
         for (genome_index, genome) in self.pop.iter().enumerate() {
             let prefix = if root_genome { "root".to_string() } else { format!("pop_{}_gen_{}_genome_{}", self.id, self.generation, genome_index) };
-            let genome_output_path = Self::genome_output_path(output_path, &prefix)?;
+            let genome_output_path = Self::genome_output_path(output_path, &prefix, self.compress_output)?;
+
             let file = File::create(&genome_output_path)?;
-            let mut writer = BufWriter::new(file);
+
+            let mut writer: Box<dyn Write> = if self.compress_output {
+                Box::new(BufWriter::new(GzEncoder::new(
+                    file,
+                    Compression::default(),
+                )))
+            } else {
+                Box::new(BufWriter::new(file))
+            };
 
             // Group element indices by seqname
             let mut contig_groups: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -1111,9 +1129,18 @@ impl Population {
 
         for (genome_index, genome) in self.pop.iter().enumerate() {
             let prefix = if root_genome { "root".to_string() } else { format!("pop_{}_gen_{}_genome_{}", self.id, self.generation, genome_index) };
-            let genome_output_path = Self::genome_output_path(output_path, &prefix)?;
+            let genome_output_path = Self::genome_output_path(output_path, &prefix, self.compress_output)?;
+
             let file = File::create(&genome_output_path)?;
-            let mut writer = BufWriter::new(file);
+
+            let mut writer: Box<dyn Write> = if self.compress_output {
+                Box::new(BufWriter::new(GzEncoder::new(
+                    file,
+                    Compression::default(),
+                )))
+            } else {
+                Box::new(BufWriter::new(file))
+            };
 
             writeln!(writer, "##gff-version 3")?;
 
@@ -1274,6 +1301,7 @@ mod tests {
             &vec![("chr1".to_string(), 150, 350)], // tracking_regions
             true, // augment_tracking
             0.01, // genome_size_penalty_per_bp
+            false,
         );
 
         // Check population was created correctly
@@ -1354,6 +1382,7 @@ mod tests {
             &vec![("chr1".to_string(), 150, 350)], // tracking
             true, // augment_tracking
             0.01, // genome_size_penalty_per_bp
+            false,
         );
 
         let temp_path = std::env::temp_dir().join(format!(
@@ -1364,7 +1393,7 @@ mod tests {
                 .as_nanos()
         ));
         let output_path = temp_path.to_string_lossy().into_owned();
-        let genome_output_path = Population::genome_output_path(&output_path, "pop_0_gen_0_genome_0")
+        let genome_output_path = Population::genome_output_path(&output_path, "pop_0_gen_0_genome_0", pop.compress_output)
             .expect("failed to construct per-genome output path");
 
         pop.write_fasta(&output_path, false)
@@ -1375,6 +1404,93 @@ mod tests {
             .expect("failed to open test FASTA file")
             .read_to_string(&mut content)
             .expect("failed to read test FASTA file");
+
+        print!("{}", content);
+
+        assert!(content.contains(">0_contig0"));
+        assert!(content.contains("ACGT"));
+
+        let _ = fs::remove_file(genome_output_path);
+    }
+
+    #[test]
+    fn test_write_fasta_compressed_decodes_nucleotides() {
+        let mut root = Vec::new();
+        let features = vec![FeaturePos {
+            contig_id: 0,
+            feature_id: 0,
+            feature_type: "exon".to_string(),
+            start: 0,
+            end: 4,
+            strand: true,
+            seq: vec![1, 2, 4, 8],
+        }];
+        root.push(features);
+
+        let exon_dist = MutationDistribution::new_double_exp(0.5, 2.0, 0.3)
+            .expect("Failed to create double exponential distribution for exon features");
+        let intron_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create uniform distribution for intron features");
+        let intergenic_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create uniform distribution for intergenic features");
+        let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
+
+        let exon_mu = 1.0;
+        let intron_mu = 1.0;
+        let intergenic_mu = 1.0;
+        let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
+        let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
+            .expect("Failed to create uniform distribution for recombination");
+        let recombination_len_dist = MutationDistribution::new_poisson(1.0)
+            .expect("Failed to create uniform distribution for recombination");
+        let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
+
+          let multiplier_dist = MutationDistribution::new_uniform(0.5, 1.5)
+            .expect("Failed to create uniform distribution for TE multipliers");
+        let multiplier_dists = vec![multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone()];
+
+
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let pop = Population::new(
+            root,
+            1,
+            site_mutation_dists,
+            &site_mutation_mus,
+            &site_mutation_mus,
+            recombination_dists,
+            1.0,
+            default_structural_dists(),
+            10, // max_multiplier_dist
+            multiplier_dists,
+            10,
+            &mut rng,
+            true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking
+            true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
+            true,
+        );
+
+        let temp_path = std::env::temp_dir().join(format!(
+            "pansimnuc_pop_{}.fasta",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time before UNIX_EPOCH")
+                .as_nanos()
+        ));
+        let output_path = temp_path.to_string_lossy().into_owned();
+        let genome_output_path = Population::genome_output_path(&output_path, "pop_0_gen_0_genome_0", pop.compress_output)
+            .expect("failed to construct per-genome output path");
+
+        pop.write_fasta(&output_path, false)
+            .expect("failed to write test FASTA file");
+
+        let mut content = String::new();
+        GzDecoder::new(fs::File::open(&genome_output_path)
+            .expect("failed to open test FASTA.gz file"))
+            .read_to_string(&mut content)
+            .expect("failed to read test FASTA.gz file");
 
         print!("{}", content);
 
@@ -1441,6 +1557,7 @@ mod tests {
             &vec![("chr1".to_string(), 150, 350)], // tracking
             true, // augment_tracking
             0.01, // genome_size_penalty_per_bp
+            false,
 
         );
 
@@ -1452,7 +1569,7 @@ mod tests {
                 .as_nanos()
         ));
         let output_path = temp_path.to_string_lossy().into_owned();
-        let genome_output_path = Population::genome_output_path(&output_path, "pop_0_gen_0_genome_0")
+        let genome_output_path = Population::genome_output_path(&output_path, "pop_0_gen_0_genome_0", pop.compress_output)
             .expect("failed to construct per-genome output path");
 
         pop.write_gff(&output_path, false)
@@ -1473,6 +1590,100 @@ mod tests {
         assert!(content.contains("log_element_selection_coefficient="));
 
         let _ = fs::remove_file(genome_output_path);
+    }
+
+    #[test]
+    fn test_write_gff_compressed_generates_expected_output() {
+        let mut root = Vec::new();
+        let features = vec![FeaturePos {
+            contig_id: 0,
+            feature_id: 0,
+            feature_type: "intergenic".to_string(),
+            start: 0,
+            end: 4,
+            strand: true,
+            seq: vec![1, 2, 4, 8],
+        }];
+        root.push(features);
+
+        let exon_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create distribution for exon features");
+        let intron_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create distribution for intron features");
+        let intergenic_dist = MutationDistribution::new_uniform(0.0, 1.0)
+            .expect("Failed to create distribution for intergenic features");
+        let site_mutation_dists = vec![exon_dist, intron_dist, intergenic_dist];
+
+        let exon_mu = 1.0;
+        let intron_mu = 1.0;
+        let intergenic_mu = 1.0;
+        let site_mutation_mus = vec![exon_mu, intron_mu, intergenic_mu];
+
+        let recombination_prob_dist = MutationDistribution::new_poisson(1.0)
+            .expect("Failed to create recombination probability distribution");
+        let recombination_len_dist = MutationDistribution::new_poisson(1.0)
+            .expect("Failed to create recombination length distribution");
+        let recombination_dists = vec![recombination_prob_dist, recombination_len_dist];
+
+        let multiplier_dist = MutationDistribution::new_uniform(0.5, 1.5)
+            .expect("Failed to create uniform distribution for TE multipliers");
+        let multiplier_dists = vec![multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone(), multiplier_dist.clone()];
+
+
+        let mut rng: StdRng = StdRng::seed_from_u64(42);
+        let pop = Population::new(
+            root,
+            1,
+            site_mutation_dists,
+            &site_mutation_mus,
+            &site_mutation_mus,
+            recombination_dists,
+            1.0,
+            default_structural_dists(),
+            10, // max_multiplier_dist
+            multiplier_dists,
+            10,
+            &mut rng,
+            true, // verbose
+            &vec!["chr1".to_string()], // contig_name_to_id
+            &vec![("chr1".to_string(), 150, 350)], // tracking
+            true, // augment_tracking
+            0.01, // genome_size_penalty_per_bp
+            true,
+
+        );
+
+        let temp_path = std::env::temp_dir().join(format!(
+            "pansimnuc_pop_{}.gff3",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time before UNIX_EPOCH")
+                .as_nanos()
+        ));
+        let output_path = temp_path.to_string_lossy().into_owned();
+        let genome_output_path = Population::genome_output_path(&output_path, "pop_0_gen_0_genome_0", pop.compress_output)
+            .expect("failed to construct per-genome output path");
+
+        pop.write_gff(&output_path, false)
+            .expect("failed to write test GFF.gz file");
+
+        let mut content = String::new();
+
+        GzDecoder::new(fs::File::open(&genome_output_path)
+            .expect("failed to open test GFF.gz file"))
+            .read_to_string(&mut content)
+            .expect("failed to read test GFF.gz file");
+
+        assert!(content.contains("##gff-version 3"));
+        assert!(content.contains("\tintergenic\t"));
+        assert!(content.contains("feature_id=0"));
+        assert!(content.contains("sequence_length=4"));
+        assert!(content.contains("log_genome_selection_coefficient="));
+        assert!(content.contains("log_genome_selection_probability="));
+        assert!(content.contains("log_element_selection_coefficient="));
+
+        let _ = fs::remove_file(genome_output_path);
+        
     }
 
     #[test]
@@ -1534,6 +1745,7 @@ mod tests {
             &vec![("chr1".to_string(), 150, 350)], // tracking
             true, // augment_tracking
             0.01, // genome_size_penalty_per_bp
+            false,
         );
 
         let original_seq = pop.pop[0].seq[0].seq.clone();
@@ -1620,6 +1832,7 @@ mod tests {
             &vec![("chr1".to_string(), 150, 350)], // tracking
             true, // augment_tracking
             0.01, // genome_size_penalty_per_bp
+            false,
         );
 
         let original_identifiers: Vec<String> = pop
@@ -1767,6 +1980,7 @@ mod tests {
             &vec![("chr1".to_string(), 150, 350)], // tracking
             true, // augment_tracking
             0.01, // genome_size_penalty_per_bp
+            false,
         )
     }
 
@@ -2424,7 +2638,8 @@ mod tests {
             &vec!["chr1".to_string()],
             &vec![tracking_region],
             true,
-            0.01
+            0.01,
+            false,
         )
     }
 
@@ -2556,6 +2771,7 @@ mod tests {
             &vec![],  // no tracking
             false,
             0.01, // genome_size_penalty_per_bp
+            false,
         );
 
         assert_eq!(pop.optimal_genome_size, 4);
@@ -2662,6 +2878,7 @@ mod tests {
             &vec![],
             false,
             0.0,
+            false,
         );
 
         // Pre-update: lambdas should equal the raw placeholder values

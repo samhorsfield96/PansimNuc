@@ -868,6 +868,7 @@ mod tests {
             augment_tracking: false,
             genome_size_penalty_per_bp: 0.01,
             optimal_genome_size: 1000,
+            compress_output: false,
         }
     }
 
