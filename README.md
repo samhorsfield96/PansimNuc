@@ -87,6 +87,7 @@ PansimNuc is configured via a `.conf` file passed with `--config`. The file uses
 | Parameter | Description |
 |---|---|
 | `outdir` | Directory where all output files are written |
+| `compress` | Set to compress all output FASTA and GFF files as .gz |
 
 ---
 
