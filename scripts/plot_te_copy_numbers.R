@@ -2,6 +2,7 @@ library(dplyr)
 library(ggplot2)
 library(tidyr)
 library(ggsci)
+library(readr)
 
 # Usage:
 #   Rscript plot_te_copy_numbers.R [output_dir] [output_prefix]
@@ -18,7 +19,7 @@ if (!dir.exists(output_dir)) {
 
 # ── Parse GFF files ───────────────────────────────────────────────────────────
 
-gff_files <- list.files(output_dir, pattern = "^pop_\\d+_gen_\\d+_genome_\\d+\\.gff$",
+gff_files <- list.files(output_dir, pattern = "^pop_\\d+_gen_\\d+_genome_\\d+\\.gff",
                          full.names = TRUE)
 
 if (length(gff_files) == 0) {
@@ -44,7 +45,7 @@ parse_gff <- function(path) {
   gen_id    <- as.integer(parts[4])
   genome_id <- as.integer(parts[6])
 
-  lines <- readLines(path, warn = FALSE)
+  lines <- read_lines(path)
   # Keep only data lines (not comments)
   data_lines <- lines[!startsWith(lines, "#") & nchar(trimws(lines)) > 0]
 

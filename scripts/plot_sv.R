@@ -37,7 +37,7 @@ parse_attrs <- function(attr_string) {
 }
 
 read_pansimnuc_gff <- function(path, bin_label) {
-  lines <- readLines(path, warn = FALSE)
+  lines <- read_lines(path)
   lines <- lines[nchar(lines) > 0L & !startsWith(lines, "#")]
   if (length(lines) == 0L) {
     warning("No records found in: ", path)
