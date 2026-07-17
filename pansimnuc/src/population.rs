@@ -15,8 +15,8 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use bgzip::BGZFWriter;
 use flate2::read::GzDecoder;
 
 #[derive(Clone)]
@@ -1035,7 +1035,7 @@ impl Population {
             let file = File::create(&genome_output_path)?;
 
             let mut writer: Box<dyn Write> = if self.compress_output {
-                Box::new(BufWriter::new(GzEncoder::new(
+                Box::new(BufWriter::new(BGZFWriter::new(
                     file,
                     Compression::default(),
                 )))
@@ -1134,7 +1134,7 @@ impl Population {
             let file = File::create(&genome_output_path)?;
 
             let mut writer: Box<dyn Write> = if self.compress_output {
-                Box::new(BufWriter::new(GzEncoder::new(
+                Box::new(BufWriter::new(BGZFWriter::new(
                     file,
                     Compression::default(),
                 )))
