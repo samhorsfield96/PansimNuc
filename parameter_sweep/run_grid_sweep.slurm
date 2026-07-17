@@ -28,11 +28,11 @@
 #SBATCH --output=/scratch/sam_simulations/logs/%A_%a.out
 #SBATCH --error=/scratch/sam_simulations/logs/%A_%a.err
 ##SBATCH --array=0-242%10             # <-- Set to 0-(N_SAMPLES-1)
-##SBATCH --array=0-2915%10             # <-- Set to 0-(N_SAMPLES-1)
-##SBATCH --array=0-728%10             # <-- Set to 0-(N_SAMPLES-1)
-#SBATCH --array=0-1151%10             # <-- Set to 0-(N_SAMPLES-1)
+##SBATCH --array=0-575%10             # <-- Set to 0-(N_SAMPLES-1)
+##SBATCH --array=0-242%10             # <-- Set to 0-(N_SAMPLES-1)
+#SBATCH --array=0-575%10             # <-- Set to 0-(N_SAMPLES-1)
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4        # Should match threads= in your .conf
+#SBATCH --cpus-per-task=1        # Should match threads= in your .conf
 #SBATCH --mem=4G
 #SBATCH --time=12:00:00
 #SBATCH --partition=normal.12h   # Uncomment and set if required
