@@ -2,6 +2,7 @@ library(dplyr)
 library(ggplot2)
 library(tidyr)
 library(ggsci)
+library(stringr)
 
 # Usage:
 #   Rscript ld_analysis.R [gff_dir] [output_prefix] [flank_bp] [generation]
@@ -52,7 +53,7 @@ read_sim_gff <- function(path) {
     # contig_N in col-1 → 0-based index for FASTA lookup
     contig_name  <- f[1L]
     contig_index <- suppressWarnings(
-      as.integer(sub("contig_", "", contig_name)) - 1L
+      as.integer(sub("contig_", "", contig_name))
     )
     data.frame(
       contig_index = contig_index,
@@ -128,7 +129,7 @@ extract_window <- function(fasta_seqs, contig_index, seq_start, seq_end, strand)
 
 # ── Discover GFF files ────────────────────────────────────────────────────────
 gff_files <- list.files(gff_dir,
-                        pattern    = "^pop_\\d+_gen_\\d+_genome_\\d+\\.gff$",
+                        pattern    = "^pop_\\d+_gen_\\d+_genome_\\d+\\.gff.gz$",
                         full.names = TRUE)
 
 if (length(gff_files) == 0L) {
@@ -139,13 +140,13 @@ message("Found ", length(gff_files), " GFF file(s) in: ", gff_dir)
 
 # ── Parse filenames → metadata ────────────────────────────────────────────────
 file_meta <- lapply(gff_files, function(fp) {
-  bn <- sub("\\.gff$", "", basename(fp))
+  bn <- sub("\\.gff.gz$", "", basename(fp))
   m  <- regmatches(bn, regexpr("^pop_(\\d+)_gen_(\\d+)_genome_(\\d+)$", bn, perl = TRUE))
   if (length(m) == 0L) return(NULL)
   parts <- as.integer(strsplit(sub("^pop_", "", m), "_gen_|_genome_")[[1L]])
   data.frame(
     gff_path   = fp,
-    fasta_path = sub("\\.gff$", ".fasta", fp),
+    fasta_path = sub("\\.gff.gz$", ".fasta.gz", fp),
     pop_id     = parts[1L],
     gen_id     = parts[2L],
     genome_id  = parts[3L],
@@ -293,11 +294,11 @@ compute_r2 <- function(site_mat, in_element, positions) {
 # ── Pre-load all FASTA sequences into memory ─────────────────────────────────
 message("Pre-loading FASTA sequences into memory...")
 fasta_cache <- list()
-for (.i in seq_len(nrow(file_meta))) {
-  .row <- file_meta[.i, ]
-  if (!file.exists(.row$fasta_path)) next
-  .key <- paste(.row$pop_id, .row$gen_id, .row$genome_id, sep = "_")
-  fasta_cache[[.key]] <- read_fasta(.row$fasta_path)
+for (i in seq_len(nrow(file_meta))) {
+  row <- file_meta[i, ]
+  if (!file.exists(row$fasta_path)) next
+  key <- paste(row$pop_id, row$gen_id, row$genome_id, sep = "_")
+  fasta_cache[[key]] <- read_fasta(row$fasta_path)
 }
 message(sprintf("Loaded %d FASTA file(s) into memory.", length(fasta_cache)))
 
@@ -480,6 +481,28 @@ p_ld <- ggplot(ld_summary,
         legend.position = "right")
 p_ld
 
+# alternative decay plot - TEST
+decay_other <- all_ld |>
+  mutate(dist = abs(focal_pos - partner_pos)) %>%
+  select(dist, r2) %>%
+  arrange(dist)
+
+decay_other$dists <- cut(decay_other$dist,
+                         breaks=seq(from=min(decay_other$dist)-1,
+                                    to=max(decay_other$dist)+1,
+                                    by=1000)) # by=10 makes it more detailed
+
+decay_other_plot <- decay_other %>% group_by(dists) %>% summarise(mean=mean(r2), median=median(r2))
+decay_other_plot <- decay_other_plot %>% mutate(start=as.integer(str_extract(str_replace_all(dists,"[\\(\\)\\[\\]]",""),"^[0-9-e+.]+")),
+                                                end=as.integer(str_extract(str_replace_all(dists,"[\\(\\)\\[\\]]",""),"[0-9-e+.]+$")),
+                                                mid=start+((end-start)/2))
+
+p_decay_other <- ggplot()+
+  geom_line(data = decay_other_plot, aes(x = start, y = mean), linewidth = 0.6, alpha = 0.8)+
+  labs(x = "Distance (bp)", y = expression(Mean~r^2)) +
+  theme_light(base_size = 11)
+p_decay_other
+
 # ── Heatmap: pairwise r² per chromosome (focal × partner, chromosomal coords) ─
 p_heat <- ggplot(all_ld |> filter(!is.na(r2)),
                  aes(x = focal_pos, y = partner_pos, fill = r2)) +
@@ -510,8 +533,12 @@ pdf_h_decay <- max(4, 3.5 * n_chr_panels)
 pdf_h_heat  <- max(6, 4  * ceiling(n_chr_panels / 2))
 pdf_w       <- 10
 
-out_decay <- paste0(outpref, "_ld_decay.pdf")
+out_decay <- paste0(outpref, "_ld_decay_per_dist.pdf")
 ggsave(out_decay, plot = p_ld, width = pdf_w, height = pdf_h_decay, limitsize = FALSE)
+message("Saved: ", out_decay)
+
+out_decay <- paste0(outpref, "_ld_decay_mean.pdf")
+ggsave(out_decay, plot = p_decay_other, width = pdf_w, height = pdf_h_decay, limitsize = FALSE)
 message("Saved: ", out_decay)
 
 out_heat <- paste0(outpref, "_ld_heatmap.pdf")
