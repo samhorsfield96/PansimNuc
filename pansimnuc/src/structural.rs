@@ -129,16 +129,16 @@ pub fn mutate_intra_genome(
             new_positions_vec.push((new_contig_id, new_pos));
 
             if dup_count > 0 && feature_type == "TE-CUT" {
-                // if element is a TE-COPY and has already been duplicated, break loop to prevent further duplications, to avoid runaway genome growth
+                // if element is a TE-CUT and has already been duplicated, break loop to mimic cut and paste mechanism
                 break;
             }
         }
 
         // deletions, only first gene deleted which is original position
         if feature_type == "TE-CUT" && dup_count > 0 {
-            // if element is a TE-COPY and has already been duplicated, force deletion of original copy, to capture cut and paste mechanism of TE-COPYs
+            // if element is a TE-CUT and has already been duplicated, force deletion of original copy, to capture cut and paste mechanism of TE-CUTs
             let _ = new_positions_vec.remove(0);
-            te_cut_deletions += 1;
+            //te_cut_deletions += 1;
         } else {
             // All other gene features
             let mut n_deletions = mutation_dist[1].sample(&mut thread_rng) as usize;
