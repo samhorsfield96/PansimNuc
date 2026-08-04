@@ -1028,8 +1028,7 @@ impl Population {
     }
 
     pub fn write_fasta(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
-        for (genome_index, genome) in self.pop.iter().enumerate() {
-            let prefix = if root_genome { "root".to_string() } else { format!("pop_{}_gen_{}_genome_{}", self.id, self.generation, genome_index) };
+        let write_one = |genome: &Genome, prefix: String| -> io::Result<()> {
             let genome_output_path = Self::genome_output_path(output_path, &prefix, self.compress_output)?;
 
             let file = File::create(&genome_output_path)?;
@@ -1095,13 +1094,23 @@ impl Population {
             }
 
             writer.flush()?;
+            Ok(())
+        };
 
-            if root_genome {
-                break; // only write root genome if specified
+        if root_genome {
+            if let Some(genome) = self.pop.first() {
+                write_one(genome, "root".to_string())?;
             }
+            return Ok(());
         }
 
-        Ok(())
+        self.pop
+            .par_iter()
+            .enumerate()
+            .try_for_each(|(genome_index, genome)| {
+                let prefix = format!("pop_{}_gen_{}_genome_{}", self.id, self.generation, genome_index);
+                write_one(genome, prefix)
+            })
     }
 
     pub fn write_gff(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
@@ -1127,8 +1136,7 @@ impl Population {
             selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
         }
 
-        for (genome_index, genome) in self.pop.iter().enumerate() {
-            let prefix = if root_genome { "root".to_string() } else { format!("pop_{}_gen_{}_genome_{}", self.id, self.generation, genome_index) };
+        let write_one = |genome_index: usize, genome: &Genome, prefix: String| -> io::Result<()> {
             let genome_output_path = Self::genome_output_path(output_path, &prefix, self.compress_output)?;
 
             let file = File::create(&genome_output_path)?;
@@ -1201,13 +1209,23 @@ impl Population {
             }
 
             writer.flush()?;
+            Ok(())
+        };
 
-            if root_genome {
-                break; // only write root genome if specified
+        if root_genome {
+            if let Some(genome) = self.pop.first() {
+                write_one(0, genome, "root".to_string())?;
             }
+            return Ok(());
         }
 
-        Ok(())
+        self.pop
+            .par_iter()
+            .enumerate()
+            .try_for_each(|(genome_index, genome)| {
+                let prefix = format!("pop_{}_gen_{}_genome_{}", self.id, self.generation, genome_index);
+                write_one(genome_index, genome, prefix)
+            })
     }
 }
 
