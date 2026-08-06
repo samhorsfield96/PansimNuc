@@ -286,7 +286,7 @@ fn connected_components(
     components
 }
 
-pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize) {
+pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> (usize, usize, usize) {
     let mut rng = rand::thread_rng();
 
     // get number of recombination events across whole population
@@ -371,12 +371,12 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                     // get local recipient index in genomes vec
                     let recipient_local = genome_id_to_local_idx[&recipient];
 
-                    let (donor_genome, recipient_genome): (&Genome, &mut Genome) = if donor_local < recipient_local {
+                    let (donor_genome, recipient_genome): (&mut Genome, &mut Genome) = if donor_local < recipient_local {
                         let (left, right) = genomes.split_at_mut(recipient_local);
-                        (&left[donor_local].1, &mut right[0].1)
+                        (&mut left[donor_local].1, &mut right[0].1)
                     } else {
                         let (left, right) = genomes.split_at_mut(donor_local);
-                        (&right[0].1, &mut left[recipient_local].1)
+                        (&mut right[0].1, &mut left[recipient_local].1)
                     };
 
                     // look for donor and recipient site, maximum total donor length attempts, if not found, skip recombination event
@@ -543,22 +543,40 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                             element.contig_id = recipient_contig_id;
                         }
 
+                        // hold recipient track in for bidirectional recombination
+                        let mut recipient_track: Vec<NucElement> = vec![];
+                        let mut recipient_track_seq_len: usize = 0;
+
+
+                        if bidirectional {
+                            recipient_track = recipient_genome.seq
+                                [start_donor_site..=end_donor_site]
+                                .to_vec()
+                                .clone();
+                            recipient_track_seq_len = recipient_track.iter()
+                                .map(|e| e.seq.len())
+                                .sum();
+                        } else {
+                            recipient_track_seq_len = recipient_genome.seq
+                                [start_recipient_site..=end_recipient_site]
+                                .iter()
+                                .map(|e| e.seq.len())
+                                .sum();
+                        }
+
                         // store donor_track length before it is moved
                         let donor_track_len = donor_track.len();
                         let donor_track_seq_len: usize = donor_track.iter().map(|e| e.seq.len()).sum();
 
-                        let recipient_track_seq_len: usize = recipient_genome.seq
-                            [start_recipient_site..=end_recipient_site]
-                            .iter()
-                            .map(|e| e.seq.len())
-                            .sum();
+                        // determine recipient track length
+                        let recipient_track_len = recipient_track.len();
 
                         thread_total_donor_length += donor_track_seq_len;
                         thread_total_recipient_length += recipient_track_seq_len;
                         thread_successful_recombinations += 1;
 
                         // update homology map for recipient genome, need to add new positions for each element in donor track, and remove old positions for each element in recipient track
-                        // remove old positions
+                        // remove old positions in recipient site
                         for element_idx in start_recipient_site..=end_recipient_site {
                             let element_id = recipient_genome.seq[element_idx].element_id;
                             let homology_group =
@@ -566,7 +584,7 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                             homology_group.retain(|&pos| pos != element_idx); // remove old position
                         }
 
-                        // now safe to mutably borrow recipient
+                        // now safe to mutably borrow recipient and update recipient
                         recipient_genome
                             .seq
                             .splice(start_recipient_site..=end_recipient_site, donor_track);
@@ -580,6 +598,32 @@ pub fn mutate_inter_genome(population: &mut Population) -> (usize, usize, usize)
                         }
                         // update contig_ids
                         recipient_genome.update_contig_starts();
+
+                        // do the same for donor track
+                        if bidirectional {
+                            // remove old positions in donor site
+                            for element_idx in start_donor_site..=end_donor_site {
+                                let element_id = donor_genome.seq[element_idx].element_id;
+                                let homology_group =
+                                    &mut thread_homology_map[element_id][donor_genome.genome_id];
+                                homology_group.retain(|&pos| pos != element_idx); // remove old position
+                            }
+
+                            // update donor genome
+                            donor_genome
+                                .seq
+                                .splice(start_donor_site..=end_donor_site, recipient_track);
+
+                            // add new positions
+                            for element_idx in start_donor_site..(start_donor_site + recipient_track_len) {
+                                let element_id = donor_genome.seq[element_idx].element_id;
+                                let homology_group =
+                                    &mut thread_homology_map[element_id][donor_genome.genome_id];
+                                homology_group.push(element_idx); // add new position
+                            }
+                            // update contig_ids
+                            donor_genome.update_contig_starts();
+                        }
                     }
                 }
             }
@@ -1041,7 +1085,7 @@ mod tests {
         );
 
         let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
-        mutate_inter_genome(&mut population);
+        mutate_inter_genome(&mut population, false);
         let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         let mixed_after = count_mixed_marker_genomes(&population);
 
@@ -1097,7 +1141,7 @@ mod tests {
         );
 
         let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
-        mutate_inter_genome(&mut population);
+        mutate_inter_genome(&mut population, false);
         let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         let mixed_after = count_mixed_marker_genomes(&population);
 
@@ -1154,7 +1198,7 @@ mod tests {
         );
 
         let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
-        mutate_inter_genome(&mut population);
+        mutate_inter_genome(&mut population, false);
         let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         let mixed_after = count_mixed_marker_genomes(&population);
 
