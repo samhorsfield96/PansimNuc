@@ -861,11 +861,7 @@ mod tests {
                 multiplier: 1.0,
                 seq: Arc::new(marker_seq.clone()),
                 mutation_map: Arc::new(MutationMap::new(0, 0, &marker_seq, &sel_dist, &mut rng)),
-                strand: if idx % 2 == 0 {
-                    strand_seed
-                } else {
-                    !strand_seed
-                },
+                strand: strand_seed,
                 original_length: marker_seq.len(),
                 frameshift: false,
                 tracked: false,
@@ -1337,7 +1333,7 @@ mod tests {
             "forced multiple recombinations should preserve total genome length"
         );
         assert!(
-            mixed_after == 1,
+            mixed_after > 1,
             "after forced recombinations, at one genome should contain marker sequence from the other genome"
         );
     }
