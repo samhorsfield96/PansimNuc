@@ -878,6 +878,17 @@ mod tests {
         }
     }
 
+    fn print_genome(population: &Population, genome_idx: usize) -> String {
+        let genome: &Genome = &population.pop[genome_idx];
+        genome
+            .seq
+            .iter()
+            .flat_map(|element| element.seq.iter())
+            .map(|base| base.to_string())
+            .collect::<Vec<String>>()
+            .join("")
+    }
+
     fn make_recombination_test_population(forced_events: usize, n_elements: usize) -> Population {
         // genome 0 starts with marker base 1 (A), genome 1 starts with marker base 2 (C)
         let g0 = make_recombination_test_genome(0, n_elements, true, 1);
@@ -1084,10 +1095,16 @@ mod tests {
             "before recombination, genomes should not be mixed"
         );
 
+        println!("Genome 0 pre-recomb: {}", print_genome(&population, 0));
+        println!("Genome 1 pre-recomb: {}", print_genome(&population, 1));
+
         let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         mutate_inter_genome(&mut population, false);
         let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         let mixed_after = count_mixed_marker_genomes(&population);
+
+        println!("Genome 0 post-recomb: {}", print_genome(&population, 0));
+        println!("Genome 1 post-recomb: {}", print_genome(&population, 1));
 
         let element_ids_after: Vec<Vec<usize>> = population
             .pop
@@ -1140,10 +1157,16 @@ mod tests {
             "before recombination, genomes should not be mixed"
         );
 
+        println!("Genome 0 pre-recomb: {}", print_genome(&population, 0));
+        println!("Genome 1 pre-recomb: {}", print_genome(&population, 1));
+
         let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         mutate_inter_genome(&mut population, false);
         let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         let mixed_after = count_mixed_marker_genomes(&population);
+
+        println!("Genome 0 post-recomb: {}", print_genome(&population, 0));
+        println!("Genome 1 post-recomb: {}", print_genome(&population, 1));
 
         let element_ids_after: Vec<Vec<usize>> = population
             .pop
@@ -1197,10 +1220,16 @@ mod tests {
             "before recombination, genomes should not be mixed"
         );
 
+        println!("Genome 0 pre-recomb: {}", print_genome(&population, 0));
+        println!("Genome 1 pre-recomb: {}", print_genome(&population, 1));
+
         let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         mutate_inter_genome(&mut population, false);
         let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         let mixed_after = count_mixed_marker_genomes(&population);
+
+        println!("Genome 0 post-recomb: {}", print_genome(&population, 0));
+        println!("Genome 1 post-recomb: {}", print_genome(&population, 1));
 
         let element_ids_after: Vec<Vec<usize>> = population
             .pop
@@ -1249,10 +1278,16 @@ mod tests {
             "before ith bidirectional recombination, genome 1 should not have marker sequence from genome 0"
         );
 
+        println!("Genome 0 pre-recomb: {}", print_genome(&population, 0));
+        println!("Genome 1 pre-recomb: {}", print_genome(&population, 1));
+
         let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         let (successful_recombinations, _, _) = mutate_inter_genome(&mut population, true);
         let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         let mixed_after = count_mixed_marker_genomes(&population);
+
+        println!("Genome 0 post-recomb: {}", print_genome(&population, 0));
+        println!("Genome 1 post-recomb: {}", print_genome(&population, 1));
 
         assert_eq!(
             population.pop.len(),
@@ -1301,10 +1336,16 @@ mod tests {
             "before ith bidirectional recombination, genome 1 should not have marker sequence from genome 0"
         );
 
+        println!("Genome 0 pre-recomb: {}", print_genome(&population, 0));
+        println!("Genome 1 pre-recomb: {}", print_genome(&population, 1));
+
         let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         let (successful_recombinations, _, _) = mutate_inter_genome(&mut population, true);
         let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
         let mixed_after = count_mixed_marker_genomes(&population);
+
+        println!("Genome 0 post-recomb: {}", print_genome(&population, 0));
+        println!("Genome 1 post-recomb: {}", print_genome(&population, 1));
 
         assert_eq!(
             population.pop.len(),
