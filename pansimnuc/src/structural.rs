@@ -900,8 +900,10 @@ mod tests {
         let recombination_len = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
 
         let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
-        for _ in 0..n_elements {
-            homology_map.push(vec![vec![0], vec![0]]);
+        for idx in 0..n_elements {
+            // Map each element_id to its actual position in each genome so
+            // recombination start sites can vary across the genome.
+            homology_map.push(vec![vec![idx], vec![idx]]);
         }
 
         Population {
