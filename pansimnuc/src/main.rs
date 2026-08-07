@@ -308,8 +308,21 @@ fn main() {
                     }
 
                     // recombination distributions
-                    let recombination_rate = parse_f64("population.recombination_rate");
+                    let mut recombination_rate = parse_f64("population.recombination_rate");
                     let recombination_size_mean = parse_f64("population.recombination_size_mean");
+
+                    // if bidirectional, need to divide recombination rate by 2 to ensure same rate of recombination
+                    let mut bidirectional = true;
+                    if let Some(bidirectional_str) = configuration.get("population.bidirectional_recombination") {
+                        bidirectional = bidirectional_str
+                            .parse::<bool>()
+                            .expect("bidirectional_recombination must be a boolean (true/false).");
+                    }
+
+                    if bidirectional {
+                        recombination_rate = recombination_rate / 2_f64;
+                    }
+
                     let recombination_prob_dist = Distribution::new_poisson(recombination_rate)
                         .expect("Failed to create recombination probability distribution");
                     let recombination_size_dist = Distribution::new_poisson(

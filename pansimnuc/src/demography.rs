@@ -169,6 +169,14 @@ impl MetaPopulation {
                 .expect("print_all_generations must be a boolean (true/false).");
         }
 
+        // determine whether recombination is bidirectional (default true)
+        let mut bidirectional = true;
+        if let Some(bidirectional_str) = configuration.get("population.bidirectional_recombination") {
+            bidirectional = bidirectional_str
+                .parse::<bool>()
+                .expect("bidirectional_recombination must be a boolean (true/false).");
+        }
+
         // before starting, update mutation distributions for all populations based on initial genome sizes, to ensure they are correct for the first generation
         self.populations.par_iter_mut().for_each(|population| {
             population.update_mu_dists(&self.site_mutation_mus_vals, &self.site_indel_mus_vals);
@@ -188,7 +196,7 @@ impl MetaPopulation {
                 let (total_length, _, _, _, _   , _, _, _, _, _, _, _, _, _) = population.total_seq_lengths();
 
                 // perform intergenome structural mutations, based on number of SNPs
-                population.structural_inter_genome(self.recombination_rate, total_length as usize, self.recombination_size_mean);
+                population.structural_inter_genome(self.recombination_rate, total_length as usize, self.recombination_size_mean, bidirectional);
 
                 // sample next generation
                 let sampled_indices = population.sample_individuals(&mut rng);

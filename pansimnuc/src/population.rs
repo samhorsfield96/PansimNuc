@@ -894,7 +894,7 @@ impl Population {
         self.update_homology_map();
     }
 
-    pub fn structural_inter_genome(&mut self, recombination_rate: f64, total_sites: usize, recombination_size_mean: f64) {
+    pub fn structural_inter_genome(&mut self, recombination_rate: f64, total_sites: usize, recombination_size_mean: f64, bidirectional: bool) {
         // generate recombination distributions
         let average_recombinations_per_generation = 
             ((recombination_rate * total_sites as f64) / recombination_size_mean)
@@ -905,7 +905,7 @@ impl Population {
         self.recombination_dists[0] = MutationDistribution::new_poisson(average_recombinations_per_generation)
             .expect("Failed to create poisson distribution for recombination rates");
 
-        let (n_recombinations, total_donor_length, total_recipient_length) = mutate_inter_genome(self, false);
+        let (n_recombinations, total_donor_length, total_recipient_length) = mutate_inter_genome(self, bidirectional);
         if self.verbose {
             println!("Total recombinations: {}", n_recombinations);
             println!("Total donor length: {}", total_donor_length);
