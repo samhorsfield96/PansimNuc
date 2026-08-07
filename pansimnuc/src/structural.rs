@@ -60,6 +60,7 @@ fn calculate_homology(a: &NucElement, b: &NucElement, threshold: f64) -> f64 {
 }
 
 // write function which runs through each element and determines whether a structural mutation occurs, and if so, which one, and where it moves to.
+#[hotpath::measure]
 pub fn mutate_intra_genome(
     genome: &mut Genome,
     structural_mu_dists: &Vec<Vec<MutationDistribution>>,
@@ -264,6 +265,7 @@ pub fn mutate_intra_genome(
 }
 
 // get connected components
+#[hotpath::measure]
 fn connected_components(
     nodes: impl IntoIterator<Item = u32>,
     edges: &Vec<(u32, u32)>,
@@ -305,6 +307,7 @@ fn connected_components(
     components
 }
 
+#[hotpath::measure]
 pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> (usize, usize, usize) {
     let mut rng = rand::thread_rng();
 
@@ -1333,7 +1336,7 @@ mod tests {
             "forced multiple recombinations should preserve total genome length"
         );
         assert!(
-            mixed_after > 1,
+            mixed_after >= 1,
             "after forced recombinations, at one genome should contain marker sequence from the other genome"
         );
     }

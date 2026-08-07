@@ -523,6 +523,7 @@ impl Population {
         }
     }
 
+    #[hotpath::measure]
     pub fn new(
         root: Vec<Vec<FeaturePos>>,
         n_genomes: usize,
@@ -543,18 +544,20 @@ impl Population {
         genome_size_penalty_per_bp: f64,
         compress_output: bool
     ) -> Self {
+        let total_elements = root.iter().map(|features| features.len()).sum::<usize>();
+
         // initialise population
-        let mut population: Vec<Genome> = Vec::new();
-        let mut genome: Vec<NucElement> = Vec::new();
+        let mut population: Vec<Genome> = Vec::with_capacity(n_genomes);
+        let mut genome: Vec<NucElement> = Vec::with_capacity(total_elements);
 
         // count for element ID, each NucElement gets own to signal it it's homology group
         let mut element_id: usize = 0;
 
         // initialise homology map, outermost loop is the homology group, middle loop is genomes, inner loop is positions
-        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::with_capacity(total_elements);
 
         // initialise feature map, maps feature ID to number of genes that should share same ID
-        let mut feature_map: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut feature_map: HashMap<usize, Vec<usize>> = HashMap::with_capacity(total_elements);
 
         // determine if tracking enabled
         let is_tracking = !tracking_regions.is_empty();
@@ -658,16 +661,12 @@ impl Population {
                 optimal_genome_size += feature.seq.len();
 
                 // generate homology map for this element, initially just self
-                let mut element_homology_map: Vec<Vec<usize>> = Vec::new();
-                for _ in 0..n_genomes {
-                    element_homology_map.push(vec![element_id]);
-                }
+                let element_homology_map: Vec<Vec<usize>> = vec![vec![element_id]; n_genomes];
                 homology_map.push(element_homology_map);
             }
         }
 
         // copy whole genome to start
-        let mut total_length = 0;
         for i in 0..n_genomes {
             let mut genome_entry = Genome {
                 identifier: format!("{}", i),
@@ -691,13 +690,12 @@ impl Population {
                 total_tracking_elements: 0,
             };
             genome_entry.update_contig_starts();
-            total_length += genome_entry.seq_length;
             population.push(genome_entry);
         }
 
         // placeholders, will be updated based on per-element average size in demography.rs
         let mu_dists = mu_dist_vals
-            .into_iter()
+            .iter()
             .map(|mu| {
                 MutationDistribution::new_poisson(*mu)
                     .expect("Failed to create poisson distribution for mutation rates")
@@ -705,13 +703,12 @@ impl Population {
             .collect();
             
         let indel_dists = indel_dist_vals
-            .into_iter()
+            .iter()
             .map(|mu| {
                 MutationDistribution::new_poisson(*mu)
                     .expect("Failed to create poisson distribution for indel rates")
             })
             .collect();
-
 
         let core_vec: Vec<Vec<u8>> =
             vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16]];
@@ -740,6 +737,7 @@ impl Population {
     }
 
     // mutate individuals in the population according to their mutation maps and the provided distributions
+    #[hotpath::measure]
     pub fn mutate(&mut self) -> (usize, usize) {
         let core_vec = &self.core_vec;
         let selection_dists = &self.selection_dists;
@@ -789,6 +787,7 @@ impl Population {
         (total_snps, total_indels)
     }
 
+    #[hotpath::measure]
     pub fn update_mu_dists(&mut self, mu_dist_vals: &Vec<f64>, indel_dist_vals: &Vec<f64>) {
         let (_, 
             total_exon_length, 
@@ -847,6 +846,7 @@ impl Population {
         self.indel_dists = new_indel_dists;
     }
 
+    #[hotpath::measure]
     pub fn structural_intra_genome(&mut self) {
         // probabilities for structural variations
         let pos_dist = MutationDistribution::new_poisson(1.0)
@@ -894,6 +894,7 @@ impl Population {
         self.update_homology_map();
     }
 
+    #[hotpath::measure]
     pub fn structural_inter_genome(&mut self, recombination_rate: f64, total_sites: usize, recombination_size_mean: f64, bidirectional: bool) {
         // generate recombination distributions
         let average_recombinations_per_generation = 
@@ -914,6 +915,7 @@ impl Population {
     }
 
     // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights
+    #[hotpath::measure]
     pub fn sample_individuals(&mut self, rng: &mut ThreadRng) -> Vec<usize> {
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
 
@@ -980,6 +982,7 @@ impl Population {
         sampled_indices
     }
 
+    #[hotpath::measure]
     pub fn next_generation(&mut self, sampled_indices: Vec<usize>) {
         let new_pop: Vec<Genome> = sampled_indices
             .par_iter()
@@ -1027,6 +1030,7 @@ impl Population {
         self.generation += 1;
     }
 
+    #[hotpath::measure]
     pub fn write_fasta(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
         let write_one = |genome: &Genome, prefix: String| -> io::Result<()> {
             let genome_output_path = Self::genome_output_path(output_path, &prefix, self.compress_output)?;
@@ -1113,6 +1117,7 @@ impl Population {
             })
     }
 
+    #[hotpath::measure]
     pub fn write_gff(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
         // calculate selection coefficients for all genomes once to avoid redundant calculations when writing attributes
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
