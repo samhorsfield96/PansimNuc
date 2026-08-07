@@ -1168,7 +1168,7 @@ mod tests {
             "single forced recombination should preserve total genome length"
         );
         assert!(
-            mixed_after > mixed_before,
+            mixed_after == 1,
             "after one forced recombination, at least one genome should contain marker sequence from the other genome"
         );
     }
@@ -1225,8 +1225,111 @@ mod tests {
             "forced multiple recombinations should preserve total genome length"
         );
         assert!(
-            mixed_after >= 1,
-            "after forced recombinations, at least one genome should contain marker sequence from the other genome"
+            mixed_after == 1,
+            "after forced recombinations, at one genome should contain marker sequence from the other genome"
+        );
+    }
+
+    #[test]
+    fn inter_genome_recombination_single_event_is_bidirectional() {
+        let mut population = make_recombination_test_population(1, 8);
+
+        let mixed_before = count_mixed_marker_genomes(&population);
+        assert_eq!(
+            mixed_before, 0,
+            "before recombination, genomes should not be mixed"
+        );
+
+        assert!(
+            !genome_has_marker(&population.pop[0], 2),
+            "before bidirectional recombination, genome 0 should not have marker sequence from genome 1"
+        );
+        assert!(
+            !genome_has_marker(&population.pop[1], 1),
+            "before ith bidirectional recombination, genome 1 should not have marker sequence from genome 0"
+        );
+
+        let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
+        let (successful_recombinations, _, _) = mutate_inter_genome(&mut population, true);
+        let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
+        let mixed_after = count_mixed_marker_genomes(&population);
+
+        assert_eq!(
+            population.pop.len(),
+            2,
+            "population size should be unchanged"
+        );
+        assert_eq!(
+            total_after, total_before,
+            "single forced bidirectional recombination should preserve total genome length"
+        );
+        assert!(
+            successful_recombinations >= 1,
+            "at least one recombination should succeed in this deterministic setup"
+        );
+        assert!(
+            genome_has_marker(&population.pop[0], 2),
+            "with bidirectional recombination, genome 0 should gain marker sequence from genome 1"
+        );
+        assert!(
+            genome_has_marker(&population.pop[1], 1),
+            "with bidirectional recombination, genome 1 should gain marker sequence from genome 0"
+        );
+        assert!(
+            mixed_after == 2,
+            "after forced recombinations, both genomes should contain marker sequence from the other genome"
+        );
+    }
+
+    #[test]
+    fn inter_genome_recombination_multiple_events_are_bidirectional() {
+        let forced_events = 3;
+        let mut population = make_recombination_test_population(forced_events, 8);
+
+        let mixed_before = count_mixed_marker_genomes(&population);
+        assert_eq!(
+            mixed_before, 0,
+            "before recombination, genomes should not be mixed"
+        );
+
+        assert!(
+            !genome_has_marker(&population.pop[0], 2),
+            "before bidirectional recombination, genome 0 should not have marker sequence from genome 1"
+        );
+        assert!(
+            !genome_has_marker(&population.pop[1], 1),
+            "before ith bidirectional recombination, genome 1 should not have marker sequence from genome 0"
+        );
+
+        let total_before: usize = population.pop.iter().map(|g| g.seq.len()).sum();
+        let (successful_recombinations, _, _) = mutate_inter_genome(&mut population, true);
+        let total_after: usize = population.pop.iter().map(|g| g.seq.len()).sum();
+        let mixed_after = count_mixed_marker_genomes(&population);
+
+        assert_eq!(
+            population.pop.len(),
+            2,
+            "population size should be unchanged"
+        );
+        assert_eq!(
+            total_after, total_before,
+            "forced multiple bidirectional recombinations should preserve total genome length"
+        );
+        assert!(
+            successful_recombinations >= 1,
+            "at least one recombination should succeed in this deterministic setup"
+        );
+        assert!(
+            genome_has_marker(&population.pop[0], 2),
+            "with bidirectional recombination, genome 0 should gain marker sequence from genome 1"
+        );
+        assert!(
+            genome_has_marker(&population.pop[1], 1),
+            "with bidirectional recombination, genome 1 should gain marker sequence from genome 0"
+        );
+        assert!(
+            mixed_after == 2,
+            "after forced recombinations, both genomes should contain marker sequence from the other genome"
         );
     }
 
