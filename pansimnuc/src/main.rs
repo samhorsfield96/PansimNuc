@@ -34,6 +34,7 @@ struct Args {
     config: Option<String>,
 }
 
+#[hotpath::main]
 fn main() {
     let args = Args::parse();
 

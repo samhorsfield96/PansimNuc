@@ -18,13 +18,14 @@ use std::sync::Arc;
 use flate2::Compression;
 use bgzip::BGZFWriter;
 use flate2::read::GzDecoder;
+use smallvec::{smallvec, SmallVec};
 
 #[derive(Clone)]
 pub struct NucElement {
     pub contig_id: usize,
     pub element_id: usize,
     pub feature_id: usize,
-    pub feature_type: String,
+    pub feature_type: Arc<str>,
     pub multiplier: f64,
     pub seq: Arc<Vec<u8>>,
     pub mutation_map: Arc<MutationMap>,
@@ -133,7 +134,7 @@ impl Genome {
             }
             total_length += element.seq.len();
             total_elements += 1;
-            match element.feature_type.as_str() {
+            match element.feature_type.as_ref() {
                 "exon" => total_exon_length += element.seq.len(),
                 "intron" => total_intron_length += element.seq.len(),
                 "intergenic" => total_intergenic_length += element.seq.len(),
@@ -142,7 +143,7 @@ impl Genome {
                 _ => {}
             }
 
-            match element.feature_type.as_str() {
+            match element.feature_type.as_ref() {
                 "exon" => total_exon_elements += 1,
                 "intron" => total_intron_elements += 1,
                 "intergenic" => total_intergenic_elements += 1,
@@ -186,7 +187,7 @@ pub struct Population {
     pub structural_mu_dists: Vec<Vec<MutationDistribution>>,
     pub recombination_dists: Vec<MutationDistribution>,
     pub recombination_threshold: f64,
-    pub homology_map: Vec<Vec<Vec<usize>>>, // Map from original element ID to positions of homologous regions in other genomes, outermost loop is the homology group, middle loop is genomes, inner loop is positions
+    pub homology_map: HomologyMap, // Map from original element ID to positions of homologous regions in other genomes, outermost loop is the homology group, middle loop is genomes, inner loop is positions
     pub feature_map: HashMap<usize, Vec<usize>>, // Map from feature ID to genes that share same ID
     pub max_multiplier_dist: usize,
     pub n_generations: usize,
@@ -196,6 +197,9 @@ pub struct Population {
     pub optimal_genome_size: usize,
     pub compress_output: bool
 }
+
+pub type HomologyPositions = SmallVec<[usize; 1]>;
+pub type HomologyMap = Vec<Vec<HomologyPositions>>;
 
 impl Population {
     pub fn total_seq_lengths(&self) -> (f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) {
@@ -268,7 +272,7 @@ impl Population {
         let max_multiplier_dist = self.max_multiplier_dist;
 
         // identify regions where order matters
-        if element.feature_type == "exon" || element.feature_type == "intron" {
+        if element.feature_type.as_ref() == "exon" || element.feature_type.as_ref() == "intron" {
             let feature_map_entry = self
                 .feature_map
                 .get(&element.feature_id)
@@ -301,7 +305,7 @@ impl Population {
                     && actual_element.strand == element.strand
                 {
                     // check if frameshift occurred, if so then feature is broken, as likely to be non-functional
-                    if actual_element.feature_type == "exon" && actual_element.frameshift {
+                    if actual_element.feature_type.as_ref() == "exon" && actual_element.frameshift {
                         feature_broken = true;
                         break;
                     } else {
@@ -346,7 +350,7 @@ impl Population {
                         && actual_element.strand == element.strand
                     {
                         // check if frameshift occurred, if so then feature is broken, as likely to be non-functional
-                        if actual_element.feature_type == "exon" && actual_element.frameshift {
+                        if actual_element.feature_type.as_ref() == "exon" && actual_element.frameshift {
                             feature_broken = true;
                             break;
                         } else {
@@ -523,6 +527,7 @@ impl Population {
         }
     }
 
+    #[hotpath::measure]
     pub fn new(
         root: Vec<Vec<FeaturePos>>,
         n_genomes: usize,
@@ -543,18 +548,20 @@ impl Population {
         genome_size_penalty_per_bp: f64,
         compress_output: bool
     ) -> Self {
+        let total_elements = root.iter().map(|features| features.len()).sum::<usize>();
+
         // initialise population
-        let mut population: Vec<Genome> = Vec::new();
-        let mut genome: Vec<NucElement> = Vec::new();
+        let mut population: Vec<Genome> = Vec::with_capacity(n_genomes);
+        let mut genome: Vec<NucElement> = Vec::with_capacity(total_elements);
 
         // count for element ID, each NucElement gets own to signal it it's homology group
         let mut element_id: usize = 0;
 
         // initialise homology map, outermost loop is the homology group, middle loop is genomes, inner loop is positions
-        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        let mut homology_map: HomologyMap = Vec::with_capacity(total_elements);
 
         // initialise feature map, maps feature ID to number of genes that should share same ID
-        let mut feature_map: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut feature_map: HashMap<usize, Vec<usize>> = HashMap::with_capacity(total_elements);
 
         // determine if tracking enabled
         let is_tracking = !tracking_regions.is_empty();
@@ -566,7 +573,7 @@ impl Population {
         for (contig_id, features) in root.iter().enumerate() {
             let mut current_start = 0;
             for feature in features {
-                let selection_dist_id: usize = match feature.feature_type.as_str() {
+                let selection_dist_id: usize = match feature.feature_type.as_ref() {
                     "exon" => 0,
                     "intron" => 1,
                     "intergenic" => 2,
@@ -575,7 +582,7 @@ impl Population {
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
-                let mu_dist_id: usize = match feature.feature_type.as_str() {
+                let mu_dist_id: usize = match feature.feature_type.as_ref() {
                     "exon" => 0,
                     "intron" => 1,
                     "intergenic" => 2,
@@ -584,7 +591,7 @@ impl Population {
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
-                let multiplier_dist: &MutationDistribution = match feature.feature_type.as_str() {
+                let multiplier_dist: &MutationDistribution = match feature.feature_type.as_ref() {
                     "exon" => &multiplier_dists[0],
                     "intron" => &multiplier_dists[1],
                     "intergenic" => &multiplier_dists[2],
@@ -593,7 +600,7 @@ impl Population {
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
-                let multiplier = match feature.feature_type.as_str() {
+                let multiplier = match feature.feature_type.as_ref() {
                     "exon" => 1.0,
                     "intron" => 1.0,
                     "intergenic" => 1.0,
@@ -614,7 +621,7 @@ impl Population {
                     contig_id: contig_id,
                     element_id: element_id,
                     feature_id: feature.feature_id,
-                    feature_type: feature.feature_type.clone(),
+                    feature_type: Arc::from(feature.feature_type.as_str()),
                     seq: Arc::new(feature.seq.clone()),
                     strand: feature.strand,
                     inverted: false,
@@ -652,22 +659,20 @@ impl Population {
                 element.calculate_element_selection_coefficient();
 
                 genome.push(element);
-                element_id += 1;
                 current_start += feature.seq.len();
 
                 optimal_genome_size += feature.seq.len();
 
-                // generate homology map for this element, initially just self
-                let mut element_homology_map: Vec<Vec<usize>> = Vec::new();
-                for _ in 0..n_genomes {
-                    element_homology_map.push(vec![element_id]);
-                }
+                // generate homology map for this element, initially one position per genome
+                let element_homology_map: Vec<HomologyPositions> =
+                    vec![smallvec![element_id]; n_genomes];
                 homology_map.push(element_homology_map);
+
+                element_id += 1;
             }
         }
 
         // copy whole genome to start
-        let mut total_length = 0;
         for i in 0..n_genomes {
             let mut genome_entry = Genome {
                 identifier: format!("{}", i),
@@ -691,13 +696,12 @@ impl Population {
                 total_tracking_elements: 0,
             };
             genome_entry.update_contig_starts();
-            total_length += genome_entry.seq_length;
             population.push(genome_entry);
         }
 
         // placeholders, will be updated based on per-element average size in demography.rs
         let mu_dists = mu_dist_vals
-            .into_iter()
+            .iter()
             .map(|mu| {
                 MutationDistribution::new_poisson(*mu)
                     .expect("Failed to create poisson distribution for mutation rates")
@@ -705,13 +709,12 @@ impl Population {
             .collect();
             
         let indel_dists = indel_dist_vals
-            .into_iter()
+            .iter()
             .map(|mu| {
                 MutationDistribution::new_poisson(*mu)
                     .expect("Failed to create poisson distribution for indel rates")
             })
             .collect();
-
 
         let core_vec: Vec<Vec<u8>> =
             vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16]];
@@ -740,6 +743,7 @@ impl Population {
     }
 
     // mutate individuals in the population according to their mutation maps and the provided distributions
+    #[hotpath::measure]
     pub fn mutate(&mut self) -> (usize, usize) {
         let core_vec = &self.core_vec;
         let selection_dists = &self.selection_dists;
@@ -789,6 +793,7 @@ impl Population {
         (total_snps, total_indels)
     }
 
+    #[hotpath::measure]
     pub fn update_mu_dists(&mut self, mu_dist_vals: &Vec<f64>, indel_dist_vals: &Vec<f64>) {
         let (_, 
             total_exon_length, 
@@ -847,6 +852,7 @@ impl Population {
         self.indel_dists = new_indel_dists;
     }
 
+    #[hotpath::measure]
     pub fn structural_intra_genome(&mut self) {
         // probabilities for structural variations
         let pos_dist = MutationDistribution::new_poisson(1.0)
@@ -894,6 +900,7 @@ impl Population {
         self.update_homology_map();
     }
 
+    #[hotpath::measure]
     pub fn structural_inter_genome(&mut self, recombination_rate: f64, total_sites: usize, recombination_size_mean: f64, bidirectional: bool) {
         // generate recombination distributions
         let average_recombinations_per_generation = 
@@ -914,6 +921,7 @@ impl Population {
     }
 
     // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights
+    #[hotpath::measure]
     pub fn sample_individuals(&mut self, rng: &mut ThreadRng) -> Vec<usize> {
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
 
@@ -980,6 +988,7 @@ impl Population {
         sampled_indices
     }
 
+    #[hotpath::measure]
     pub fn next_generation(&mut self, sampled_indices: Vec<usize>) {
         let new_pop: Vec<Genome> = sampled_indices
             .par_iter()
@@ -1010,7 +1019,7 @@ impl Population {
             })
             .collect();
 
-        let new_homology_map: Vec<Vec<Vec<usize>>> = self
+        let new_homology_map: HomologyMap = self
             .homology_map
             .par_iter()
             .map(|element_homology_map| {
@@ -1027,6 +1036,7 @@ impl Population {
         self.generation += 1;
     }
 
+    #[hotpath::measure]
     pub fn write_fasta(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
         let write_one = |genome: &Genome, prefix: String| -> io::Result<()> {
             let genome_output_path = Self::genome_output_path(output_path, &prefix, self.compress_output)?;
@@ -1113,6 +1123,7 @@ impl Population {
             })
     }
 
+    #[hotpath::measure]
     pub fn write_gff(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
         // calculate selection coefficients for all genomes once to avoid redundant calculations when writing attributes
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
@@ -1335,12 +1346,12 @@ mod tests {
             // Check first feature
             assert_eq!(genome.seq[0].contig_id, 0);
             assert_eq!(genome.seq[0].feature_id, 0);
-            assert_eq!(genome.seq[0].feature_type, "exon");
+            assert_eq!(genome.seq[0].feature_type.as_ref(), "exon");
 
             // Check second feature
             assert_eq!(genome.seq[1].contig_id, 0);
             assert_eq!(genome.seq[1].feature_id, 1);
-            assert_eq!(genome.seq[1].feature_type, "intron");
+            assert_eq!(genome.seq[1].feature_type.as_ref(), "intron");
         }
     }
 
@@ -2030,7 +2041,7 @@ mod tests {
         let idx = genome
             .seq
             .iter()
-            .position(|element| element.feature_id == 1 && element.feature_type == "intron")
+            .position(|element| element.feature_id == 1 && element.feature_type.as_ref() == "intron")
             .expect("expected intron in feature block");
         pop.check_feature_order(genome, idx, &genome.seq[idx])
     }
@@ -2039,7 +2050,7 @@ mod tests {
         let idx = genome
             .seq
             .iter()
-            .position(|element| element.feature_id == feature_id && element.feature_type == "exon")
+            .position(|element| element.feature_id == feature_id && element.feature_type.as_ref() == "exon")
             .expect("expected exon in feature block");
         pop.check_feature_order(genome, idx, &genome.seq[idx])
     }
@@ -2059,7 +2070,7 @@ mod tests {
         let mut seq = pop.pop[0].seq.clone();
 
         let mut inserted_te = seq[0].clone();
-        inserted_te.feature_type = "TE-CUT".to_string();
+        inserted_te.feature_type = Arc::from("TE-CUT");
         inserted_te.feature_id = 0;
         inserted_te.multiplier = 2.0;
         inserted_te.element_id = 10_000;
@@ -2080,7 +2091,7 @@ mod tests {
         let exon_idx = genome
             .seq
             .iter()
-            .position(|element| element.feature_id == 1 && element.feature_type == "exon")
+            .position(|element| element.feature_id == 1 && element.feature_type.as_ref() == "exon")
             .expect("expected exon in feature block");
         let (broken, _) = pop.check_feature_order(&genome, exon_idx, &genome.seq[exon_idx]);
         assert!(broken);
@@ -2137,14 +2148,14 @@ mod tests {
         let mut seq = pop.pop[0].seq.clone();
 
         let mut upstream_te = seq[0].clone();
-        upstream_te.feature_type = "TE-CUT".to_string();
+        upstream_te.feature_type = Arc::from("TE-CUT");
         upstream_te.feature_id = 0;
         upstream_te.multiplier = 2.0;
         upstream_te.element_id = 20_000;
         seq.insert(1, upstream_te);
 
         let mut downstream_te = seq[0].clone();
-        downstream_te.feature_type = "TE-COPY".to_string();
+        downstream_te.feature_type = Arc::from("TE-COPY");
         downstream_te.feature_id = 0;
         downstream_te.multiplier = 3.5;
         downstream_te.element_id = 20_001;
@@ -2164,14 +2175,14 @@ mod tests {
         pop.max_multiplier_dist = 10; // ensure the TEs we add are within the max multiplier distance
 
         let mut upstream_te = seq[0].clone();
-        upstream_te.feature_type = "TE-CUT".to_string();
+        upstream_te.feature_type = Arc::from("TE-CUT");
         upstream_te.feature_id = 0;
         upstream_te.multiplier = 2.0;
         upstream_te.element_id = 20_000;
         seq.insert(0, upstream_te);
 
         let mut downstream_te = seq[0].clone();
-        downstream_te.feature_type = "TE-COPY".to_string();
+        downstream_te.feature_type = Arc::from("TE-COPY");
         downstream_te.feature_id = 0;
         downstream_te.multiplier = 3.5;
         downstream_te.element_id = 20_001;
@@ -2198,14 +2209,14 @@ mod tests {
         pop.max_multiplier_dist = 2; // ensure the TEs we add are not within the max multiplier distance
 
         let mut upstream_te = seq[0].clone();
-        upstream_te.feature_type = "TE-CUT".to_string();
+        upstream_te.feature_type = Arc::from("TE-CUT");
         upstream_te.feature_id = 0;
         upstream_te.multiplier = 2.0;
         upstream_te.element_id = 20_000;
         seq.insert(0, upstream_te);
 
         let mut downstream_te = seq[0].clone();
-        downstream_te.feature_type = "TE-COPY".to_string();
+        downstream_te.feature_type = Arc::from("TE-COPY");
         downstream_te.feature_id = 0;
         downstream_te.multiplier = 3.5;
         downstream_te.element_id = 20_001;
@@ -2230,28 +2241,28 @@ mod tests {
         let mut seq = pop.pop[0].seq.clone();
 
         let mut upstream_intergenic = seq[0].clone();
-        upstream_intergenic.feature_type = "intergenic".to_string();
+        upstream_intergenic.feature_type = Arc::from("intergenic");
         upstream_intergenic.feature_id = 0;
         upstream_intergenic.multiplier = 1.5;
         upstream_intergenic.element_id = 10_000;
         seq.insert(0, upstream_intergenic);
 
         let mut upstream_te = seq[0].clone();
-        upstream_te.feature_type = "TE-CUT".to_string();
+        upstream_te.feature_type = Arc::from("TE-CUT");
         upstream_te.feature_id = 0;
         upstream_te.multiplier = 0.25;
         upstream_te.element_id = 20_000;
         seq.insert(0, upstream_te);
 
         let mut downstream_intergenic = seq[0].clone();
-        downstream_intergenic.feature_type = "intergenic".to_string();
+        downstream_intergenic.feature_type = Arc::from("intergenic");
         downstream_intergenic.feature_id = 0;
         downstream_intergenic.multiplier = 0.5;
         downstream_intergenic.element_id = 15_000;
         seq.push(downstream_intergenic);
 
         let mut downstream_te = seq[0].clone();
-        downstream_te.feature_type = "TE-COPY".to_string();
+        downstream_te.feature_type = Arc::from("TE-COPY");
         downstream_te.feature_id = 0;
         downstream_te.multiplier = 3.5;
         downstream_te.element_id = 20_001;
@@ -2321,7 +2332,7 @@ mod tests {
             contig_id: 0,
             element_id: 0,
             feature_id: feature_id,
-            feature_type: "exon".to_string(),
+            feature_type: Arc::from("exon"),
             multiplier: 1.0,
             seq: seq.clone().into(),
             mutation_map: mutation_map.into(),
@@ -2375,12 +2386,12 @@ mod tests {
 
         let neutral = {
             let mut e = make_test_element_with_coefficients(1,vec![1u8], &[(0, 1u8, 0.0)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             e
         };
         let lethal = {
             let mut e = make_test_element_with_coefficients(2,vec![2u8], &[(0, 2u8, -1.0)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             e
         };
 
@@ -2403,13 +2414,13 @@ mod tests {
                 vec![1u8, 2u8],
                 &[(0, 1u8, 0.5), (1, 2u8, 0.3)],
             );
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             e.element_id = 0;
             e
         };
         let e2 = {
             let mut e = make_test_element_with_coefficients(1,vec![4u8], &[(0, 4u8, 0.2)]);
-            e.feature_type = "exon".to_string();
+            e.feature_type = Arc::from("exon");
             e.element_id = 1;
             e
         };
@@ -2436,7 +2447,7 @@ mod tests {
                 vec![1u8, 2u8],
                 &[(0, 1u8, 0.5), (1, 2u8, 0.3)],
             );
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             e.element_id = 0;
             e
         };
@@ -2445,7 +2456,7 @@ mod tests {
                 1, 
                 vec![4u8], 
                 &[(0, 4u8, 0.2)]);
-            e.feature_type = "exon".to_string();
+            e.feature_type = Arc::from("exon");
             e.element_id = 1;
             e
         };
@@ -2469,7 +2480,7 @@ mod tests {
         // Being 1 position upstream of the exon, its multiplier=2.0 scales e2's contribution.
         let te = {
             let mut e = make_test_element_with_coefficients(0, vec![1u8], &[(0, 1u8, 1.0)]);
-            e.feature_type = "TE-CUT".to_string();
+            e.feature_type = Arc::from("TE-CUT");
             e.element_id = 99_999;
             e.multiplier = 2.0;
             e
@@ -2521,17 +2532,17 @@ mod tests {
         // Build three genomes: two viable and one lethal.
         let g1 = {
             let mut e = make_test_element_with_coefficients(0, vec![1u8], &[(0, 1u8, 0.2)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             genome_from_seq(vec![e])
         };
         let g2 = {
             let mut e = make_test_element_with_coefficients(0, vec![2u8], &[(0, 2u8, 0.8)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             genome_from_seq(vec![e])
         };
         let g3 = {
             let mut e = make_test_element_with_coefficients(0, vec![4u8], &[(0, 4u8, 0.1)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             genome_from_seq(vec![e])
         };
 
@@ -2561,17 +2572,17 @@ mod tests {
         // Build three genomes: two viable and one lethal.
         let g1 = {
             let mut e = make_test_element_with_coefficients(0, vec![1u8], &[(0, 1u8, 0.2)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             genome_from_seq(vec![e])
         };
         let g2 = {
             let mut e = make_test_element_with_coefficients(0, vec![2u8], &[(0, 2u8, 0.8)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             genome_from_seq(vec![e])
         };
         let g3 = {
             let mut e = make_test_element_with_coefficients(0, vec![4u8], &[(0, 4u8, -1.0)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             genome_from_seq(vec![e])
         };
 

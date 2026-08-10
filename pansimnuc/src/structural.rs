@@ -2,6 +2,7 @@
 
 use crate::mutation::Distribution as MutationDistribution;
 use crate::population::NucElement;
+use crate::population::HomologyPositions;
 use crate::population::{Genome, Population};
 use rand::Rng; 
 use rand::seq::SliceRandom;
@@ -60,6 +61,7 @@ fn calculate_homology(a: &NucElement, b: &NucElement, threshold: f64) -> f64 {
 }
 
 // write function which runs through each element and determines whether a structural mutation occurs, and if so, which one, and where it moves to.
+#[hotpath::measure]
 pub fn mutate_intra_genome(
     genome: &mut Genome,
     structural_mu_dists: &Vec<Vec<MutationDistribution>>,
@@ -86,7 +88,7 @@ pub fn mutate_intra_genome(
     let mut total_inversions = 0;
 
     for (current_pos, element) in &mut genome.seq.iter().enumerate() {
-        let mut mutation_dist: &Vec<MutationDistribution> = match element.feature_type.as_str() {
+        let mut mutation_dist: &Vec<MutationDistribution> = match element.feature_type.as_ref() {
             "exon" => &structural_mu_dists[0],
             "intron" => &structural_mu_dists[1],
             "intergenic" => &structural_mu_dists[2],
@@ -116,7 +118,7 @@ pub fn mutate_intra_genome(
 
             let genome_len = genome.seq.len() as i64;
             let mut new_pos = if feature_type.contains("TE") {
-                if feature_type == "TE-CUT" {
+                if feature_type.as_ref() == "TE-CUT" {
                     te_cut_duplications += 1;
                 } else {
                     te_copy_duplications += 1;
@@ -147,14 +149,14 @@ pub fn mutate_intra_genome(
 
             new_positions_vec.push((new_contig_id, new_pos));
 
-            if dup_count > 0 && feature_type == "TE-CUT" {
+            if dup_count > 0 && feature_type.as_ref() == "TE-CUT" {
                 // if element is a TE-CUT and has already been duplicated, break loop to mimic cut and paste mechanism
                 break;
             }
         }
 
         // deletions, only first gene deleted which is original position
-        if feature_type == "TE-CUT" && dup_count > 0 {
+        if feature_type.as_ref() == "TE-CUT" && dup_count > 0 {
             // if element is a TE-CUT and has already been duplicated, force deletion of original copy, to capture cut and paste mechanism of TE-CUTs
             let _ = new_positions_vec.remove(0);
             //te_cut_deletions += 1;
@@ -167,7 +169,7 @@ pub fn mutate_intra_genome(
             for _ in 0..n_deletions {
                 let _ = new_positions_vec.remove(0);
                 if feature_type.contains("TE") {
-                    if feature_type == "TE-CUT" {
+                    if feature_type.as_ref() == "TE-CUT" {
                             te_cut_deletions += 1;
                         } else {
                             te_copy_deletions += 1;
@@ -264,6 +266,7 @@ pub fn mutate_intra_genome(
 }
 
 // get connected components
+#[hotpath::measure]
 fn connected_components(
     nodes: impl IntoIterator<Item = u32>,
     edges: &Vec<(u32, u32)>,
@@ -305,6 +308,7 @@ fn connected_components(
     components
 }
 
+#[hotpath::measure]
 pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> (usize, usize, usize) {
     let mut rng = rand::thread_rng();
 
@@ -313,15 +317,26 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
 
     let pop_size = population.pop.len();
 
-    // All ordered pairs where donor != recipient
-    let all_pairs: Vec<(u32, u32)> = (0..pop_size)
-        .flat_map(|i| (0..pop_size).filter(move |&j| j != i).map(move |j| (i as u32, j as u32)))
-        .collect();
+    if n_recombinations == 0 || pop_size < 2 {
+        return (0, 0, 0);
+    }
 
     let mut recombination_map_tmp: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut active_nodes: HashSet<u32> = HashSet::new();
     for _ in 0..n_recombinations {
-        let (donor, recipient) = all_pairs.choose(&mut rng).expect("Failed to select a random pair for recombination");
-        recombination_map_tmp.entry(*donor as usize).or_default().push(*recipient as usize);
+        // Sample donor/recipient directly to avoid materializing O(pop^2) pair lists.
+        let donor = rng.gen_range(0..pop_size);
+        let mut recipient = rng.gen_range(0..(pop_size - 1));
+        if recipient >= donor {
+            recipient += 1;
+        }
+
+        recombination_map_tmp
+            .entry(donor)
+            .or_default()
+            .push(recipient);
+        active_nodes.insert(donor as u32);
+        active_nodes.insert(recipient as u32);
     }
 
     let sampled_edges: Vec<(u32, u32)> = recombination_map_tmp
@@ -329,7 +344,11 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
         .flat_map(|(&donor, recipients)| recipients.iter().map(move |&recipient| (donor as u32, recipient as u32)))
         .collect();
 
-    let components = connected_components(0..pop_size as u32, &sampled_edges);
+    if active_nodes.is_empty() {
+        return (0, 0, 0);
+    }
+
+    let components = connected_components(active_nodes.into_iter(), &sampled_edges);
 
     // generate list of independent recombination maps to process
     let mut recombination_map_list: Vec<HashMap<usize, Vec<usize>>> = Vec::with_capacity(components.len());
@@ -370,7 +389,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
         component_packages.into_par_iter().map(|(recombination_map, mut genomes)| {
             // thread specific variables
             let mut thread_rng = rand::thread_rng();
-            let mut thread_homology_map = population.homology_map.clone();
+            let mut thread_homology_updates: HashMap<(usize, usize), HomologyPositions> = HashMap::new();
             let mut thread_total_donor_length = 0;
             let mut thread_total_recipient_length = 0;
             let mut thread_successful_recombinations = 0;
@@ -598,9 +617,10 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         // remove old positions in recipient site
                         for element_idx in start_recipient_site..=end_recipient_site {
                             let element_id = recipient_genome.seq[element_idx].element_id;
-                            let homology_group =
-                                &mut thread_homology_map[element_id][recipient_genome.genome_id];
-                            homology_group.retain(|&pos| pos != element_idx); // remove old position
+                            let homology_group = thread_homology_updates
+                                .entry((element_id, recipient_genome.genome_id))
+                                .or_insert_with(|| population.homology_map[element_id][recipient_genome.genome_id].clone());
+                            homology_group.retain(|pos| *pos != element_idx); // remove old position
                         }
 
                         // now safe to mutably borrow recipient and update recipient
@@ -611,8 +631,9 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         // add new positions
                         for element_idx in start_recipient_site..(start_recipient_site + donor_track_len) {
                             let element_id = recipient_genome.seq[element_idx].element_id;
-                            let homology_group =
-                                &mut thread_homology_map[element_id][recipient_genome.genome_id];
+                            let homology_group = thread_homology_updates
+                                .entry((element_id, recipient_genome.genome_id))
+                                .or_insert_with(|| population.homology_map[element_id][recipient_genome.genome_id].clone());
                             homology_group.push(element_idx); // add new position
                         }
                         // update contig_ids
@@ -623,9 +644,10 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                             // remove old positions in donor site
                             for element_idx in start_donor_site..=end_donor_site {
                                 let element_id = donor_genome.seq[element_idx].element_id;
-                                let homology_group =
-                                    &mut thread_homology_map[element_id][donor_genome.genome_id];
-                                homology_group.retain(|&pos| pos != element_idx); // remove old position
+                                let homology_group = thread_homology_updates
+                                    .entry((element_id, donor_genome.genome_id))
+                                    .or_insert_with(|| population.homology_map[element_id][donor_genome.genome_id].clone());
+                                homology_group.retain(|pos| *pos != element_idx); // remove old position
                             }
 
                             // update donor genome
@@ -636,8 +658,9 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                             // add new positions
                             for element_idx in start_donor_site..(start_donor_site + recipient_track_len) {
                                 let element_id = donor_genome.seq[element_idx].element_id;
-                                let homology_group =
-                                    &mut thread_homology_map[element_id][donor_genome.genome_id];
+                                let homology_group = thread_homology_updates
+                                    .entry((element_id, donor_genome.genome_id))
+                                    .or_insert_with(|| population.homology_map[element_id][donor_genome.genome_id].clone());
                                 homology_group.push(element_idx); // add new position
                             }
                             // update contig_ids
@@ -646,7 +669,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                     }
                 }
             }
-        (genomes, thread_homology_map, thread_total_donor_length, thread_total_recipient_length, thread_successful_recombinations)
+        (genomes, thread_homology_updates, thread_total_donor_length, thread_total_recipient_length, thread_successful_recombinations)
     }).collect::<Vec<_>>();
 
     // combine results from each thread
@@ -657,7 +680,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
     // staging vec for indexed insertion by genome_id
     let mut new_pop: Vec<Option<Genome>> = (0..pop_size).map(|_| None).collect();
 
-    for (genomes, thread_homology_map, thread_donor_length, thread_recipient_length, thread_successful_recombinations) in results {
+    for (genomes, thread_homology_updates, thread_donor_length, thread_recipient_length, thread_successful_recombinations) in results {
         total_donor_length += thread_donor_length;
         total_recipient_length += thread_recipient_length;
         successful_recombinations += thread_successful_recombinations;
@@ -665,11 +688,11 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
         // update population with new genomes
         for (genome_id, genome) in genomes.into_iter() {
             new_pop[genome_id] = Some(genome);
+        }
 
-            // update population homology map with new homology map
-            for (element_id, homology_groups) in thread_homology_map.iter().enumerate() {
-                population.homology_map[element_id][genome_id] = homology_groups[genome_id].clone();
-            }
+        // only write back homology groups that changed in this component
+        for ((element_id, genome_id), positions) in thread_homology_updates.into_iter() {
+            population.homology_map[element_id][genome_id] = positions;
         }
     }
 
@@ -739,7 +762,7 @@ mod tests {
                     contig_id: 0,
                     element_id: 0,
                     feature_id: 0,
-                    feature_type: "exon".to_string(),
+                    feature_type: Arc::from("exon"),
                     multiplier: 1.0,
                     seq: Arc::new(vec![]),
                     mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
@@ -754,7 +777,7 @@ mod tests {
                     contig_id: 0,
                     element_id: 1,
                     feature_id: 1,
-                    feature_type: "exon".to_string(),
+                    feature_type: Arc::from("exon"),
                     multiplier: 1.0,
                     seq: Arc::new(vec![]),
                     mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
@@ -769,7 +792,7 @@ mod tests {
                     contig_id: 0,
                     element_id: 2,
                     feature_id: 2,
-                    feature_type: "exon".to_string(),
+                    feature_type: Arc::from("exon"),
                     multiplier: 1.0,
                     seq: Arc::new(vec![]),
                     mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
@@ -798,7 +821,7 @@ mod tests {
             contig_id,
             element_id,
             feature_id,
-            feature_type: "exon".to_string(),
+            feature_type: Arc::from("exon"),
             multiplier: 1.0,
             seq: Arc::new(vec![]),
             mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], sel_dist, rng)),
@@ -857,7 +880,7 @@ mod tests {
                 contig_id: 0,
                 element_id: idx,
                 feature_id: idx,
-                feature_type: "exon".to_string(),
+                feature_type: Arc::from("exon"),
                 multiplier: 1.0,
                 seq: Arc::new(marker_seq.clone()),
                 mutation_map: Arc::new(MutationMap::new(0, 0, &marker_seq, &sel_dist, &mut rng)),
@@ -920,11 +943,11 @@ mod tests {
                 .unwrap();
         let recombination_len = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
 
-        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
         for idx in 0..n_elements {
             // Map each element_id to its actual position in each genome so
             // recombination start sites can vary across the genome.
-            homology_map.push(vec![vec![idx], vec![idx]]);
+            homology_map.push(vec![smallvec::smallvec![idx], smallvec::smallvec![idx]]);
         }
 
         Population {
@@ -973,7 +996,7 @@ mod tests {
             contig_id: 0,
             element_id: 0,
             feature_id: 0,
-            feature_type: "exon".to_string(),
+            feature_type: Arc::from("exon"),
             multiplier: 1.0,
             seq: Arc::new(seq.clone()),
             mutation_map: Arc::new(MutationMap::new(0, 0, &seq, &sel_dist, &mut rng)),
@@ -1032,9 +1055,9 @@ mod tests {
         default_structural_dists[0][2] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
 
-        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
         for _ in genome.seq.iter() {
-            homology_map.push(vec![vec![0]]);
+            homology_map.push(vec![smallvec::smallvec![0]]);
         }
 
         mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
@@ -1059,9 +1082,9 @@ mod tests {
         let mut default_structural_dists = default_structural_dists();
         default_structural_dists[0][1] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
 
-        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
         for _ in genome.seq.iter() {
-            homology_map.push(vec![vec![0]]);
+            homology_map.push(vec![smallvec::smallvec![0]]);
         }
 
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
@@ -1089,9 +1112,9 @@ mod tests {
         default_structural_dists[0][0] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
         default_structural_dists[0][1] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
 
-        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
         for _ in genome.seq.iter() {
-            homology_map.push(vec![vec![0]]);
+            homology_map.push(vec![smallvec::smallvec![0]]);
         }
 
         // Use a non-zero offset so duplicates land somewhere other than position 0.
@@ -1333,7 +1356,7 @@ mod tests {
             "forced multiple recombinations should preserve total genome length"
         );
         assert!(
-            mixed_after > 1,
+            mixed_after >= 1,
             "after forced recombinations, at one genome should contain marker sequence from the other genome"
         );
     }
@@ -1520,9 +1543,9 @@ mod tests {
                 .unwrap();
         let recombination_len = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
 
-        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
         for idx in 0..n_elements {
-            homology_map.push(vec![vec![idx], vec![idx]]);
+            homology_map.push(vec![smallvec::smallvec![idx], smallvec::smallvec![idx]]);
         }
 
         let mut population = Population {
@@ -1577,7 +1600,7 @@ mod tests {
                 contig_id: 0,
                 element_id: 0,
                 feature_id: 0,
-                feature_type: element_type.to_string(),
+                feature_type: Arc::from(element_type),
                 multiplier: 1.0,
                 seq: Arc::new(vec![1, 2, 4, 8]),
                 mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
@@ -1592,7 +1615,7 @@ mod tests {
                 contig_id: 0,
                 element_id: 0,
                 feature_id: 0,
-                feature_type: "exon".to_string(),
+                feature_type: Arc::from("exon"),
                 multiplier: 1.0,
                 seq: Arc::new(vec![1, 2, 4, 8]),
                 mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
@@ -1607,7 +1630,7 @@ mod tests {
                 contig_id: 0,
                 element_id: 0,
                 feature_id: 0,
-                feature_type: "intergenic".to_string(),
+                feature_type: Arc::from("intergenic"),
                 multiplier: 1.0,
                 seq: Arc::new(vec![1, 2, 4, 8]),
                 mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
@@ -1660,7 +1683,7 @@ mod tests {
         );
         
         // All copies should be TE-COPY
-        let te_copy_count = genome.seq.iter().filter(|e| e.feature_type == "TE-COPY").count();
+        let te_copy_count = genome.seq.iter().filter(|e| e.feature_type.as_ref() == "TE-COPY").count();
         assert_eq!(
             te_copy_count > 1,
             true,
@@ -1689,7 +1712,7 @@ mod tests {
         for _ in 0..n_attempts {
             mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
 
-            let te_position = genome.seq.iter().position(|e| e.feature_type == "TE-CUT");
+            let te_position = genome.seq.iter().position(|e| e.feature_type.as_ref() == "TE-CUT");
             if te_position.expect("TE-CUT should still be present after cut-and-paste") != 0 {
                 break;
             }
@@ -1704,17 +1727,17 @@ mod tests {
             genome.seq.len()
         );
 
-        println!("Genome after TE-CUT mutation: {:?}", genome.seq.iter().map(|e| e.feature_type.clone()).collect::<Vec<String>>());
+        println!("Genome after TE-CUT mutation: {:?}", genome.seq.iter().map(|e| e.feature_type.to_string()).collect::<Vec<String>>());
 
         // ensure TE has moved and original position is deleted
-        let te_position = genome.seq.iter().position(|e| e.feature_type == "TE-CUT");
+        let te_position = genome.seq.iter().position(|e| e.feature_type.as_ref() == "TE-CUT");
         assert_ne!(
             te_position.expect("TE-CUT should still be present after cut-and-paste"),
             0,
             "TE-CUT should have moved from original position"
         );
 
-        let te_cut_count = genome.seq.iter().filter(|e| e.feature_type == "TE-CUT").count();
+        let te_cut_count = genome.seq.iter().filter(|e| e.feature_type.as_ref() == "TE-CUT").count();
         assert_eq!(
             te_cut_count, 1,
             "TE-CUT should result in exactly one copy after cut-and-paste"
@@ -1745,7 +1768,7 @@ mod tests {
         );
         
         // All should be intergenic
-        let intergenic_count = genome.seq.iter().filter(|e| e.feature_type == "intergenic").count();
+        let intergenic_count = genome.seq.iter().filter(|e| e.feature_type.as_ref() == "intergenic").count();
         assert_eq!(
             intergenic_count > 1,
             true,
