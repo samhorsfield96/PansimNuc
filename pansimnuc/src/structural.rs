@@ -316,15 +316,26 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
 
     let pop_size = population.pop.len();
 
-    // All ordered pairs where donor != recipient
-    let all_pairs: Vec<(u32, u32)> = (0..pop_size)
-        .flat_map(|i| (0..pop_size).filter(move |&j| j != i).map(move |j| (i as u32, j as u32)))
-        .collect();
+    if n_recombinations == 0 || pop_size < 2 {
+        return (0, 0, 0);
+    }
 
     let mut recombination_map_tmp: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut active_nodes: HashSet<u32> = HashSet::new();
     for _ in 0..n_recombinations {
-        let (donor, recipient) = all_pairs.choose(&mut rng).expect("Failed to select a random pair for recombination");
-        recombination_map_tmp.entry(*donor as usize).or_default().push(*recipient as usize);
+        // Sample donor/recipient directly to avoid materializing O(pop^2) pair lists.
+        let donor = rng.gen_range(0..pop_size);
+        let mut recipient = rng.gen_range(0..(pop_size - 1));
+        if recipient >= donor {
+            recipient += 1;
+        }
+
+        recombination_map_tmp
+            .entry(donor)
+            .or_default()
+            .push(recipient);
+        active_nodes.insert(donor as u32);
+        active_nodes.insert(recipient as u32);
     }
 
     let sampled_edges: Vec<(u32, u32)> = recombination_map_tmp
@@ -332,7 +343,11 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
         .flat_map(|(&donor, recipients)| recipients.iter().map(move |&recipient| (donor as u32, recipient as u32)))
         .collect();
 
-    let components = connected_components(0..pop_size as u32, &sampled_edges);
+    if active_nodes.is_empty() {
+        return (0, 0, 0);
+    }
+
+    let components = connected_components(active_nodes.into_iter(), &sampled_edges);
 
     // generate list of independent recombination maps to process
     let mut recombination_map_list: Vec<HashMap<usize, Vec<usize>>> = Vec::with_capacity(components.len());
@@ -373,7 +388,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
         component_packages.into_par_iter().map(|(recombination_map, mut genomes)| {
             // thread specific variables
             let mut thread_rng = rand::thread_rng();
-            let mut thread_homology_map = population.homology_map.clone();
+            let mut thread_homology_updates: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
             let mut thread_total_donor_length = 0;
             let mut thread_total_recipient_length = 0;
             let mut thread_successful_recombinations = 0;
@@ -601,8 +616,9 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         // remove old positions in recipient site
                         for element_idx in start_recipient_site..=end_recipient_site {
                             let element_id = recipient_genome.seq[element_idx].element_id;
-                            let homology_group =
-                                &mut thread_homology_map[element_id][recipient_genome.genome_id];
+                            let homology_group = thread_homology_updates
+                                .entry((element_id, recipient_genome.genome_id))
+                                .or_insert_with(|| population.homology_map[element_id][recipient_genome.genome_id].clone());
                             homology_group.retain(|&pos| pos != element_idx); // remove old position
                         }
 
@@ -614,8 +630,9 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         // add new positions
                         for element_idx in start_recipient_site..(start_recipient_site + donor_track_len) {
                             let element_id = recipient_genome.seq[element_idx].element_id;
-                            let homology_group =
-                                &mut thread_homology_map[element_id][recipient_genome.genome_id];
+                            let homology_group = thread_homology_updates
+                                .entry((element_id, recipient_genome.genome_id))
+                                .or_insert_with(|| population.homology_map[element_id][recipient_genome.genome_id].clone());
                             homology_group.push(element_idx); // add new position
                         }
                         // update contig_ids
@@ -626,8 +643,9 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                             // remove old positions in donor site
                             for element_idx in start_donor_site..=end_donor_site {
                                 let element_id = donor_genome.seq[element_idx].element_id;
-                                let homology_group =
-                                    &mut thread_homology_map[element_id][donor_genome.genome_id];
+                                let homology_group = thread_homology_updates
+                                    .entry((element_id, donor_genome.genome_id))
+                                    .or_insert_with(|| population.homology_map[element_id][donor_genome.genome_id].clone());
                                 homology_group.retain(|&pos| pos != element_idx); // remove old position
                             }
 
@@ -639,8 +657,9 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                             // add new positions
                             for element_idx in start_donor_site..(start_donor_site + recipient_track_len) {
                                 let element_id = donor_genome.seq[element_idx].element_id;
-                                let homology_group =
-                                    &mut thread_homology_map[element_id][donor_genome.genome_id];
+                                let homology_group = thread_homology_updates
+                                    .entry((element_id, donor_genome.genome_id))
+                                    .or_insert_with(|| population.homology_map[element_id][donor_genome.genome_id].clone());
                                 homology_group.push(element_idx); // add new position
                             }
                             // update contig_ids
@@ -649,7 +668,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                     }
                 }
             }
-        (genomes, thread_homology_map, thread_total_donor_length, thread_total_recipient_length, thread_successful_recombinations)
+        (genomes, thread_homology_updates, thread_total_donor_length, thread_total_recipient_length, thread_successful_recombinations)
     }).collect::<Vec<_>>();
 
     // combine results from each thread
@@ -660,7 +679,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
     // staging vec for indexed insertion by genome_id
     let mut new_pop: Vec<Option<Genome>> = (0..pop_size).map(|_| None).collect();
 
-    for (genomes, thread_homology_map, thread_donor_length, thread_recipient_length, thread_successful_recombinations) in results {
+    for (genomes, thread_homology_updates, thread_donor_length, thread_recipient_length, thread_successful_recombinations) in results {
         total_donor_length += thread_donor_length;
         total_recipient_length += thread_recipient_length;
         successful_recombinations += thread_successful_recombinations;
@@ -668,11 +687,11 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
         // update population with new genomes
         for (genome_id, genome) in genomes.into_iter() {
             new_pop[genome_id] = Some(genome);
+        }
 
-            // update population homology map with new homology map
-            for (element_id, homology_groups) in thread_homology_map.iter().enumerate() {
-                population.homology_map[element_id][genome_id] = homology_groups[genome_id].clone();
-            }
+        // only write back homology groups that changed in this component
+        for ((element_id, genome_id), positions) in thread_homology_updates.into_iter() {
+            population.homology_map[element_id][genome_id] = positions;
         }
     }
 
