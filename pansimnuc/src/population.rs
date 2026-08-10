@@ -24,7 +24,7 @@ pub struct NucElement {
     pub contig_id: usize,
     pub element_id: usize,
     pub feature_id: usize,
-    pub feature_type: String,
+    pub feature_type: Arc<str>,
     pub multiplier: f64,
     pub seq: Arc<Vec<u8>>,
     pub mutation_map: Arc<MutationMap>,
@@ -133,7 +133,7 @@ impl Genome {
             }
             total_length += element.seq.len();
             total_elements += 1;
-            match element.feature_type.as_str() {
+            match element.feature_type.as_ref() {
                 "exon" => total_exon_length += element.seq.len(),
                 "intron" => total_intron_length += element.seq.len(),
                 "intergenic" => total_intergenic_length += element.seq.len(),
@@ -142,7 +142,7 @@ impl Genome {
                 _ => {}
             }
 
-            match element.feature_type.as_str() {
+            match element.feature_type.as_ref() {
                 "exon" => total_exon_elements += 1,
                 "intron" => total_intron_elements += 1,
                 "intergenic" => total_intergenic_elements += 1,
@@ -268,7 +268,7 @@ impl Population {
         let max_multiplier_dist = self.max_multiplier_dist;
 
         // identify regions where order matters
-        if element.feature_type == "exon" || element.feature_type == "intron" {
+        if element.feature_type.as_ref() == "exon" || element.feature_type.as_ref() == "intron" {
             let feature_map_entry = self
                 .feature_map
                 .get(&element.feature_id)
@@ -301,7 +301,7 @@ impl Population {
                     && actual_element.strand == element.strand
                 {
                     // check if frameshift occurred, if so then feature is broken, as likely to be non-functional
-                    if actual_element.feature_type == "exon" && actual_element.frameshift {
+                    if actual_element.feature_type.as_ref() == "exon" && actual_element.frameshift {
                         feature_broken = true;
                         break;
                     } else {
@@ -346,7 +346,7 @@ impl Population {
                         && actual_element.strand == element.strand
                     {
                         // check if frameshift occurred, if so then feature is broken, as likely to be non-functional
-                        if actual_element.feature_type == "exon" && actual_element.frameshift {
+                        if actual_element.feature_type.as_ref() == "exon" && actual_element.frameshift {
                             feature_broken = true;
                             break;
                         } else {
@@ -569,7 +569,7 @@ impl Population {
         for (contig_id, features) in root.iter().enumerate() {
             let mut current_start = 0;
             for feature in features {
-                let selection_dist_id: usize = match feature.feature_type.as_str() {
+                let selection_dist_id: usize = match feature.feature_type.as_ref() {
                     "exon" => 0,
                     "intron" => 1,
                     "intergenic" => 2,
@@ -578,7 +578,7 @@ impl Population {
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
-                let mu_dist_id: usize = match feature.feature_type.as_str() {
+                let mu_dist_id: usize = match feature.feature_type.as_ref() {
                     "exon" => 0,
                     "intron" => 1,
                     "intergenic" => 2,
@@ -587,7 +587,7 @@ impl Population {
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
-                let multiplier_dist: &MutationDistribution = match feature.feature_type.as_str() {
+                let multiplier_dist: &MutationDistribution = match feature.feature_type.as_ref() {
                     "exon" => &multiplier_dists[0],
                     "intron" => &multiplier_dists[1],
                     "intergenic" => &multiplier_dists[2],
@@ -596,7 +596,7 @@ impl Population {
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
-                let multiplier = match feature.feature_type.as_str() {
+                let multiplier = match feature.feature_type.as_ref() {
                     "exon" => 1.0,
                     "intron" => 1.0,
                     "intergenic" => 1.0,
@@ -617,7 +617,7 @@ impl Population {
                     contig_id: contig_id,
                     element_id: element_id,
                     feature_id: feature.feature_id,
-                    feature_type: feature.feature_type.clone(),
+                    feature_type: Arc::from(feature.feature_type.as_str()),
                     seq: Arc::new(feature.seq.clone()),
                     strand: feature.strand,
                     inverted: false,
@@ -1340,12 +1340,12 @@ mod tests {
             // Check first feature
             assert_eq!(genome.seq[0].contig_id, 0);
             assert_eq!(genome.seq[0].feature_id, 0);
-            assert_eq!(genome.seq[0].feature_type, "exon");
+            assert_eq!(genome.seq[0].feature_type.as_ref(), "exon");
 
             // Check second feature
             assert_eq!(genome.seq[1].contig_id, 0);
             assert_eq!(genome.seq[1].feature_id, 1);
-            assert_eq!(genome.seq[1].feature_type, "intron");
+            assert_eq!(genome.seq[1].feature_type.as_ref(), "intron");
         }
     }
 
@@ -2035,7 +2035,7 @@ mod tests {
         let idx = genome
             .seq
             .iter()
-            .position(|element| element.feature_id == 1 && element.feature_type == "intron")
+            .position(|element| element.feature_id == 1 && element.feature_type.as_ref() == "intron")
             .expect("expected intron in feature block");
         pop.check_feature_order(genome, idx, &genome.seq[idx])
     }
@@ -2044,7 +2044,7 @@ mod tests {
         let idx = genome
             .seq
             .iter()
-            .position(|element| element.feature_id == feature_id && element.feature_type == "exon")
+            .position(|element| element.feature_id == feature_id && element.feature_type.as_ref() == "exon")
             .expect("expected exon in feature block");
         pop.check_feature_order(genome, idx, &genome.seq[idx])
     }
@@ -2064,7 +2064,7 @@ mod tests {
         let mut seq = pop.pop[0].seq.clone();
 
         let mut inserted_te = seq[0].clone();
-        inserted_te.feature_type = "TE-CUT".to_string();
+        inserted_te.feature_type = Arc::from("TE-CUT");
         inserted_te.feature_id = 0;
         inserted_te.multiplier = 2.0;
         inserted_te.element_id = 10_000;
@@ -2085,7 +2085,7 @@ mod tests {
         let exon_idx = genome
             .seq
             .iter()
-            .position(|element| element.feature_id == 1 && element.feature_type == "exon")
+            .position(|element| element.feature_id == 1 && element.feature_type.as_ref() == "exon")
             .expect("expected exon in feature block");
         let (broken, _) = pop.check_feature_order(&genome, exon_idx, &genome.seq[exon_idx]);
         assert!(broken);
@@ -2142,14 +2142,14 @@ mod tests {
         let mut seq = pop.pop[0].seq.clone();
 
         let mut upstream_te = seq[0].clone();
-        upstream_te.feature_type = "TE-CUT".to_string();
+        upstream_te.feature_type = Arc::from("TE-CUT");
         upstream_te.feature_id = 0;
         upstream_te.multiplier = 2.0;
         upstream_te.element_id = 20_000;
         seq.insert(1, upstream_te);
 
         let mut downstream_te = seq[0].clone();
-        downstream_te.feature_type = "TE-COPY".to_string();
+        downstream_te.feature_type = Arc::from("TE-COPY");
         downstream_te.feature_id = 0;
         downstream_te.multiplier = 3.5;
         downstream_te.element_id = 20_001;
@@ -2169,14 +2169,14 @@ mod tests {
         pop.max_multiplier_dist = 10; // ensure the TEs we add are within the max multiplier distance
 
         let mut upstream_te = seq[0].clone();
-        upstream_te.feature_type = "TE-CUT".to_string();
+        upstream_te.feature_type = Arc::from("TE-CUT");
         upstream_te.feature_id = 0;
         upstream_te.multiplier = 2.0;
         upstream_te.element_id = 20_000;
         seq.insert(0, upstream_te);
 
         let mut downstream_te = seq[0].clone();
-        downstream_te.feature_type = "TE-COPY".to_string();
+        downstream_te.feature_type = Arc::from("TE-COPY");
         downstream_te.feature_id = 0;
         downstream_te.multiplier = 3.5;
         downstream_te.element_id = 20_001;
@@ -2203,14 +2203,14 @@ mod tests {
         pop.max_multiplier_dist = 2; // ensure the TEs we add are not within the max multiplier distance
 
         let mut upstream_te = seq[0].clone();
-        upstream_te.feature_type = "TE-CUT".to_string();
+        upstream_te.feature_type = Arc::from("TE-CUT");
         upstream_te.feature_id = 0;
         upstream_te.multiplier = 2.0;
         upstream_te.element_id = 20_000;
         seq.insert(0, upstream_te);
 
         let mut downstream_te = seq[0].clone();
-        downstream_te.feature_type = "TE-COPY".to_string();
+        downstream_te.feature_type = Arc::from("TE-COPY");
         downstream_te.feature_id = 0;
         downstream_te.multiplier = 3.5;
         downstream_te.element_id = 20_001;
@@ -2235,28 +2235,28 @@ mod tests {
         let mut seq = pop.pop[0].seq.clone();
 
         let mut upstream_intergenic = seq[0].clone();
-        upstream_intergenic.feature_type = "intergenic".to_string();
+        upstream_intergenic.feature_type = Arc::from("intergenic");
         upstream_intergenic.feature_id = 0;
         upstream_intergenic.multiplier = 1.5;
         upstream_intergenic.element_id = 10_000;
         seq.insert(0, upstream_intergenic);
 
         let mut upstream_te = seq[0].clone();
-        upstream_te.feature_type = "TE-CUT".to_string();
+        upstream_te.feature_type = Arc::from("TE-CUT");
         upstream_te.feature_id = 0;
         upstream_te.multiplier = 0.25;
         upstream_te.element_id = 20_000;
         seq.insert(0, upstream_te);
 
         let mut downstream_intergenic = seq[0].clone();
-        downstream_intergenic.feature_type = "intergenic".to_string();
+        downstream_intergenic.feature_type = Arc::from("intergenic");
         downstream_intergenic.feature_id = 0;
         downstream_intergenic.multiplier = 0.5;
         downstream_intergenic.element_id = 15_000;
         seq.push(downstream_intergenic);
 
         let mut downstream_te = seq[0].clone();
-        downstream_te.feature_type = "TE-COPY".to_string();
+        downstream_te.feature_type = Arc::from("TE-COPY");
         downstream_te.feature_id = 0;
         downstream_te.multiplier = 3.5;
         downstream_te.element_id = 20_001;
@@ -2326,7 +2326,7 @@ mod tests {
             contig_id: 0,
             element_id: 0,
             feature_id: feature_id,
-            feature_type: "exon".to_string(),
+            feature_type: Arc::from("exon"),
             multiplier: 1.0,
             seq: seq.clone().into(),
             mutation_map: mutation_map.into(),
@@ -2380,12 +2380,12 @@ mod tests {
 
         let neutral = {
             let mut e = make_test_element_with_coefficients(1,vec![1u8], &[(0, 1u8, 0.0)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             e
         };
         let lethal = {
             let mut e = make_test_element_with_coefficients(2,vec![2u8], &[(0, 2u8, -1.0)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             e
         };
 
@@ -2408,13 +2408,13 @@ mod tests {
                 vec![1u8, 2u8],
                 &[(0, 1u8, 0.5), (1, 2u8, 0.3)],
             );
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             e.element_id = 0;
             e
         };
         let e2 = {
             let mut e = make_test_element_with_coefficients(1,vec![4u8], &[(0, 4u8, 0.2)]);
-            e.feature_type = "exon".to_string();
+            e.feature_type = Arc::from("exon");
             e.element_id = 1;
             e
         };
@@ -2441,7 +2441,7 @@ mod tests {
                 vec![1u8, 2u8],
                 &[(0, 1u8, 0.5), (1, 2u8, 0.3)],
             );
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             e.element_id = 0;
             e
         };
@@ -2450,7 +2450,7 @@ mod tests {
                 1, 
                 vec![4u8], 
                 &[(0, 4u8, 0.2)]);
-            e.feature_type = "exon".to_string();
+            e.feature_type = Arc::from("exon");
             e.element_id = 1;
             e
         };
@@ -2474,7 +2474,7 @@ mod tests {
         // Being 1 position upstream of the exon, its multiplier=2.0 scales e2's contribution.
         let te = {
             let mut e = make_test_element_with_coefficients(0, vec![1u8], &[(0, 1u8, 1.0)]);
-            e.feature_type = "TE-CUT".to_string();
+            e.feature_type = Arc::from("TE-CUT");
             e.element_id = 99_999;
             e.multiplier = 2.0;
             e
@@ -2526,17 +2526,17 @@ mod tests {
         // Build three genomes: two viable and one lethal.
         let g1 = {
             let mut e = make_test_element_with_coefficients(0, vec![1u8], &[(0, 1u8, 0.2)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             genome_from_seq(vec![e])
         };
         let g2 = {
             let mut e = make_test_element_with_coefficients(0, vec![2u8], &[(0, 2u8, 0.8)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             genome_from_seq(vec![e])
         };
         let g3 = {
             let mut e = make_test_element_with_coefficients(0, vec![4u8], &[(0, 4u8, 0.1)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             genome_from_seq(vec![e])
         };
 
@@ -2566,17 +2566,17 @@ mod tests {
         // Build three genomes: two viable and one lethal.
         let g1 = {
             let mut e = make_test_element_with_coefficients(0, vec![1u8], &[(0, 1u8, 0.2)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             genome_from_seq(vec![e])
         };
         let g2 = {
             let mut e = make_test_element_with_coefficients(0, vec![2u8], &[(0, 2u8, 0.8)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             genome_from_seq(vec![e])
         };
         let g3 = {
             let mut e = make_test_element_with_coefficients(0, vec![4u8], &[(0, 4u8, -1.0)]);
-            e.feature_type = "intergenic".to_string();
+            e.feature_type = Arc::from("intergenic");
             genome_from_seq(vec![e])
         };
 

@@ -87,7 +87,7 @@ pub fn mutate_intra_genome(
     let mut total_inversions = 0;
 
     for (current_pos, element) in &mut genome.seq.iter().enumerate() {
-        let mut mutation_dist: &Vec<MutationDistribution> = match element.feature_type.as_str() {
+        let mut mutation_dist: &Vec<MutationDistribution> = match element.feature_type.as_ref() {
             "exon" => &structural_mu_dists[0],
             "intron" => &structural_mu_dists[1],
             "intergenic" => &structural_mu_dists[2],
@@ -117,7 +117,7 @@ pub fn mutate_intra_genome(
 
             let genome_len = genome.seq.len() as i64;
             let mut new_pos = if feature_type.contains("TE") {
-                if feature_type == "TE-CUT" {
+                if feature_type.as_ref() == "TE-CUT" {
                     te_cut_duplications += 1;
                 } else {
                     te_copy_duplications += 1;
@@ -148,14 +148,14 @@ pub fn mutate_intra_genome(
 
             new_positions_vec.push((new_contig_id, new_pos));
 
-            if dup_count > 0 && feature_type == "TE-CUT" {
+            if dup_count > 0 && feature_type.as_ref() == "TE-CUT" {
                 // if element is a TE-CUT and has already been duplicated, break loop to mimic cut and paste mechanism
                 break;
             }
         }
 
         // deletions, only first gene deleted which is original position
-        if feature_type == "TE-CUT" && dup_count > 0 {
+        if feature_type.as_ref() == "TE-CUT" && dup_count > 0 {
             // if element is a TE-CUT and has already been duplicated, force deletion of original copy, to capture cut and paste mechanism of TE-CUTs
             let _ = new_positions_vec.remove(0);
             //te_cut_deletions += 1;
@@ -168,7 +168,7 @@ pub fn mutate_intra_genome(
             for _ in 0..n_deletions {
                 let _ = new_positions_vec.remove(0);
                 if feature_type.contains("TE") {
-                    if feature_type == "TE-CUT" {
+                    if feature_type.as_ref() == "TE-CUT" {
                             te_cut_deletions += 1;
                         } else {
                             te_copy_deletions += 1;
@@ -742,7 +742,7 @@ mod tests {
                     contig_id: 0,
                     element_id: 0,
                     feature_id: 0,
-                    feature_type: "exon".to_string(),
+                    feature_type: Arc::from("exon"),
                     multiplier: 1.0,
                     seq: Arc::new(vec![]),
                     mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
@@ -757,7 +757,7 @@ mod tests {
                     contig_id: 0,
                     element_id: 1,
                     feature_id: 1,
-                    feature_type: "exon".to_string(),
+                    feature_type: Arc::from("exon"),
                     multiplier: 1.0,
                     seq: Arc::new(vec![]),
                     mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
@@ -772,7 +772,7 @@ mod tests {
                     contig_id: 0,
                     element_id: 2,
                     feature_id: 2,
-                    feature_type: "exon".to_string(),
+                    feature_type: Arc::from("exon"),
                     multiplier: 1.0,
                     seq: Arc::new(vec![]),
                     mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
@@ -801,7 +801,7 @@ mod tests {
             contig_id,
             element_id,
             feature_id,
-            feature_type: "exon".to_string(),
+            feature_type: Arc::from("exon"),
             multiplier: 1.0,
             seq: Arc::new(vec![]),
             mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], sel_dist, rng)),
@@ -860,7 +860,7 @@ mod tests {
                 contig_id: 0,
                 element_id: idx,
                 feature_id: idx,
-                feature_type: "exon".to_string(),
+                feature_type: Arc::from("exon"),
                 multiplier: 1.0,
                 seq: Arc::new(marker_seq.clone()),
                 mutation_map: Arc::new(MutationMap::new(0, 0, &marker_seq, &sel_dist, &mut rng)),
@@ -976,7 +976,7 @@ mod tests {
             contig_id: 0,
             element_id: 0,
             feature_id: 0,
-            feature_type: "exon".to_string(),
+            feature_type: Arc::from("exon"),
             multiplier: 1.0,
             seq: Arc::new(seq.clone()),
             mutation_map: Arc::new(MutationMap::new(0, 0, &seq, &sel_dist, &mut rng)),
@@ -1580,7 +1580,7 @@ mod tests {
                 contig_id: 0,
                 element_id: 0,
                 feature_id: 0,
-                feature_type: element_type.to_string(),
+                feature_type: Arc::from(element_type),
                 multiplier: 1.0,
                 seq: Arc::new(vec![1, 2, 4, 8]),
                 mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
@@ -1595,7 +1595,7 @@ mod tests {
                 contig_id: 0,
                 element_id: 0,
                 feature_id: 0,
-                feature_type: "exon".to_string(),
+                feature_type: Arc::from("exon"),
                 multiplier: 1.0,
                 seq: Arc::new(vec![1, 2, 4, 8]),
                 mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
@@ -1610,7 +1610,7 @@ mod tests {
                 contig_id: 0,
                 element_id: 0,
                 feature_id: 0,
-                feature_type: "intergenic".to_string(),
+                feature_type: Arc::from("intergenic"),
                 multiplier: 1.0,
                 seq: Arc::new(vec![1, 2, 4, 8]),
                 mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
@@ -1663,7 +1663,7 @@ mod tests {
         );
         
         // All copies should be TE-COPY
-        let te_copy_count = genome.seq.iter().filter(|e| e.feature_type == "TE-COPY").count();
+        let te_copy_count = genome.seq.iter().filter(|e| e.feature_type.as_ref() == "TE-COPY").count();
         assert_eq!(
             te_copy_count > 1,
             true,
@@ -1692,7 +1692,7 @@ mod tests {
         for _ in 0..n_attempts {
             mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
 
-            let te_position = genome.seq.iter().position(|e| e.feature_type == "TE-CUT");
+            let te_position = genome.seq.iter().position(|e| e.feature_type.as_ref() == "TE-CUT");
             if te_position.expect("TE-CUT should still be present after cut-and-paste") != 0 {
                 break;
             }
@@ -1707,17 +1707,17 @@ mod tests {
             genome.seq.len()
         );
 
-        println!("Genome after TE-CUT mutation: {:?}", genome.seq.iter().map(|e| e.feature_type.clone()).collect::<Vec<String>>());
+        println!("Genome after TE-CUT mutation: {:?}", genome.seq.iter().map(|e| e.feature_type.to_string()).collect::<Vec<String>>());
 
         // ensure TE has moved and original position is deleted
-        let te_position = genome.seq.iter().position(|e| e.feature_type == "TE-CUT");
+        let te_position = genome.seq.iter().position(|e| e.feature_type.as_ref() == "TE-CUT");
         assert_ne!(
             te_position.expect("TE-CUT should still be present after cut-and-paste"),
             0,
             "TE-CUT should have moved from original position"
         );
 
-        let te_cut_count = genome.seq.iter().filter(|e| e.feature_type == "TE-CUT").count();
+        let te_cut_count = genome.seq.iter().filter(|e| e.feature_type.as_ref() == "TE-CUT").count();
         assert_eq!(
             te_cut_count, 1,
             "TE-CUT should result in exactly one copy after cut-and-paste"
@@ -1748,7 +1748,7 @@ mod tests {
         );
         
         // All should be intergenic
-        let intergenic_count = genome.seq.iter().filter(|e| e.feature_type == "intergenic").count();
+        let intergenic_count = genome.seq.iter().filter(|e| e.feature_type.as_ref() == "intergenic").count();
         assert_eq!(
             intergenic_count > 1,
             true,
