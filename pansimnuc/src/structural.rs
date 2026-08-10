@@ -2,6 +2,7 @@
 
 use crate::mutation::Distribution as MutationDistribution;
 use crate::population::NucElement;
+use crate::population::HomologyPositions;
 use crate::population::{Genome, Population};
 use rand::Rng; 
 use rand::seq::SliceRandom;
@@ -388,7 +389,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
         component_packages.into_par_iter().map(|(recombination_map, mut genomes)| {
             // thread specific variables
             let mut thread_rng = rand::thread_rng();
-            let mut thread_homology_updates: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+            let mut thread_homology_updates: HashMap<(usize, usize), HomologyPositions> = HashMap::new();
             let mut thread_total_donor_length = 0;
             let mut thread_total_recipient_length = 0;
             let mut thread_successful_recombinations = 0;
@@ -619,7 +620,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                             let homology_group = thread_homology_updates
                                 .entry((element_id, recipient_genome.genome_id))
                                 .or_insert_with(|| population.homology_map[element_id][recipient_genome.genome_id].clone());
-                            homology_group.retain(|&pos| pos != element_idx); // remove old position
+                            homology_group.retain(|pos| *pos != element_idx); // remove old position
                         }
 
                         // now safe to mutably borrow recipient and update recipient
@@ -646,7 +647,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                                 let homology_group = thread_homology_updates
                                     .entry((element_id, donor_genome.genome_id))
                                     .or_insert_with(|| population.homology_map[element_id][donor_genome.genome_id].clone());
-                                homology_group.retain(|&pos| pos != element_idx); // remove old position
+                                homology_group.retain(|pos| *pos != element_idx); // remove old position
                             }
 
                             // update donor genome
@@ -942,11 +943,11 @@ mod tests {
                 .unwrap();
         let recombination_len = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
 
-        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
         for idx in 0..n_elements {
             // Map each element_id to its actual position in each genome so
             // recombination start sites can vary across the genome.
-            homology_map.push(vec![vec![idx], vec![idx]]);
+            homology_map.push(vec![smallvec::smallvec![idx], smallvec::smallvec![idx]]);
         }
 
         Population {
@@ -1054,9 +1055,9 @@ mod tests {
         default_structural_dists[0][2] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
 
-        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
         for _ in genome.seq.iter() {
-            homology_map.push(vec![vec![0]]);
+            homology_map.push(vec![smallvec::smallvec![0]]);
         }
 
         mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
@@ -1081,9 +1082,9 @@ mod tests {
         let mut default_structural_dists = default_structural_dists();
         default_structural_dists[0][1] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
 
-        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
         for _ in genome.seq.iter() {
-            homology_map.push(vec![vec![0]]);
+            homology_map.push(vec![smallvec::smallvec![0]]);
         }
 
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
@@ -1111,9 +1112,9 @@ mod tests {
         default_structural_dists[0][0] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
         default_structural_dists[0][1] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
 
-        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
         for _ in genome.seq.iter() {
-            homology_map.push(vec![vec![0]]);
+            homology_map.push(vec![smallvec::smallvec![0]]);
         }
 
         // Use a non-zero offset so duplicates land somewhere other than position 0.
@@ -1542,9 +1543,9 @@ mod tests {
                 .unwrap();
         let recombination_len = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
 
-        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::new();
+        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
         for idx in 0..n_elements {
-            homology_map.push(vec![vec![idx], vec![idx]]);
+            homology_map.push(vec![smallvec::smallvec![idx], smallvec::smallvec![idx]]);
         }
 
         let mut population = Population {

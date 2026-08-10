@@ -18,6 +18,7 @@ use std::sync::Arc;
 use flate2::Compression;
 use bgzip::BGZFWriter;
 use flate2::read::GzDecoder;
+use smallvec::{smallvec, SmallVec};
 
 #[derive(Clone)]
 pub struct NucElement {
@@ -186,7 +187,7 @@ pub struct Population {
     pub structural_mu_dists: Vec<Vec<MutationDistribution>>,
     pub recombination_dists: Vec<MutationDistribution>,
     pub recombination_threshold: f64,
-    pub homology_map: Vec<Vec<Vec<usize>>>, // Map from original element ID to positions of homologous regions in other genomes, outermost loop is the homology group, middle loop is genomes, inner loop is positions
+    pub homology_map: HomologyMap, // Map from original element ID to positions of homologous regions in other genomes, outermost loop is the homology group, middle loop is genomes, inner loop is positions
     pub feature_map: HashMap<usize, Vec<usize>>, // Map from feature ID to genes that share same ID
     pub max_multiplier_dist: usize,
     pub n_generations: usize,
@@ -196,6 +197,9 @@ pub struct Population {
     pub optimal_genome_size: usize,
     pub compress_output: bool
 }
+
+pub type HomologyPositions = SmallVec<[usize; 1]>;
+pub type HomologyMap = Vec<Vec<HomologyPositions>>;
 
 impl Population {
     pub fn total_seq_lengths(&self) -> (f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) {
@@ -554,7 +558,7 @@ impl Population {
         let mut element_id: usize = 0;
 
         // initialise homology map, outermost loop is the homology group, middle loop is genomes, inner loop is positions
-        let mut homology_map: Vec<Vec<Vec<usize>>> = Vec::with_capacity(total_elements);
+        let mut homology_map: HomologyMap = Vec::with_capacity(total_elements);
 
         // initialise feature map, maps feature ID to number of genes that should share same ID
         let mut feature_map: HashMap<usize, Vec<usize>> = HashMap::with_capacity(total_elements);
@@ -655,14 +659,16 @@ impl Population {
                 element.calculate_element_selection_coefficient();
 
                 genome.push(element);
-                element_id += 1;
                 current_start += feature.seq.len();
 
                 optimal_genome_size += feature.seq.len();
 
-                // generate homology map for this element, initially just self
-                let element_homology_map: Vec<Vec<usize>> = vec![vec![element_id]; n_genomes];
+                // generate homology map for this element, initially one position per genome
+                let element_homology_map: Vec<HomologyPositions> =
+                    vec![smallvec![element_id]; n_genomes];
                 homology_map.push(element_homology_map);
+
+                element_id += 1;
             }
         }
 
@@ -1013,7 +1019,7 @@ impl Population {
             })
             .collect();
 
-        let new_homology_map: Vec<Vec<Vec<usize>>> = self
+        let new_homology_map: HomologyMap = self
             .homology_map
             .par_iter()
             .map(|element_homology_map| {

@@ -21,6 +21,7 @@ csv = "1.4.0"
 flate2 = "1"
 bgzip = "0.2"
 hotpath = "0.22"
+smallvec = "1.13"
 
 [features]
 hotpath = ["hotpath/hotpath"]
