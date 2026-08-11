@@ -585,7 +585,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
 
                         if bidirectional {
                             recipient_track = recipient_genome.seq
-                                [start_donor_site..=end_donor_site]
+                                [start_recipient_site..=end_recipient_site]
                                 .to_vec()
                                 .clone();
                             recipient_track_seq_len = recipient_track.iter()
