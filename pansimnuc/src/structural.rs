@@ -420,12 +420,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                     // now sample from poisson distribution to determine minumum size of recombination track
                     let min_recombination_len =
                             population.recombination_dists[1].sample(&mut thread_rng) as usize;
-
-                    // determine where in donor recombination can occur based on minimum recombination length
-                    let donor_seq_length = donor_genome.seq_length;
                     
-                    // determine whether 
-
                     // set up sampling with replacement
                     let mut indices: Vec<usize> = (0..donor_genome.seq.len()).collect();
                     indices.shuffle(&mut thread_rng);
@@ -437,7 +432,17 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         if donor_site_chosen {
                             break;
                         }
-                        let recombination_pos_idx = donor_genome.seq[recombination_pos].element_id;
+                        let element = &donor_genome.seq[recombination_pos];
+                        let recombination_pos_idx = element.element_id;
+
+                        // determine if recombination position is usable.
+                        let element_contig_length = donor_genome.contig_lengths[element.contig_id];
+                        let element_pos = element.feature_pos;
+
+                        // skip if too short for recombination event, only if element is not first in contig, otherwise just recombine the whole chromosome
+                        if element_contig_length - element_pos < min_recombination_len && element_pos > 0 {
+                            continue;
+                        }
 
                         // determine if position in both donor and recipient genome, if not, resample
                         let recomb_element = &population.homology_map[recombination_pos_idx];
@@ -903,7 +908,7 @@ mod tests {
             });
         }
 
-        Genome {
+        let mut genome = Genome {
             identifier: format!("recomb_{}", genome_id),
             genome_id,
             parent: "root".to_string(),
@@ -924,7 +929,9 @@ mod tests {
             total_te_cut_elements: 0,
             total_te_copy_elements: 0,
             total_tracking_elements: 0,
-        }
+        };
+        genome.update_contig_starts();
+        genome
     }
 
     fn print_genome(population: &Population, genome_idx: usize) -> String {
