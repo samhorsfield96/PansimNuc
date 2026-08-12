@@ -424,7 +424,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                     // determine where in donor recombination can occur based on minimum recombination length
                     let donor_seq_length = donor_genome.seq_length;
                     
-                    // if 
+                    // determine whether 
 
                     // set up sampling with replacement
                     let mut indices: Vec<usize> = (0..donor_genome.seq.len()).collect();
@@ -765,6 +765,7 @@ mod tests {
                     contig_id: 0,
                     element_id: 0,
                     feature_id: 0,
+                    feature_pos: 0,
                     feature_type: Arc::from("exon"),
                     multiplier: 1.0,
                     seq: Arc::new(vec![]),
@@ -780,6 +781,7 @@ mod tests {
                     contig_id: 0,
                     element_id: 1,
                     feature_id: 1,
+                    feature_pos: 1,
                     feature_type: Arc::from("exon"),
                     multiplier: 1.0,
                     seq: Arc::new(vec![]),
@@ -795,6 +797,7 @@ mod tests {
                     contig_id: 0,
                     element_id: 2,
                     feature_id: 2,
+                    feature_pos: 2,
                     feature_type: Arc::from("exon"),
                     multiplier: 1.0,
                     seq: Arc::new(vec![]),
@@ -818,12 +821,14 @@ mod tests {
         let make_element = |contig_id: usize,
                             element_id: usize,
                             feature_id: usize,
+                            feature_pos: usize,
                             strand: bool,
                             sel_dist: &MutationDistribution,
                             rng: &mut StdRng| NucElement {
             contig_id,
             element_id,
             feature_id,
+            feature_pos,
             feature_type: Arc::from("exon"),
             multiplier: 1.0,
             seq: Arc::new(vec![]),
@@ -843,12 +848,12 @@ mod tests {
             contig_starts: vec![0, 2, 4],
             contig_lengths: vec![0, 0, 0],
             seq: vec![
-                make_element(0, 0, 0, true, &sel_dist, &mut rng),
-                make_element(0, 1, 1, false, &sel_dist, &mut rng),
-                make_element(1, 2, 2, true, &sel_dist, &mut rng),
-                make_element(1, 3, 3, false, &sel_dist, &mut rng),
-                make_element(2, 4, 4, true, &sel_dist, &mut rng),
-                make_element(2, 5, 5, false, &sel_dist, &mut rng),
+                make_element(0, 0, 0, 0, true, &sel_dist, &mut rng),
+                make_element(0, 1, 1, 1, false, &sel_dist, &mut rng),
+                make_element(1, 2, 2, 2, true, &sel_dist, &mut rng),
+                make_element(1, 3, 3, 3, false, &sel_dist, &mut rng),
+                make_element(2, 4, 4, 4, true, &sel_dist, &mut rng),
+                make_element(2, 5, 5, 5, false, &sel_dist, &mut rng),
             ],
             seq_length: 0,
             total_exon_length: 0,
@@ -884,6 +889,7 @@ mod tests {
                 contig_id: 0,
                 element_id: idx,
                 feature_id: idx,
+                feature_pos: idx,
                 feature_type: Arc::from("exon"),
                 multiplier: 1.0,
                 seq: Arc::new(marker_seq.clone()),
@@ -1001,6 +1007,7 @@ mod tests {
             contig_id: 0,
             element_id: 0,
             feature_id: 0,
+            feature_pos: 0,
             feature_type: Arc::from("exon"),
             multiplier: 1.0,
             seq: Arc::new(seq.clone()),
@@ -1606,6 +1613,7 @@ mod tests {
                 contig_id: 0,
                 element_id: 0,
                 feature_id: 0,
+                feature_pos: 0,
                 feature_type: Arc::from(element_type),
                 multiplier: 1.0,
                 seq: Arc::new(vec![1, 2, 4, 8]),
@@ -1621,6 +1629,7 @@ mod tests {
                 contig_id: 0,
                 element_id: 0,
                 feature_id: 0,
+                feature_pos: 0,
                 feature_type: Arc::from("exon"),
                 multiplier: 1.0,
                 seq: Arc::new(vec![1, 2, 4, 8]),
@@ -1636,6 +1645,7 @@ mod tests {
                 contig_id: 0,
                 element_id: 0,
                 feature_id: 0,
+                feature_pos: 0,
                 feature_type: Arc::from("intergenic"),
                 multiplier: 1.0,
                 seq: Arc::new(vec![1, 2, 4, 8]),

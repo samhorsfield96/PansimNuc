@@ -127,6 +127,7 @@ mod tests {
             contig_id,
             element_id: 0,
             feature_id: 0,
+            feature_pos: 0,
             feature_type: Arc::from("intergenic"),
             multiplier: 1.0,
             mutation_map: Arc::new(MutationMap::new(0, 0, &seq, &dist, &mut rng)),

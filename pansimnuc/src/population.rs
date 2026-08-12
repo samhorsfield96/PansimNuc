@@ -25,6 +25,7 @@ pub struct NucElement {
     pub contig_id: usize,
     pub element_id: usize,
     pub feature_id: usize,
+    pub feature_pos: usize,
     pub feature_type: Arc<str>,
     pub multiplier: f64,
     pub seq: Arc<Vec<u8>>,
@@ -132,19 +133,37 @@ impl Genome {
 
         // current contig length
         let mut current_contig_length = 0;
+        let mut prev_contig_id: Option<_> = None;
 
-        for (idx, element) in self.seq.iter().enumerate() {
-            if idx == 0 || element.contig_id != self.seq[idx - 1].contig_id {
+        // total sequence length
+        let seq_len = self.seq.len();
+
+        for (idx, element) in self.seq.iter_mut().enumerate() {
+            
+            // determine if contig has changed
+            let contig_changed = prev_contig_id
+                .as_ref()
+                .map_or(true, |prev_id| *prev_id != element.contig_id);
+
+            if contig_changed {
                 self.contig_starts.push(idx);
             }
+
             total_length += element.seq.len();
+
+            // update element position
+            element.feature_pos = current_contig_length;
+
+            // update contig length
             current_contig_length += element.seq.len();
 
             // add contig lengths if moved to the next contig or at end of genome
-            if idx == self.seq.len() - 1 || idx != 0 && element.contig_id != self.seq[idx - 1].contig_id {
+            if idx == seq_len - 1 || idx != 0 && contig_changed {
                 self.contig_lengths.push(current_contig_length);
                 current_contig_length = 0;
             }
+
+            prev_contig_id = Some(element.contig_id.clone());
 
             total_elements += 1;
             match element.feature_type.as_ref() {
@@ -635,6 +654,7 @@ impl Population {
                     element_id: element_id,
                     feature_id: feature.feature_id,
                     feature_type: Arc::from(feature.feature_type.as_str()),
+                    feature_pos: 0, // update with update_contig_ids
                     seq: Arc::new(feature.seq.clone()),
                     strand: feature.strand,
                     inverted: false,
@@ -2355,6 +2375,7 @@ mod tests {
             contig_id: 0,
             element_id: 0,
             feature_id: feature_id,
+            feature_pos: 0,
             feature_type: Arc::from("exon"),
             multiplier: 1.0,
             seq: seq.clone().into(),
