@@ -198,7 +198,7 @@ impl MetaPopulation {
                 population.structural_intra_genome();
 
                 // get total size of pangenome for recombination rate scaling
-                let (total_length, _, _, _, _   , _, _, _, _, _, _, _, _, _) = population.total_seq_lengths();
+                let (total_length, _, _, _, _, _, _, _, _, _, _, _, _, _) = population.total_seq_lengths();
 
                 // perform intergenome structural mutations, based on number of SNPs
                 population.structural_inter_genome(self.recombination_rate, total_length as usize, self.recombination_size_mean, bidirectional);

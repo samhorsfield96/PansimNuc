@@ -907,6 +907,8 @@ impl Population {
             ((recombination_rate * total_sites as f64) / recombination_size_mean)
             .max(f64::MIN_POSITIVE);
         if self.verbose {
+            println!("Recombination rate: {}", recombination_rate);
+            println!("Total bases: {}", total_sites);
             println!("Average recombinations per generation: {}", average_recombinations_per_generation);
         }
         self.recombination_dists[0] = MutationDistribution::new_poisson(average_recombinations_per_generation)
