@@ -1550,6 +1550,89 @@ mod tests {
     }
 
     #[test]
+    fn recombination_length_relative_to_contig_controls_track_coverage() {
+        let n_elements = 8;
+
+        // Small minimum recombination length relative to contig length should
+        // produce a partial-track swap (not the whole contig).
+        let mut short_len_population = make_recombination_test_population(1, n_elements);
+        short_len_population.recombination_dists[1] =
+            MutationDistribution::new_uniform(1.0, 1.1).unwrap();
+
+        let (short_successful_recombinations, _, _) =
+            mutate_inter_genome(&mut short_len_population, false);
+        assert!(
+            short_successful_recombinations >= 1,
+            "expected at least one successful recombination with short minimum length"
+        );
+
+        let short_foreign_sites: usize = short_len_population
+            .pop
+            .iter()
+            .enumerate()
+            .map(|(genome_idx, genome)| {
+                let foreign_marker = if genome_idx == 0 { 2 } else { 1 };
+                genome
+                    .seq
+                    .iter()
+                    .filter(|element| element.seq.first().copied() == Some(foreign_marker))
+                    .count()
+            })
+            .sum();
+
+        assert!(
+            short_foreign_sites > 0 && short_foreign_sites < n_elements,
+            "short minimum recombination length should recombine part, not all, of a contig (foreign sites: {}, contig elements: {})",
+            short_foreign_sites,
+            n_elements
+        );
+
+        // Large minimum recombination length relative to contig length should
+        // force a whole-contig swap.
+        let mut long_len_population = make_recombination_test_population(1, n_elements);
+        let contig_length_bp: usize = long_len_population.pop[0]
+            .seq
+            .iter()
+            .map(|element| element.seq.len())
+            .sum();
+        let huge_min_track = (contig_length_bp * 10) as f64;
+        long_len_population.recombination_dists[1] =
+            MutationDistribution::new_uniform(huge_min_track, huge_min_track + 0.1).unwrap();
+
+        let (long_successful_recombinations, _, _) =
+            mutate_inter_genome(&mut long_len_population, false);
+        assert!(
+            long_successful_recombinations >= 1,
+            "expected at least one successful recombination with large minimum length"
+        );
+
+        let long_foreign_sites: usize = long_len_population
+            .pop
+            .iter()
+            .enumerate()
+            .map(|(genome_idx, genome)| {
+                let foreign_marker = if genome_idx == 0 { 2 } else { 1 };
+                genome
+                    .seq
+                    .iter()
+                    .filter(|element| element.seq.first().copied() == Some(foreign_marker))
+                    .count()
+            })
+            .sum();
+
+        assert!(long_foreign_sites > short_foreign_sites, 
+            "Should be more recombined sites in longer track recombination.");
+
+        assert_eq!(
+            long_foreign_sites,
+            n_elements,
+            "large minimum recombination length should recombine the entire contig (foreign sites: {}, contig elements: {})",
+            long_foreign_sites,
+            n_elements
+        );
+    }
+
+    #[test]
     fn whole_genome_inversion_prevents_recombination() {
         let forced_events = 5;
         let n_elements = 8;
