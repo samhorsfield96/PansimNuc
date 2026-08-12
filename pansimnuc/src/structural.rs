@@ -417,6 +417,15 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                     // look for donor and recipient site, maximum total donor length attempts, if not found, skip recombination event
                     let mut donor_site_chosen: bool = false;
 
+                    // now sample from poisson distribution to determine minumum size of recombination track
+                    let min_recombination_len =
+                            population.recombination_dists[1].sample(&mut thread_rng) as usize;
+
+                    // determine where in donor recombination can occur based on minimum recombination length
+                    let donor_seq_length = donor_genome.seq_length;
+                    
+                    // if 
+
                     // set up sampling with replacement
                     let mut indices: Vec<usize> = (0..donor_genome.seq.len()).collect();
                     indices.shuffle(&mut thread_rng);
@@ -473,10 +482,6 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                     }
 
                     if donor_site_chosen {
-                        // now sample from poisson distribution to determine minumum size of recombination track
-                        let min_recombination_len =
-                            population.recombination_dists[1].sample(&mut thread_rng) as usize;
-
                         // determine whether there is a track that can be recombined
                         let mut track_found = false;
                         let mut end_donor_site = start_donor_site;
@@ -741,6 +746,7 @@ mod tests {
             genome_id: 0,
             parent: "root".to_string(),
             contig_starts: vec![0],
+            contig_lengths: vec![0],
             total_exon_length: 0,
             total_intron_length: 0,
             total_intergenic_length: 0,
@@ -835,6 +841,7 @@ mod tests {
             genome_id: 0,
             parent: "root".to_string(),
             contig_starts: vec![0, 2, 4],
+            contig_lengths: vec![0, 0, 0],
             seq: vec![
                 make_element(0, 0, 0, true, &sel_dist, &mut rng),
                 make_element(0, 1, 1, false, &sel_dist, &mut rng),
@@ -895,6 +902,7 @@ mod tests {
             genome_id,
             parent: "root".to_string(),
             contig_starts: vec![0],
+            contig_lengths: vec![0],
             seq,
             seq_length: 0,
             total_exon_length: 0,
@@ -1593,6 +1601,7 @@ mod tests {
             genome_id: 0,
             parent: "root".to_string(),
             contig_starts: vec![0],
+            contig_lengths: vec![0],
             seq: vec![NucElement {
                 contig_id: 0,
                 element_id: 0,

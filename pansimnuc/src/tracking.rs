@@ -145,6 +145,7 @@ mod tests {
             identifier: "0".to_string(),
             genome_id: 0,
             contig_starts: vec![0],
+            contig_lengths: vec![0],
             parent: "root".to_string(),
             seq_length: elements.iter().map(|e| e.seq.len()).sum(),
             seq: elements,

@@ -88,6 +88,7 @@ pub struct Genome {
     pub identifier: String,
     pub genome_id: usize,
     pub contig_starts: Vec<usize>,
+    pub contig_lengths: Vec<usize>,
     pub parent: String,
     pub seq: Vec<NucElement>,
     pub seq_length: usize,
@@ -109,6 +110,7 @@ pub struct Genome {
 impl Genome {
     pub fn update_contig_starts(&mut self) {
         self.contig_starts.clear();
+        self.contig_lengths.clear();
         
         // total lengths
         let mut total_length = 0;
@@ -128,11 +130,22 @@ impl Genome {
         let mut total_te_copy_elements = 0;
         let mut total_tracking_elements = 0;
 
+        // current contig length
+        let mut current_contig_length = 0;
+
         for (idx, element) in self.seq.iter().enumerate() {
             if idx == 0 || element.contig_id != self.seq[idx - 1].contig_id {
                 self.contig_starts.push(idx);
             }
             total_length += element.seq.len();
+            current_contig_length += element.seq.len();
+
+            // add contig lengths if moved to the next contig or at end of genome
+            if idx == self.seq.len() - 1 || idx != 0 && element.contig_id != self.seq[idx - 1].contig_id {
+                self.contig_lengths.push(current_contig_length);
+                current_contig_length = 0;
+            }
+
             total_elements += 1;
             match element.feature_type.as_ref() {
                 "exon" => total_exon_length += element.seq.len(),
@@ -672,12 +685,11 @@ impl Population {
             }
         }
 
-        // copy whole genome to start
-        for i in 0..n_genomes {
-            let mut genome_entry = Genome {
-                identifier: format!("{}", i),
-                genome_id: i,
+        let mut initial_genome = Genome {
+                identifier: format!("{}", 0),
+                genome_id: 0,
                 contig_starts: Vec::new(), // will be updated after mutations
+                contig_lengths: Vec::new(), // will be updated after mutations
                 parent: "root".to_string(),
                 seq: genome.clone().into(), // convert to Arc for shared ownership and potential memory savings
                 seq_length: 0, // will be updated after mutations
@@ -695,7 +707,14 @@ impl Population {
                 total_te_copy_elements: 0,
                 total_tracking_elements: 0,
             };
-            genome_entry.update_contig_starts();
+        // initialise contig positions
+        initial_genome.update_contig_starts();
+
+        // copy whole genome to start
+        for i in 0..n_genomes {
+            let mut genome_entry = initial_genome.clone();
+            genome_entry.identifier =  format!("{}", i);
+            genome_entry.genome_id = i;
             population.push(genome_entry);
         }
 
@@ -1001,6 +1020,7 @@ impl Population {
                     identifier: format!("{}-{}-{}", self.id, self.generation + 1, genome_id.to_string()),
                     genome_id,
                     contig_starts: selected_genome.contig_starts.clone(),
+                    contig_lengths: selected_genome.contig_lengths.clone(),
                     parent: selected_genome.identifier.to_string(),
                     seq: selected_genome.seq.clone(),
                     seq_length: selected_genome.seq_length,
@@ -2020,6 +2040,7 @@ mod tests {
             identifier: "test".to_string(),
             genome_id: 0,
             contig_starts: vec![0],
+            contig_lengths: vec![0],
             parent: "test-parent".to_string(),
             seq: seq.clone().into(),
             seq_length: 0,
@@ -2921,10 +2942,12 @@ mod tests {
             assert_eq!(genome.total_exon_length, 100);
             assert_eq!(genome.total_intron_length, 50);
             assert_eq!(genome.total_intergenic_length, 200);
+            assert_eq!(genome.contig_lengths[0], 350);
             genome.update_contig_starts();
             assert_eq!(genome.total_exon_length, 100);
             assert_eq!(genome.total_intron_length, 50);
             assert_eq!(genome.total_intergenic_length, 200);
+            assert_eq!(genome.contig_lengths[0], 350);
         }
         
         // update contig distrubutions with the new mu/indel values

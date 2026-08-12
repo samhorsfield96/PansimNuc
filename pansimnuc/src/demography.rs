@@ -305,6 +305,7 @@ mod tests {
                 identifier: format!("{}_{}", prefix, idx),
                 genome_id: idx,
                 contig_starts: Vec::new(),
+                contig_lengths: Vec::new(),
                 parent: "root".to_string(),
                 seq: Vec::new(),
                 seq_length: 0,
