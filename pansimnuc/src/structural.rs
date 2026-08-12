@@ -497,6 +497,39 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         let donor_contig_id = donor_genome.seq[start_donor_site].contig_id;
                         let recipient_contig_id = recipient_genome.seq[start_recipient_site].contig_id;
 
+                        // testing - recombine entirely from chosen site
+                        let mut donor_contig_end = false;
+                        let mut recipient_contig_end = false;
+                        while !donor_contig_end {
+                            let new_end_donor_site = end_donor_site + 1;
+                            if new_end_donor_site >= donor_genome.seq.len() {
+                                donor_contig_end = true;
+                                break;
+                            } else if donor_genome.seq[new_end_donor_site].contig_id != donor_contig_id {
+                                donor_contig_end = true;
+                                break;
+                            }
+                            
+                            end_donor_site = new_end_donor_site;
+                        }
+
+                        while !recipient_contig_end {
+                            let new_end_recipient_site = end_recipient_site + 1;
+                            if new_end_recipient_site >= recipient_genome.seq.len() {
+                                recipient_contig_end = true;
+                                break;
+                            } else if recipient_genome.seq[new_end_recipient_site].contig_id != donor_contig_id {
+                                recipient_contig_end = true;
+                                break;
+                            }
+                            
+                            end_recipient_site = new_end_recipient_site;
+                        }
+
+                        track_found = true;
+
+                        // testing
+
                         // track contig end of donor
                         let mut donor_contig_end = false;
 
@@ -522,7 +555,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                                         
                                         // check if at end of contig
                                         if new_end_recipient_site >= recipient_genome.seq.len() {
-                                            recipient_contig_end = true;
+                                            recipient_contig_end = true;          
                                         } else if recipient_genome.seq[new_end_recipient_site].contig_id
                                             != recipient_contig_id {
                                                 recipient_contig_end = true;
@@ -535,10 +568,14 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                                     break;
                                 }
                                 
-
                                 // else continue going through contig
                                 end_donor_site = new_end_donor_site;
                                 recombination_len += donor_genome.seq[end_donor_site].seq.len();
+                            }
+
+                            // break if track found already, don't check homology
+                            if track_found {
+                                break;
                             }
 
                             // use to determine homology between sites
@@ -550,7 +587,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                                 // run off end of contig, assume complete recombination
                                 if end_recipient_site >= recipient_genome.seq.len()
                                 {
-                                    // reduce index by 1
+                                    // reduce index by 1 if over sequence length
                                     end_recipient_site -= 1;
                                     track_found = true;
                                     recipient_end_found = true;
