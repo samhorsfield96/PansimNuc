@@ -309,7 +309,6 @@ fn main() {
 
                     // recombination distributions
                     let mut recombination_rate = parse_f64("population.recombination_rate");
-                    let recombination_size_mean = parse_f64("population.recombination_size_mean");
 
                     // if bidirectional, need to divide recombination rate by 2 to ensure same rate of recombination
                     let mut bidirectional = true;
@@ -395,8 +394,7 @@ fn main() {
                         population, 
                         population_split_config, 
                         n_generations, 
-                        recombination_rate, 
-                        recombination_size_mean, 
+                        recombination_rate,
                         site_mutation_mus_vals,
                         site_indel_mus_vals
                     );
