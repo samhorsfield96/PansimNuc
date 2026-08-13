@@ -309,7 +309,6 @@ fn main() {
 
                     // recombination distributions
                     let mut recombination_rate = parse_f64("population.recombination_rate");
-                    let recombination_size_mean = parse_f64("population.recombination_size_mean");
 
                     // if bidirectional, need to divide recombination rate by 2 to ensure same rate of recombination
                     let mut bidirectional = true;
@@ -325,14 +324,10 @@ fn main() {
 
                     let recombination_prob_dist = Distribution::new_poisson(recombination_rate)
                         .expect("Failed to create recombination probability distribution");
-                    let recombination_size_dist = Distribution::new_poisson(
-                        recombination_size_mean,
-                    )
-                    .expect("Failed to create recombination distance probability distribution");
                     let recombination_threshold = parse_f64("population.recombination_threshold");
 
                     let recombination_dists =
-                        vec![recombination_prob_dist, recombination_size_dist];
+                        vec![recombination_prob_dist];
 
                     // generate initial population
                     let n_individuals: usize = n_individuals_str
@@ -399,8 +394,7 @@ fn main() {
                         population, 
                         population_split_config, 
                         n_generations, 
-                        recombination_rate, 
-                        recombination_size_mean, 
+                        recombination_rate,
                         site_mutation_mus_vals,
                         site_indel_mus_vals
                     );

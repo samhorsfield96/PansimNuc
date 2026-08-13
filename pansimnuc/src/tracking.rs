@@ -282,7 +282,6 @@ mod tests {
             },
             n_generations: 1,
             recombination_rate: 0.0,
-            recombination_size_mean: 1.0,
             site_mutation_mus_vals: vec![],
             site_indel_mus_vals: vec![],
         };
@@ -330,7 +329,6 @@ mod tests {
             },
             n_generations: 1,
             recombination_rate: 0.0,
-            recombination_size_mean: 1.0,
             site_mutation_mus_vals: vec![],
             site_indel_mus_vals: vec![],
         };

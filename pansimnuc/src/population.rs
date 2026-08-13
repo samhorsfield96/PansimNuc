@@ -940,10 +940,10 @@ impl Population {
     }
 
 
-    pub fn structural_inter_genome(&mut self, recombination_rate: f64, total_sites: usize, recombination_size_mean: f64, bidirectional: bool) {
+    pub fn structural_inter_genome(&mut self, recombination_rate: f64, total_sites: usize, bidirectional: bool) {
         // generate recombination distributions
         let average_recombinations_per_generation = 
-            ((recombination_rate * total_sites as f64) / recombination_size_mean)
+            ((recombination_rate * total_sites as f64))
             .max(f64::MIN_POSITIVE);
         if self.verbose {
             println!("Recombination rate: {}", recombination_rate);
