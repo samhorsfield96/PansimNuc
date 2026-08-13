@@ -325,14 +325,10 @@ fn main() {
 
                     let recombination_prob_dist = Distribution::new_poisson(recombination_rate)
                         .expect("Failed to create recombination probability distribution");
-                    let recombination_size_dist = Distribution::new_poisson(
-                        recombination_size_mean,
-                    )
-                    .expect("Failed to create recombination distance probability distribution");
                     let recombination_threshold = parse_f64("population.recombination_threshold");
 
                     let recombination_dists =
-                        vec![recombination_prob_dist, recombination_size_dist];
+                        vec![recombination_prob_dist];
 
                     // generate initial population
                     let n_individuals: usize = n_individuals_str

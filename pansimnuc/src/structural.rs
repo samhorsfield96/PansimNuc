@@ -320,6 +320,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
 
     let mut recombination_map_tmp: HashMap<usize, Vec<usize>> = HashMap::new();
     let mut active_nodes: HashSet<u32> = HashSet::new();
+
     for _ in 0..n_recombinations {
         // Sample donor/recipient directly to avoid materializing O(pop^2) pair lists.
         let donor = rng.gen_range(0..pop_size);
@@ -416,11 +417,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
 
                     // look for donor and recipient site, maximum total donor length attempts, if not found, skip recombination event
                     let mut donor_site_chosen: bool = false;
-
-                    // now sample from poisson distribution to determine minumum size of recombination track
-                    let min_recombination_len =
-                            population.recombination_dists[1].sample(&mut thread_rng) as usize;
-                    
+                   
                     // set up sampling with replacement
                     let mut indices: Vec<usize> = (0..donor_genome.seq.len()).collect();
                     indices.shuffle(&mut thread_rng);
@@ -434,15 +431,6 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         }
                         let element = &donor_genome.seq[recombination_pos];
                         let recombination_pos_idx = element.element_id;
-
-                        // determine if recombination position is usable.
-                        let element_contig_length = donor_genome.contig_lengths[element.contig_id];
-                        let element_pos = element.feature_pos;
-
-                        // skip if too short for recombination event, only if element is not first in contig, otherwise just recombine the whole chromosome
-                        if element_contig_length - element_pos < min_recombination_len && element_pos > 0 {
-                            continue;
-                        }
 
                         // determine if position in both donor and recipient genome, if not, resample
                         let recomb_element = &population.homology_map[recombination_pos_idx];
@@ -488,16 +476,14 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
 
                     if donor_site_chosen {
                         // determine whether there is a track that can be recombined
-                        let mut track_found = false;
                         let mut end_donor_site = start_donor_site;
                         let mut end_recipient_site = start_recipient_site;
-                        let mut recombination_len = donor_genome.seq[start_donor_site].seq.len();
 
                         // ensure recombination occurs in single chromosome each
                         let donor_contig_id = donor_genome.seq[start_donor_site].contig_id;
                         let recipient_contig_id = recipient_genome.seq[start_recipient_site].contig_id;
 
-                        // testing - recombine entirely from chosen site
+                        // recombine entire chromosome from chosen site
                         let mut donor_contig_end = false;
                         let mut recipient_contig_end = false;
                         while !donor_contig_end {
@@ -524,93 +510,6 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                             }
                             
                             end_recipient_site = new_end_recipient_site;
-                        }
-
-                        track_found = true;
-
-                        // testing
-
-                        // track contig end of donor
-                        let mut donor_contig_end = false;
-
-                        while !track_found {
-                            // determine length of donor DNA
-                            while recombination_len < min_recombination_len {
-                                let new_end_donor_site = end_donor_site + 1;
-
-                                // run off end of contig, assume complete recombination
-                                if new_end_donor_site >= donor_genome.seq.len() {
-                                    donor_contig_end = true;
-                                } else if donor_genome.seq[new_end_donor_site].contig_id != donor_contig_id {
-                                    donor_contig_end = true
-                                }
-                                if donor_contig_end 
-                                {
-                                    recombination_len += donor_genome.seq[end_donor_site].seq.len();
-
-                                    // find end of recipient track
-                                    let mut recipient_contig_end = false;
-                                    while !recipient_contig_end {
-                                        let new_end_recipient_site = end_recipient_site + 1;
-                                        
-                                        // check if at end of contig
-                                        if new_end_recipient_site >= recipient_genome.seq.len() {
-                                            recipient_contig_end = true;          
-                                        } else if recipient_genome.seq[new_end_recipient_site].contig_id
-                                            != recipient_contig_id {
-                                                recipient_contig_end = true;
-                                        } else {
-                                            end_recipient_site = new_end_recipient_site;
-                                        }
-                                    }
-                                    
-                                    track_found = true;
-                                    break;
-                                }
-                                
-                                // else continue going through contig
-                                end_donor_site = new_end_donor_site;
-                                recombination_len += donor_genome.seq[end_donor_site].seq.len();
-                            }
-
-                            // break if track found already, don't check homology
-                            if track_found {
-                                break;
-                            }
-
-                            // use to determine homology between sites
-                            let donor_site = &donor_genome.seq[end_donor_site];
-
-                            // now iterate through recipient genome until homology found between end and donor site
-                            let mut recipient_end_found = false;
-                            while !recipient_end_found {
-                                // run off end of contig, assume complete recombination
-                                if end_recipient_site >= recipient_genome.seq.len()
-                                {
-                                    // reduce index by 1 if over sequence length
-                                    end_recipient_site -= 1;
-                                    track_found = true;
-                                    recipient_end_found = true;
-                                    break;
-                                } else if recipient_genome.seq[end_recipient_site].contig_id != recipient_contig_id {
-                                    // reduce index by 1
-                                    end_recipient_site -= 1;
-                                    track_found = true;
-                                    recipient_end_found = true;
-                                    break;
-                                }
-
-                                let recipient_site = &recipient_genome.seq[end_recipient_site];
-                                let homology = calculate_homology(donor_site, recipient_site, population.recombination_threshold);
-                                if homology >= population.recombination_threshold {
-                                    track_found = true;
-                                    recipient_end_found = true;
-                                    break;
-                                }
-
-                                // continue iterating through recipient contig until homology found, or end of contig reached
-                                end_recipient_site += 1;
-                            }
                         }
 
                         // perform recombination event, replacing recipient track with donor track
@@ -1592,80 +1491,93 @@ mod tests {
 
         // Small minimum recombination length relative to contig length should
         // produce a partial-track swap (not the whole contig).
-        let mut short_len_population = make_recombination_test_population(1, n_elements);
-        short_len_population.recombination_dists[1] =
-            MutationDistribution::new_uniform(1.0, 1.1).unwrap();
+        let mut short_len_population = make_recombination_test_population(3, n_elements);
+        let genome_length: usize = short_len_population.pop[0]
+            .seq
+            .iter()
+            .map(|element| element.seq.len())
+            .sum();
 
+        println!("Short recomb Genome 0 pre-recomb: {}", print_genome(&short_len_population, 0));
+        println!("Short recomb Genome 1 pre-recomb: {}", print_genome(&short_len_population, 1));
+        
         let (short_successful_recombinations, _, _) =
-            mutate_inter_genome(&mut short_len_population, false);
+            mutate_inter_genome(&mut short_len_population, true);
         assert!(
             short_successful_recombinations >= 1,
             "expected at least one successful recombination with short minimum length"
         );
 
+        println!("Short recomb Genome 0 post-recomb: {}", print_genome(&short_len_population, 0));
+        println!("Short recomb Genome 1 post-recomb: {}", print_genome(&short_len_population, 1));
+
         let short_foreign_sites: usize = short_len_population
-            .pop
+            .pop[1]
+            .seq
             .iter()
+            .flat_map(|element| element.seq.iter())
+            .filter(|&&base| base == 1)
+            .count();
+
+        let short_foreign_positions: Vec<usize> = short_len_population
+            .pop[1]
+            .seq
+            .iter()
+            .flat_map(|element| element.seq.iter())
             .enumerate()
-            .map(|(genome_idx, genome)| {
-                let foreign_marker = if genome_idx == 0 { 2 } else { 1 };
-                genome
-                    .seq
-                    .iter()
-                    .filter(|element| element.seq.first().copied() == Some(foreign_marker))
-                    .count()
-            })
-            .sum();
+            .filter_map(|(position, &base)| (base == 1).then_some(position))
+            .collect();
 
         assert!(
-            short_foreign_sites > 0 && short_foreign_sites < n_elements,
-            "short minimum recombination length should recombine part, not all, of a contig (foreign sites: {}, contig elements: {})",
-            short_foreign_sites,
-            n_elements
+            !short_foreign_positions.windows(2).all(|positions| positions[1] == positions[0] + 1),
+            "short recombination should produce a broken foreign sequence (positions: {:?})",
+            short_foreign_positions
         );
 
         // Large minimum recombination length relative to contig length should
         // force a whole-contig swap.
         let mut long_len_population = make_recombination_test_population(1, n_elements);
-        let contig_length_bp: usize = long_len_population.pop[0]
-            .seq
-            .iter()
-            .map(|element| element.seq.len())
-            .sum();
-        let huge_min_track = (contig_length_bp * 10) as f64;
-        long_len_population.recombination_dists[1] =
-            MutationDistribution::new_uniform(huge_min_track, huge_min_track + 0.1).unwrap();
+
+        println!("Long recomb Genome 0 pre-recomb: {}", print_genome(&long_len_population, 0));
+        println!("Long recomb Genome 1 pre-recomb: {}", print_genome(&long_len_population, 1));
 
         let (long_successful_recombinations, _, _) =
-            mutate_inter_genome(&mut long_len_population, false);
+            mutate_inter_genome(&mut long_len_population, true);
         assert!(
-            long_successful_recombinations >= 1,
-            "expected at least one successful recombination with large minimum length"
+            long_successful_recombinations == 1,
+            "long recombination should produce exactly one successful event, got {}",
+            long_successful_recombinations
         );
 
-        let long_foreign_sites: usize = long_len_population
-            .pop
-            .iter()
-            .enumerate()
-            .map(|(genome_idx, genome)| {
-                let foreign_marker = if genome_idx == 0 { 2 } else { 1 };
-                genome
-                    .seq
-                    .iter()
-                    .filter(|element| element.seq.first().copied() == Some(foreign_marker))
-                    .count()
-            })
-            .sum();
+        println!("Long recomb Genome 0 post-recomb: {}", print_genome(&long_len_population, 0));
+        println!("Long recomb Genome 1 post-recomb: {}", print_genome(&long_len_population, 1));
 
-        assert!(long_foreign_sites > short_foreign_sites, 
-            "Should be more recombined sites in longer track recombination.");
+        let long_foreign_sites: usize = long_len_population
+            .pop[1]
+            .seq
+            .iter()
+            .flat_map(|element| element.seq.iter())
+            .filter(|&&base| base == 1)
+            .count();
+
+        let long_foreign_positions: Vec<usize> = long_len_population
+            .pop[1]
+            .seq
+            .iter()
+            .flat_map(|element| element.seq.iter())
+            .enumerate()
+            .filter_map(|(position, &base)| (base == 1).then_some(position))
+            .collect();
 
         assert_eq!(
+            long_foreign_positions.len(),
             long_foreign_sites,
-            n_elements,
-            "large minimum recombination length should recombine the entire contig (foreign sites: {}, contig elements: {})",
-            long_foreign_sites,
-            n_elements
+            "long recombination foreign-site accounting should be consistent"
+        );
+        assert!(
+            long_foreign_positions.windows(2).all(|positions| positions[1] == positions[0] + 1),
+            "long recombination should produce an unbroken foreign sequence (positions: {:?})",
+            long_foreign_positions
         );
     }
 
