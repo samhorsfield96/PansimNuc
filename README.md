@@ -99,8 +99,7 @@ PansimNuc is configured via a `.conf` file passed with `--config`. The file uses
 |---|---|
 | `n_individuals` | Number of haploid individuals in the population |
 | `n_generations` | Number of generations to simulate |
-| `recombination_rate` | Number of recombination events per base per generation |
-| `recombination_size_mean` | Mean recombination tract length (bp); tract lengths are Poisson-distributed |
+| `recombination_rate` | Average number of recombination events per genome per generation |
 | `bidirectional_recombination` | Specify true/false to ensure each recombination event is bidirectional (each genome is donor and recipient) or unidirectional (one genome is donor and other is recipient) |
 | `recombination_threshold` | Minimum sequence homology (0–1) required for two sequences to recombine |
 | `max_multiplier_dist` | Maximum distance (bp) between elements for TE multiplier/recombination pairing |
