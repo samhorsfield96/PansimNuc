@@ -9,13 +9,13 @@ python grid_parameter_sweep.py \
     --param input.earlgrey_gff_file:/home/sam/Software/PansimNuc/testing/Zymo_EarlGrey_chr19.gff \
     --param population.n_individuals:50 \
     --param population.n_generations:500 \
-    --param mutation_rate:1e-10,1e-8,1e-6 \
+    --param mutation_rate:1e-8,1e-6 \
     --param selection_distribution:double_exp \
-    --param selection_lambda1:1e14,1e7,1e1 \
-    --param selection_lambda2:1e14,1e7,1e1 \
+    --param selection_lambda1:1e14,1e4,1e1 \
+    --param selection_lambda2:1e14,1e4,1e1 \
     --param selection_cutoff:0.1,0.5,0.9 \
     --param misc.print_all_generations:false \
-    --param population.recombination_rate:1e-8,1e-6,1e-4 \
+    --param population.recombination_rate:1e-30,1e-8,1e-5 \
     --param compress:true
 
 # TE dynamics
@@ -29,17 +29,17 @@ python grid_parameter_sweep.py \
     --param input.earlgrey_gff_file:/home/sam/Software/PansimNuc/testing/Zymo_EarlGrey_chr19.gff \
     --param population.n_individuals:50 \
     --param population.n_generations:500 \
-    --param mutation_rate:1e-8 \
+    --param mutation_rate:1e-6 \
     --param selection_distribution:double_exp \
     --param selection_lambda1:1e14,1e1 \
     --param selection_lambda2:1e14,1e1 \
     --param selection_cutoff:0.1,0.5,0.9 \
     --param misc.print_all_generations:false \
-    --param population.recombination_rate:1e-8,1e-6,1e-4 \
-    --param TE-CUT.duplication_rate:3e-2,4e-2 \
-    --param TE-CUT.deletion_rate:3e-2,4e-2 \
-    --param TE-COPY.duplication_rate:3e-2,4e-2 \
-    --param TE-COPY.deletion_rate:3e-2,4e-2 \
+    --param population.recombination_rate:1e-30,1e-8,1e-5 \
+    --param TE-CUT.duplication_rate:1e-3,1e-2 \
+    --param TE-CUT.deletion_rate:1e-3,1e-2 \
+    --param TE-COPY.duplication_rate:1e-3,1e-2 \
+    --param TE-COPY.deletion_rate:1e-3,1e-2 \
     --param compress:true
 
 # multiple populations
@@ -53,13 +53,13 @@ python grid_parameter_sweep.py \
     --param input.earlgrey_gff_file:/home/sam/Software/PansimNuc/testing/Zymo_EarlGrey_chr19.gff \
     --param population.n_individuals:50 \
     --param population.n_generations:500 \
-    --param mutation_rate:1e-8 \
+    --param mutation_rate:1e-6 \
     --param selection_distribution:double_exp \
-    --param selection_lambda1:1e14,1e7,1e1 \
-    --param selection_lambda2:1e14,1e7,1e1 \
+    --param selection_lambda1:1e14,1e1 \
+    --param selection_lambda2:1e14,1e1 \
     --param selection_cutoff:0.1,0.5,0.9 \
     --param misc.print_all_generations:true \
-    --param population.recombination_rate:1e-8,1e-6,1e-4 \
+    --param population.recombination_rate:1e-30,1e-8,1e-5 \
     --param population.population_splits:2 \
     --param population.generation_splits:250 \
     --param population.migration_rate:0.0,0.01,0.1 \
@@ -78,16 +78,16 @@ python grid_parameter_sweep.py \
     --param population.n_generations:500 \
     --param mutation_rate:1e-50 \
     --param selection_distribution:uniform \
-    --param selection_low:-1e-15,9e-2 \
+    --param selection_low:1e-2 \
     --param selection_high:1e-1 \
     --param misc.print_all_generations:false \
     --param tracking.selection_distribution:uniform \
-    --param tracking.selection_low:-1e-15,-1e-1 \
+    --param tracking.selection_low:-1e-15,1e-2 \
     --param tracking.selection_high:1e-15,1e-1 \
     --param TE-COPY.selection_distribution:uniform \
-    --param TE-COPY.selection_low:-1e-15,-1e-1 \
-    --param TE-COPY.selection_high:1e-15,1e-1 \
-    --param TE-COPY.duplication_rate:2.25e0,2.5e0,2.75e0 \
-    --param TE-COPY.deletion_rate:2.25e0,2.5e0,2.75e0 \
-    --param TE-COPY.multiplier_rate:0.1,10.0 \
+    --param TE-COPY.selection_low:-1e-15 \
+    --param TE-COPY.selection_high:1e-15 \
+    --param TE-COPY.duplication_rate:2e0,4e0 \
+    --param TE-COPY.deletion_rate:2e0,4e0 \
+    --param TE-COPY.multiplier_rate:0.01,1.0 \
     --param compress:true
