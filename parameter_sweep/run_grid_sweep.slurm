@@ -25,12 +25,12 @@
 # =============================================================================
 
 #SBATCH --job-name=pansimnuc_grid
-#SBATCH --output=/scratch/sam_simulations/logs/%A_%a.out
-#SBATCH --error=/scratch/sam_simulations/logs/%A_%a.err
-##SBATCH --array=0-242%10             # <-- Set to 0-(N_SAMPLES-1)
+#SBATCH --output=/scratch/sam_simulations/Pansimlogs/%A_%a.out
+#SBATCH --error=/scratch/sam_simulations/Pansimlogs/%A_%a.err
+##SBATCH --array=0-161%10             # <-- Set to 0-(N_SAMPLES-1)
 ##SBATCH --array=0-575%10             # <-- Set to 0-(N_SAMPLES-1)
-##SBATCH --array=0-242%10             # <-- Set to 0-(N_SAMPLES-1)
-#SBATCH --array=0-575%10             # <-- Set to 0-(N_SAMPLES-1)
+##SBATCH --array=0-107%10             # <-- Set to 0-(N_SAMPLES-1)
+#SBATCH --array=0-31%10             # <-- Set to 0-(N_SAMPLES-1)
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1        # Should match threads= in your .conf
 #SBATCH --mem=4G
