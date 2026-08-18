@@ -49,6 +49,12 @@ fn calculate_homology(a: &NucElement, b: &NucElement, threshold: f64) -> f64 {
     }
 
     let max_len = m.max(n) as f64;
+    let min_len = m.min(n) as f64;
+
+    // determine if length difference is significant to ignore
+    if min_len / max_len < threshold {
+        return 0.0;
+    }
 
     let min_dist = ((1.0 - threshold) * max_len).ceil() as u32;
 
@@ -474,50 +480,27 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         }
                     }
 
-                    if donor_site_chosen {
-                        // determine whether there is a track that can be recombined
-                        let mut end_donor_site = start_donor_site;
-                        let mut end_recipient_site = start_recipient_site;
-
+                    if donor_site_chosen {               
                         // ensure recombination occurs in single chromosome each
                         let donor_contig_id = donor_genome.seq[start_donor_site].contig_id;
                         let recipient_contig_id = recipient_genome.seq[start_recipient_site].contig_id;
 
-                        // recombine entire chromosome from chosen site
-                        let mut donor_contig_end = false;
-                        let mut recipient_contig_end = false;
-                        while !donor_contig_end {
-                            let new_end_donor_site = end_donor_site + 1;
-                            if new_end_donor_site >= donor_genome.seq.len() {
-                                donor_contig_end = true;
-                                break;
-                            } else if donor_genome.seq[new_end_donor_site].contig_id != donor_contig_id {
-                                donor_contig_end = true;
-                                break;
-                            }
-                            
-                            end_donor_site = new_end_donor_site;
-                        }
-
-                        while !recipient_contig_end {
-                            let new_end_recipient_site = end_recipient_site + 1;
-                            if new_end_recipient_site >= recipient_genome.seq.len() {
-                                recipient_contig_end = true;
-                                break;
-                            } else if recipient_genome.seq[new_end_recipient_site].contig_id != donor_contig_id {
-                                recipient_contig_end = true;
-                                break;
-                            }
-                            
-                            end_recipient_site = new_end_recipient_site;
-                        }
+                        // The next contig's start bounds the current contig; the
+                        // final contig ends at the end of the genome.
+                        let end_donor_site = donor_genome
+                            .contig_starts
+                            .get(donor_contig_id + 1)
+                            .map_or(donor_genome.seq.len() - 1, |&start| start - 1);
+                        let end_recipient_site = recipient_genome
+                            .contig_starts
+                            .get(recipient_contig_id + 1)
+                            .map_or(recipient_genome.seq.len() - 1, |&start| start - 1);
 
                         // perform recombination event, replacing recipient track with donor track
                         // clone the donor track first, before any mutable borrow of pop
                         let mut donor_track: Vec<NucElement> = donor_genome.seq
                             [start_donor_site..=end_donor_site]
-                            .to_vec()
-                            .clone();
+                            .to_vec();
 
                         // update information from recipient track
                         for element in &mut donor_track {
@@ -532,8 +515,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         if bidirectional {
                             recipient_track = recipient_genome.seq
                                 [start_recipient_site..=end_recipient_site]
-                                .to_vec()
-                                .clone();
+                                .to_vec();
                             recipient_track_seq_len = recipient_track.iter()
                                 .map(|e| e.seq.len())
                                 .sum();
