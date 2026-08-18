@@ -9,9 +9,9 @@ use rand::seq::SliceRandom;
 use triple_accel::levenshtein::*;
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use petgraph::graph::{NodeIndex, UnGraph};
 use petgraph::visit::Dfs;
-use std::collections::HashSet;
 use rayon::{prelude::*};
 
 // for a given NucElement, store its position in the genome
@@ -31,6 +31,39 @@ fn reverse_complement(seq: &[u8]) -> Vec<u8> {
             _ => panic!("Allele code must be one-hot (1, 2, 4, 8, 16); got {}", base),
         })
         .collect()
+}
+
+// limits for fast k-mer distance analysis
+const LONG_SEQUENCE_THRESHOLD: usize = 500;
+const LONG_SEQUENCE_KMER_SIZE: usize = 31;
+
+/// Estimate ANI using the Mash distance between the two k-mer sets.
+fn estimate_long_sequence_homology(s: &[u8], t: &[u8]) -> f64 {
+    if s.len() < LONG_SEQUENCE_KMER_SIZE || t.len() < LONG_SEQUENCE_KMER_SIZE {
+        return 0.0;
+    }
+
+    let s_kmers: HashSet<&[u8]> = s.windows(LONG_SEQUENCE_KMER_SIZE).collect();
+    let t_kmers: HashSet<&[u8]> = t.windows(LONG_SEQUENCE_KMER_SIZE).collect();
+
+    let union_size = s_kmers.union(&t_kmers).count();
+    if union_size == 0 {
+        return 0.0;
+    }
+
+    let jaccard_similarity = s_kmers.intersection(&t_kmers).count() as f64 / union_size as f64;
+    if jaccard_similarity == 0.0 {
+        return 0.0;
+    }
+
+    // Mash distance: D = -ln(2J / (1 + J)) / k.
+    let mash_distance =
+        -(2.0 * jaccard_similarity / (1.0 + jaccard_similarity)).ln()
+            / LONG_SEQUENCE_KMER_SIZE as f64;
+
+    // Invert the Mash model to obtain average nucleotide identity.
+    let mash_similarity = 1.0 - mash_distance;
+    mash_similarity.clamp(0.0, 1.0)
 }
 
 fn calculate_homology(a: &NucElement, b: &NucElement, threshold: f64) -> f64 {
@@ -56,11 +89,16 @@ fn calculate_homology(a: &NucElement, b: &NucElement, threshold: f64) -> f64 {
         return 0.0;
     }
 
+    // rapid k-mer matching method
+    if max_len as usize > LONG_SEQUENCE_THRESHOLD {
+        return estimate_long_sequence_homology(s, t.as_ref());
+    }
+
     let min_dist = ((1.0 - threshold) * max_len).ceil() as u32;
 
     // accelerated Levenshtein distance with early exit if distance exceeds min_dist
     if let Some(dist) = levenshtein_simd_k(s, t.as_ref(), min_dist) {
-        return 1.0 - (dist as f64 / max_len)
+        return 1.0 - (dist as f64 / max_len);
     } else {
         return 0.0;
     };    
@@ -438,21 +476,27 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         let element = &donor_genome.seq[recombination_pos];
                         let recombination_pos_idx = element.element_id;
 
-                        // determine if position in both donor and recipient genome, if not, resample
-                        let recomb_element = &population.homology_map[recombination_pos_idx];
+                        // Use staged positions for genomes already changed by an earlier event in
+                        // this component; the population map is only the initial snapshot.
+                        let donor_homology = thread_homology_updates
+                            .get(&(recombination_pos_idx, donor))
+                            .unwrap_or(&population.homology_map[recombination_pos_idx][donor]);
+                        let recipient_homology = thread_homology_updates
+                            .get(&(recombination_pos_idx, recipient))
+                            .unwrap_or(&population.homology_map[recombination_pos_idx][recipient]);
 
-                        let donor_has_site = !recomb_element[donor].is_empty();
-                        let recipient_has_site =
-                            recomb_element.len() > recipient && !recomb_element[recipient].is_empty();
+
+                        let donor_has_site = !donor_homology.is_empty();
+                        let recipient_has_site = !recipient_homology.is_empty();
 
                         // if both vectors are not empty, then search through each and test to make sure they have sufficient homology
                         if donor_has_site && recipient_has_site {
-                            for donor_site in &recomb_element[donor] {
+                            for donor_site in donor_homology {
                                 // check that site present in donor
                                 if donor_site >= &donor_genome.seq.len() {
                                     continue;
                                 }
-                                for recipient_site in &recomb_element[recipient] {
+                                for recipient_site in recipient_homology {
                                     // check that site present in recipient
                                     if recipient_site >= &recipient_genome.seq.len() {
                                         continue;
@@ -495,7 +539,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                             .contig_starts
                             .get(recipient_contig_id + 1)
                             .map_or(recipient_genome.seq.len() - 1, |&start| start - 1);
-
+                                               
                         // perform recombination event, replacing recipient track with donor track
                         // clone the donor track first, before any mutable borrow of pop
                         let mut donor_track: Vec<NucElement> = donor_genome.seq
@@ -978,6 +1022,64 @@ mod tests {
         assert!(
             homology_with_rc >= 0.99,
             "opposite-strand comparison should reverse complement and recover a near-perfect match"
+        );
+    }
+
+    #[test]
+    fn long_sequence_kmer_homology_is_close_to_exact_homology() {
+        let sequence_length = 1_000;
+        let sequence: Vec<u8> = (0..sequence_length)
+            .scan(0x1234_5678_u32, |state, _| {
+                *state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                Some(match (*state >> 30) & 3 {
+                    0 => 1,
+                    1 => 2,
+                    2 => 4,
+                    _ => 8,
+                })
+            })
+            .collect();
+
+        let mut similar_sequence = sequence.clone();
+        for index in (37..sequence_length).step_by(113) {
+            similar_sequence[index] = match similar_sequence[index] {
+                1 => 2,
+                2 => 4,
+                4 => 8,
+                _ => 1,
+            };
+        }
+
+        let query = make_homology_test_element(sequence, true);
+        let subject = make_homology_test_element(similar_sequence, true);
+
+        let exact_homology = {
+            let distance = levenshtein_simd_k(
+                query.seq.as_slice(),
+                subject.seq.as_slice(),
+                sequence_length as u32,
+            )
+            .expect("the exact distance should be within the maximum bound");
+            1.0 - distance as f64 / sequence_length as f64
+        };
+        let kmer_homology = estimate_long_sequence_homology(
+            query.seq.as_slice(),
+            subject.seq.as_slice(),
+        );
+
+        println!("exact_homology: {}", exact_homology);
+        println!("kmer_homology: {}", kmer_homology);
+
+        assert!(
+            exact_homology > 0.95,
+            "test sequences should be strongly homologous; exact score: {}",
+            exact_homology
+        );
+        assert!(
+            (exact_homology - kmer_homology).abs() < 0.05,
+            "k-mer ANI estimate should be close to exact homology; exact: {}, k-mer: {}",
+            exact_homology,
+            kmer_homology
         );
     }
 
