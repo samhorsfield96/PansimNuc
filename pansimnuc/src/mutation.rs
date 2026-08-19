@@ -566,7 +566,7 @@ impl MutationMap {
     pub(crate) fn set_for_test(&mut self, level: u8, key: usize, value: f64) {
         self.insert(level, key, value);
     }
-
+    #[hotpath::measure]
     fn mutate_snps(
         &mut self,
         core_vec: &Vec<Vec<u8>>,
@@ -613,7 +613,7 @@ impl MutationMap {
         }
         n_draws
     }
-
+    #[hotpath::measure]
     fn mutate_indels (
         &mut self,
         core_vec: &Vec<Vec<u8>>,
@@ -666,7 +666,7 @@ impl MutationMap {
         }
         n_sites
     }
-
+    #[hotpath::measure]
     pub fn mutate(
         &mut self,
         core_vec: &Vec<Vec<u8>>,

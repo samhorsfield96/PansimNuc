@@ -38,6 +38,7 @@ const LONG_SEQUENCE_THRESHOLD: usize = 500;
 const LONG_SEQUENCE_KMER_SIZE: usize = 31;
 
 /// Estimate ANI using the Mash distance between the two k-mer sets.
+#[hotpath::measure]
 fn estimate_long_sequence_homology(s: &[u8], t: &[u8]) -> f64 {
     if s.len() < LONG_SEQUENCE_KMER_SIZE || t.len() < LONG_SEQUENCE_KMER_SIZE {
         return 0.0;
@@ -66,6 +67,7 @@ fn estimate_long_sequence_homology(s: &[u8], t: &[u8]) -> f64 {
     mash_similarity.clamp(0.0, 1.0)
 }
 
+#[hotpath::measure]
 fn calculate_homology(a: &NucElement, b: &NucElement, threshold: f64) -> f64 {
     let s: &[u8] = a.seq.as_slice();
     let t: Cow<[u8]> = if a.strand == b.strand {
@@ -105,6 +107,7 @@ fn calculate_homology(a: &NucElement, b: &NucElement, threshold: f64) -> f64 {
 }
 
 // write function which runs through each element and determines whether a structural mutation occurs, and if so, which one, and where it moves to.
+#[hotpath::measure]
 pub fn mutate_intra_genome(
     genome: &mut Genome,
     structural_mu_dists: &Vec<Vec<MutationDistribution>>,
@@ -309,6 +312,7 @@ pub fn mutate_intra_genome(
 }
 
 // get connected components
+#[hotpath::measure]
 fn connected_components(
     nodes: impl IntoIterator<Item = u32>,
     edges: &Vec<(u32, u32)>,
@@ -350,6 +354,7 @@ fn connected_components(
     components
 }
 
+#[hotpath::measure]
 pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> (usize, usize, usize) {
     let mut rng = rand::thread_rng();
 

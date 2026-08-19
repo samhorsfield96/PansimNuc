@@ -40,7 +40,7 @@ impl MetaPopulation {
         self.populations.iter().map(|p| p.id).max().unwrap_or(0)
     }
 
-
+    #[hotpath::measure]
     fn split_population(&mut self) {
         // pick random population to duplicate
         let mut rng = rand::thread_rng();
@@ -106,7 +106,7 @@ impl MetaPopulation {
         self.populations.push(merged_population);
     }
 
-
+    #[hotpath::measure]
     fn migrate(&mut self) -> usize {
         if self.populations.len() < 2 {
             return 0; // Need at least two populations to migrate
@@ -161,6 +161,7 @@ impl MetaPopulation {
     }
 
 
+    #[hotpath::measure]
     pub fn run_simulation(&mut self, is_tracking: bool, configuration: &HashMap<String, String>) {
         let verbose = self.populations[0].verbose; // assume all populations have same verbose setting
 
@@ -263,7 +264,7 @@ impl MetaPopulation {
         }
     }
 
-
+    #[hotpath::measure]
     pub fn write_output(&self, configuration: &HashMap<String, String>) {
         for population in &self.populations {
             if let Some(outdir) = configuration.get("output.outdir") {

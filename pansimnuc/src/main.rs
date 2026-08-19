@@ -34,6 +34,7 @@ struct Args {
     config: Option<String>,
 }
 
+#[hotpath::main]
 fn main() {
     let args = Args::parse();
 
@@ -187,13 +188,14 @@ fn main() {
                     }
 
                     // generate distributions to draw mutations from
-                    let mut site_selection_dists: Vec<Distribution> = Vec::new();
-                    let mut site_mutation_mus_vals: Vec<f64> = Vec::new();
-                    let mut site_indel_mus_vals: Vec<f64> = Vec::new();
-                    let mut structural_dists: Vec<Vec<Distribution>> = Vec::new();
-					let mut multiplier_dists: Vec<Distribution> = Vec::new();
+                    let n_sections = feature_sections.len();
+                    let mut site_selection_dists: Vec<Distribution> = Vec::with_capacity(n_sections);
+                    let mut site_mutation_mus_vals: Vec<f64> = Vec::with_capacity(n_sections);
+                    let mut site_indel_mus_vals: Vec<f64> = Vec::with_capacity(n_sections);
+                    let mut structural_dists: Vec<Vec<Distribution>> = Vec::with_capacity(n_sections);
+					let mut multiplier_dists: Vec<Distribution> = Vec::with_capacity(n_sections);
 
-                    for section in feature_sections.clone() {
+                    for &section in &feature_sections {
                         // update selection distribution for this section
                         site_selection_dists.push(
 							Distribution::from_selection_config(&configuration, section).unwrap_or_else(|err| {
