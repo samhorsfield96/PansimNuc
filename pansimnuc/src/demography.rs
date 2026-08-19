@@ -16,7 +16,6 @@ pub struct MetaPopulation {
 }
 
 impl MetaPopulation {
-    #[hotpath::measure]
     pub fn new(
         population: Population, 
         population_split_config: PopulationSplitConfig, 
@@ -35,12 +34,10 @@ impl MetaPopulation {
         }
     }
 
-    #[hotpath::measure]
     fn max_population_id(&self) -> usize {
         self.populations.iter().map(|p| p.id).max().unwrap_or(0)
     }
 
-    #[hotpath::measure]
     fn split_population(&mut self) {
         // pick random population to duplicate
         let mut rng = rand::thread_rng();
@@ -53,7 +50,6 @@ impl MetaPopulation {
         self.populations.push(new_population);
     }
 
-    #[hotpath::measure]
     fn merge_populations(&mut self) {
         if self.populations.len() < 2 {
             return; // Need at least two populations to merge
@@ -97,7 +93,6 @@ impl MetaPopulation {
         self.populations.push(merged_population);
     }
 
-    #[hotpath::measure]
     fn migrate(&mut self) -> usize {
         if self.populations.len() < 2 {
             return 0; // Need at least two populations to migrate
@@ -152,7 +147,6 @@ impl MetaPopulation {
     }
 
 
-    #[hotpath::measure]
     pub fn run_simulation(&mut self, is_tracking: bool, configuration: &HashMap<String, String>) {
         let verbose = self.populations[0].verbose; // assume all populations have same verbose setting
 
@@ -257,7 +251,6 @@ impl MetaPopulation {
         }
     }
 
-    #[hotpath::measure]
     pub fn write_output(&self, configuration: &HashMap<String, String>) {
         for population in &self.populations {
             if let Some(outdir) = configuration.get("output.outdir") {

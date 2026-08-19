@@ -23,7 +23,6 @@ pub struct FeaturePos {
     pub seq: Vec<u8>,
 }
 
-#[hotpath::measure]
 fn encode_dna(seq: &str) -> Vec<u8> {
     seq.bytes()
         .map(|b| match b {
@@ -36,7 +35,6 @@ fn encode_dna(seq: &str) -> Vec<u8> {
         .collect()
 }
 
-#[hotpath::measure]
 fn classify_te_feature_type(raw_type: &str) -> Option<String> {
     let upper = raw_type.to_ascii_uppercase();
 
@@ -51,7 +49,6 @@ fn classify_te_feature_type(raw_type: &str) -> Option<String> {
     }
 }
 
-#[hotpath::measure]
 fn parse_earlgrey_intervals(
     earlgrey_gff_path: &str,
     contig_map: &HashMap<String, usize>,
@@ -96,7 +93,6 @@ fn parse_earlgrey_intervals(
     Ok(intervals_by_contig)
 }
 
-#[hotpath::measure]
 fn apply_contig_sequence(
     contig_id: usize,
     results: &mut Vec<FeaturePos>,
@@ -142,7 +138,6 @@ fn apply_contig_sequence(
     }
 }
 
-#[hotpath::measure]
 fn push_feature_segment(
     out: &mut Vec<FeaturePos>,
     contig_id: usize,
@@ -168,7 +163,6 @@ fn push_feature_segment(
     });
 }
 
-#[hotpath::measure]
 fn overlay_te_intervals(
     features: &mut Vec<FeaturePos>,
     intervals: &[TeInterval],
@@ -244,7 +238,6 @@ fn overlay_te_intervals(
     }
 }
 
-#[hotpath::measure]
 fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &str) {
     let mut normalized: Vec<FeaturePos> = Vec::with_capacity(features.len());
 
@@ -314,7 +307,6 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
     *features = normalized;
 }
 
-#[hotpath::measure]
 pub fn extract_feature_positions(file_gff: File) -> io::Result<(Vec<Vec<FeaturePos>>, Vec<String>)> {
     let mut gff_reader = gff::io::Reader::new(BufReader::new(file_gff));
 
@@ -457,7 +449,6 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<(Vec<Vec<FeatureP
     Ok((features, contig_name_to_id))
 }
 
-#[hotpath::measure]
 pub fn read_gff_lines(
     gff_path: &str,
     fasta_path: &str,

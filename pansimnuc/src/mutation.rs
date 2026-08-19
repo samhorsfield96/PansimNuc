@@ -234,7 +234,6 @@ impl Distribution {
             })
     }
 
-    #[hotpath::measure]
     pub fn from_selection_config(
         configuration: &HashMap<String, String>,
         section: &str,
@@ -420,14 +419,12 @@ impl Distribution {
         }
     }
 
-    #[hotpath::measure]
     pub fn new_normal(mean: f64, std_dev: f64) -> Result<Self, DistributionError> {
         Normal::new(mean, std_dev)
             .map(Distribution::Normal)
             .map_err(|_| DistributionError::InvalidNormalParameters)
     }
 
-    #[hotpath::measure]
     pub fn new_uniform(low: f64, high: f64) -> Result<Self, DistributionError> {
         if low >= high {
             return Err(DistributionError::InvalidUniformParameters);
@@ -435,14 +432,12 @@ impl Distribution {
         Ok(Distribution::Uniform(Uniform::new(low, high)))
     }
 
-    #[hotpath::measure]
     pub fn new_exp(lambda: f64) -> Result<Self, DistributionError> {
         Exp::new(lambda)
             .map(Distribution::Exp)
             .map_err(|_| DistributionError::InvalidExponentialParameters)
     }
 
-    #[hotpath::measure]
     pub fn new_double_exp(
         lambda1: f64,
         lambda2: f64,
@@ -451,14 +446,12 @@ impl Distribution {
         DoubleExponential::new(lambda1, lambda2, cutoff).map(Distribution::DoubleExp)
     }
 
-    #[hotpath::measure]
     pub fn new_poisson(lambda: f64) -> Result<Self, DistributionError> {
         Poisson::new(lambda)
             .map(Distribution::Poisson)
             .map_err(|_| DistributionError::InvalidPoissonParameters)
     }
 
-    #[hotpath::measure]
     pub fn new_negative_binomial(r: f64, p: f64) -> Result<Self, DistributionError> {
         if r <= 0.0 || p <= 0.0 || p >= 1.0 {
             return Err(DistributionError::InvalidNegativeBinomialParameters);
@@ -468,7 +461,6 @@ impl Distribution {
             .map_err(|_| DistributionError::InvalidNegativeBinomialParameters)
     }
 
-    #[hotpath::measure]
     pub fn new_negative_binomial_from_moments(mean: f64, variance: f64) -> Result<Self, DistributionError> {
         if mean <= 0.0 || variance <= mean {
             return Err(DistributionError::InvalidNegativeBinomialMomentsParameters);
@@ -478,14 +470,12 @@ impl Distribution {
         Self::new_negative_binomial(r, p)
     }
 
-    #[hotpath::measure]
     pub fn new_gamma(shape: f64, scale: f64) -> Result<Self, DistributionError> {
         Gamma::new(shape, scale)
             .map(Distribution::Gamma)
             .map_err(|_| DistributionError::InvalidGammaParameters)
     }
 
-    #[hotpath::measure]
     pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
         match self {
             Distribution::Normal(d) => d.sample(rng),
@@ -576,7 +566,7 @@ impl MutationMap {
     pub(crate) fn set_for_test(&mut self, level: u8, key: usize, value: f64) {
         self.insert(level, key, value);
     }
-    #[hotpath::measure]
+    
     fn mutate_snps(
         &mut self,
         core_vec: &Vec<Vec<u8>>,
@@ -623,7 +613,7 @@ impl MutationMap {
         }
         n_draws
     }
-    #[hotpath::measure]
+    
     fn mutate_indels (
         &mut self,
         core_vec: &Vec<Vec<u8>>,
@@ -676,7 +666,7 @@ impl MutationMap {
         }
         n_sites
     }
-    #[hotpath::measure]
+    
     pub fn mutate(
         &mut self,
         core_vec: &Vec<Vec<u8>>,
