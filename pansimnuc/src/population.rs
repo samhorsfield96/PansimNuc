@@ -1109,55 +1109,59 @@ impl Population {
                 Box::new(BufWriter::new(file))
             };
 
-            // Group element indices by seqname
-            let mut contig_groups: HashMap<usize, Vec<usize>> = HashMap::new();
-            for (idx, element) in genome.seq.iter().enumerate() {
-                contig_groups
-                    .entry(element.contig_id)
-                    .or_insert_with(Vec::new)
-                    .push(idx);
-            }
+            // Sort element indices by (contig_id, seq position) and stream each contig.
+            // This avoids building a HashMap<contig, Vec<idx>> with many small allocations.
+            let mut sorted_seq_indices: Vec<usize> = (0..genome.seq.len()).collect();
+            sorted_seq_indices.sort_by_key(|&i| (genome.seq[i].contig_id, i));
 
-            // Write each contig group as a separate FASTA entry, in ascending contig order
-            let mut sorted_contig_groups: Vec<(usize, Vec<usize>)> = contig_groups.into_iter().collect();
-            sorted_contig_groups.sort_by_key(|&(id, _)| id);
-            for (contig_id, indices) in sorted_contig_groups {
-                writeln!(
-                    writer,
-                    ">{id}_contig{contig_id}",
-                    id = genome.identifier,
-                    contig_id = contig_id
-                )?;
+            let mut current_contig_id: Option<usize> = None;
+            let mut wrapped_line_len = 0usize;
 
-                let mut wrapped_line_len = 0usize;
-                for idx in indices {
-                    // if inverted, write in reverse complement
-                    if genome.seq[idx].inverted {
-                        for &base in genome.seq[idx].seq.iter().rev() {
-                            writer.write_all(&[Self::decode_base(base, true)])?;
-                            wrapped_line_len += 1;
+            for seq_idx in sorted_seq_indices {
+                let element = &genome.seq[seq_idx];
 
-                            if wrapped_line_len == 80 {
-                                writer.write_all(b"\n")?;
-                                wrapped_line_len = 0;
-                            }
+                if current_contig_id != Some(element.contig_id) {
+                    if current_contig_id.is_some() && wrapped_line_len > 0 {
+                        writer.write_all(b"\n")?;
+                    }
+
+                    current_contig_id = Some(element.contig_id);
+                    wrapped_line_len = 0;
+
+                    writeln!(
+                        writer,
+                        ">{id}_contig{contig_id}",
+                        id = genome.identifier,
+                        contig_id = element.contig_id
+                    )?;
+                }
+
+                // if inverted, write in reverse complement
+                if element.inverted {
+                    for &base in element.seq.iter().rev() {
+                        writer.write_all(&[Self::decode_base(base, true)])?;
+                        wrapped_line_len += 1;
+
+                        if wrapped_line_len == 80 {
+                            writer.write_all(b"\n")?;
+                            wrapped_line_len = 0;
                         }
-                    } else {
-                        for &base in genome.seq[idx].seq.iter() {
-                            writer.write_all(&[Self::decode_base(base, false)])?;
-                            wrapped_line_len += 1;
+                    }
+                } else {
+                    for &base in element.seq.iter() {
+                        writer.write_all(&[Self::decode_base(base, false)])?;
+                        wrapped_line_len += 1;
 
-                            if wrapped_line_len == 80 {
-                                writer.write_all(b"\n")?;
-                                wrapped_line_len = 0;
-                            }
+                        if wrapped_line_len == 80 {
+                            writer.write_all(b"\n")?;
+                            wrapped_line_len = 0;
                         }
                     }
                 }
+            }
 
-                if wrapped_line_len > 0 {
-                    writer.write_all(b"\n")?;
-                }
+            if wrapped_line_len > 0 {
+                writer.write_all(b"\n")?;
             }
 
             writer.flush()?;
@@ -1186,17 +1190,15 @@ impl Population {
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
 
         if logsumexp_value.is_finite() {
-            selection_weights = selection_weights
-                .into_iter()
-                .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
-                .collect();
+            for w in &mut selection_weights {
+                *w = (*w - logsumexp_value).exp(); // exp(log(w) - logsumexp)
+            }
 
             let sum_weights: f64 = selection_weights.iter().sum();
             if sum_weights > 0.0 && sum_weights.is_finite() {
-                selection_weights = selection_weights
-                    .iter()
-                    .map(|&w| w / sum_weights)
-                    .collect();
+                for w in &mut selection_weights {
+                    *w /= sum_weights;
+                }
             } else {
                 selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
             }
@@ -1222,19 +1224,26 @@ impl Population {
 
             let log_genome_selection_probability = selection_weights[genome_index].ln();
             let log_genome_selection_coefficient = self.genome_selection_coefficient(genome);
-            let mut contig_offsets: HashMap<usize, usize> = HashMap::new();
 
             // Sort element indices by (contig_id, seq position) so GFF is grouped
             // by contig and entries within each contig appear in physical order.
             let mut sorted_seq_indices: Vec<usize> = (0..genome.seq.len()).collect();
             sorted_seq_indices.sort_by_key(|&i| (genome.seq[i].contig_id, i));
 
+            let mut current_contig_id: Option<usize> = None;
+            let mut current_contig_offset: usize = 0;
+
             for seq_idx in sorted_seq_indices {
                 let element = &genome.seq[seq_idx];
-                let offset = contig_offsets.entry(element.contig_id).or_insert(0);
-                let start_0 = *offset;
+
+                if current_contig_id != Some(element.contig_id) {
+                    current_contig_id = Some(element.contig_id);
+                    current_contig_offset = 0;
+                }
+
+                let start_0 = current_contig_offset;
                 let end_0 = start_0 + element.seq.len();
-                *offset = end_0;
+                current_contig_offset = end_0;
 
                 if start_0 >= end_0 {
                     continue;
@@ -1251,7 +1260,17 @@ impl Population {
                 let end_1based = end_0;
                 let strand = if element.strand { "+" } else { "-" };
 
-                let attributes = format!(
+                write!(
+                    writer,
+                    "{}\tPansimNuc\t{}\t{}\t{}\t.\t{}\t.\t",
+                    seq_id,
+                    element.feature_type,
+                    start_1based,
+                    end_1based,
+                    strand
+                )?;
+                writeln!(
+                    writer,
                     "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};parent={};multiplier={:.6};sequence_length={};log_genome_selection_coefficient={:.6};log_genome_selection_probability={:.6};log_element_selection_coefficient={:.6};feature_broken={};multiplier_adj={:.6};multiplier_adj_selection_coefficient={:.6}",
                     genome.genome_id,
                     element.element_id,
@@ -1267,12 +1286,6 @@ impl Population {
                     feature_broken,
                     feature_multiplier,
                     log_element_selection_coefficient + feature_multiplier.ln(),
-                );
-
-                writeln!(
-                    writer,
-                    "{}\tPansimNuc\t{}\t{}\t{}\t.\t{}\t.\t{}",
-                    seq_id, element.feature_type, start_1based, end_1based, strand, attributes
                 )?;
             }
 
