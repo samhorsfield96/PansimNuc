@@ -104,7 +104,7 @@ fn calculate_homology(a: &NucElement, b: &NucElement, threshold: f64) -> f64 {
     };    
 }
 
-// write function which runs through each element and determines whether a structural mutation occurs, and if so, which one, and where it moves to.
+// write function which runs through each element and determines whether a structural mutation occurs, and if so, which one, and where it moves to
 pub fn mutate_intra_genome(
     genome: &mut Genome,
     structural_mu_dists: &Vec<Vec<MutationDistribution>>,
@@ -459,11 +459,14 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         (&mut right[0].1, &mut left[recipient_local].1)
                     };
 
+                    let donor_genome_len = donor_genome.seq.len();
+                    let recipient_genome_len = recipient_genome.seq.len();
+
                     // look for donor and recipient site, maximum total donor length attempts, if not found, skip recombination event
                     let mut donor_site_chosen: bool = false;
                    
                     // set up sampling with replacement
-                    let mut indices: Vec<usize> = (0..donor_genome.seq.len()).collect();
+                    let mut indices: Vec<usize> = (0..donor_genome_len).collect();
                     indices.shuffle(&mut thread_rng);
 
                     let mut start_donor_site: usize = 0;
@@ -493,25 +496,25 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         if donor_has_site && recipient_has_site {
                             for donor_site in donor_homology {
                                 // check that site present in donor
-                                if donor_site >= &donor_genome.seq.len() {
+                                if donor_site >= &donor_genome_len {
                                     continue;
                                 }
                                 for recipient_site in recipient_homology {
                                     // check that site present in recipient
-                                    if recipient_site >= &recipient_genome.seq.len() {
+                                    if recipient_site >= &recipient_genome_len {
                                         continue;
                                     }
                                     // check homology between donor and recipient site, if sufficient, break loop and move to recombination, if not, continue searching
                                     let homology = calculate_homology(
-                                        &donor_genome.seq[*donor_site],
-                                        &recipient_genome.seq[*recipient_site],
+                                        &donor_genome.seq[*donor_site as usize],
+                                        &recipient_genome.seq[*recipient_site as usize],
                                         population.recombination_threshold
                                     );
                                     if homology >= population.recombination_threshold {
                                         // perform recombination event, break out of loops
 
-                                        start_donor_site = *donor_site;
-                                        start_recipient_site = *recipient_site;
+                                        start_donor_site = *donor_site as usize;
+                                        start_recipient_site = *recipient_site as usize;
 
                                         donor_site_chosen = true;
                                         break;
@@ -534,11 +537,11 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         let end_donor_site = donor_genome
                             .contig_starts
                             .get(donor_contig_id + 1)
-                            .map_or(donor_genome.seq.len() - 1, |&start| start - 1);
+                            .map_or(donor_genome_len - 1, |&start| start - 1);
                         let end_recipient_site = recipient_genome
                             .contig_starts
                             .get(recipient_contig_id + 1)
-                            .map_or(recipient_genome.seq.len() - 1, |&start| start - 1);
+                            .map_or(recipient_genome_len - 1, |&start| start - 1);
                                                
                         // perform recombination event, replacing recipient track with donor track
                         // clone the donor track first, before any mutable borrow of pop

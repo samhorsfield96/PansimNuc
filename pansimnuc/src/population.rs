@@ -559,7 +559,6 @@ impl Population {
         }
     }
 
-
     pub fn new(
         root: Vec<Vec<FeaturePos>>,
         n_genomes: usize,
@@ -602,9 +601,9 @@ impl Population {
         let mut optimal_genome_size = 0;
 
         // generate starting genome
-        for (contig_id, features) in root.iter().enumerate() {
+        for (contig_id, features) in root.into_iter().enumerate() {
             let mut current_start = 0;
-            for feature in features {
+            for feature in features.into_iter() {
                 let selection_dist_id: usize = match feature.feature_type.as_ref() {
                     "exon" => 0,
                     "intron" => 1,
@@ -649,24 +648,29 @@ impl Population {
                         .push(element_id);
                 }
 
+                let feature_type = feature.feature_type;
+                let feature_seq = feature.seq;
+                let feature_len = feature_seq.len();
+                let mutation_map = Arc::new(MutationMap::new(
+                    selection_dist_id,
+                    mu_dist_id,
+                    &feature_seq,
+                    &selection_dists[selection_dist_id],
+                    rng,
+                ));
+
                 let mut element = NucElement {
                     contig_id: contig_id,
                     element_id: element_id,
                     feature_id: feature.feature_id,
-                    feature_type: Arc::from(feature.feature_type.as_str()),
+                    feature_type: Arc::from(feature_type),
                     feature_pos: 0, // update with update_contig_ids
-                    seq: Arc::new(feature.seq.clone()),
+                    seq: Arc::new(feature_seq),
                     strand: feature.strand,
                     inverted: false,
-                    mutation_map: Arc::new(MutationMap::new(
-                        selection_dist_id,
-                        mu_dist_id,
-                        &feature.seq,
-                        &selection_dists[selection_dist_id],
-                        rng,
-                    )),
+                    mutation_map,
                     multiplier: multiplier,
-                    original_length: feature.seq.len(),
+                    original_length: feature_len,
                     frameshift: false,
                     tracked: false,
                     selection_coeff: 0.0 // placeholder
@@ -692,9 +696,9 @@ impl Population {
                 element.calculate_element_selection_coefficient();
 
                 genome.push(element);
-                current_start += feature.seq.len();
+                current_start += feature_len;
 
-                optimal_genome_size += feature.seq.len();
+                optimal_genome_size += feature_len;
 
                 // generate homology map for this element, initially one position per genome
                 let element_homology_map: Vec<HomologyPositions> =
@@ -711,7 +715,7 @@ impl Population {
                 contig_starts: Vec::new(), // will be updated after mutations
                 contig_lengths: Vec::new(), // will be updated after mutations
                 parent: "root".to_string(),
-                seq: genome.clone().into(), // convert to Arc for shared ownership and potential memory savings
+            seq: genome.into(), // convert to Arc for shared ownership and potential memory savings
                 seq_length: 0, // will be updated after mutations
                 total_exon_length: 0,
                 total_intron_length: 0,
@@ -731,11 +735,14 @@ impl Population {
         initial_genome.update_contig_starts();
 
         // copy whole genome to start
-        for i in 0..n_genomes {
-            let mut genome_entry = initial_genome.clone();
-            genome_entry.identifier =  format!("{}", i);
-            genome_entry.genome_id = i;
-            population.push(genome_entry);
+        if n_genomes > 0 {
+            population.push(initial_genome);
+            for i in 1..n_genomes {
+                let mut genome_entry = population[0].clone();
+                genome_entry.identifier = format!("{}", i);
+                genome_entry.genome_id = i;
+                population.push(genome_entry);
+            }
         }
 
         // placeholders, will be updated based on per-element average size in demography.rs
@@ -782,7 +789,6 @@ impl Population {
     }
 
     // mutate individuals in the population according to their mutation maps and the provided distributions
-
     pub fn mutate(&mut self) -> (usize, usize) {
         let core_vec = &self.core_vec;
         let selection_dists = &self.selection_dists;
@@ -831,7 +837,6 @@ impl Population {
         }
         (total_snps, total_indels)
     }
-
 
     pub fn update_mu_dists(&mut self, mu_dist_vals: &Vec<f64>, indel_dist_vals: &Vec<f64>) {
         let (_, 
@@ -891,7 +896,6 @@ impl Population {
         self.indel_dists = new_indel_dists;
     }
 
-
     pub fn structural_intra_genome(&mut self) {
         // probabilities for structural variations
         let pos_dist = MutationDistribution::new_poisson(1.0)
@@ -939,7 +943,6 @@ impl Population {
         self.update_homology_map();
     }
 
-
     pub fn structural_inter_genome(&mut self, recombination_rate: f64, total_sites: usize, bidirectional: bool) {
         // generate recombination distributions
         let average_recombinations_per_generation = 
@@ -962,7 +965,6 @@ impl Population {
     }
 
     // sample individuals using logsumexp normalisation to prevent underflow/overflow issues with very small/large weights
-
     pub fn sample_individuals(&mut self, rng: &mut ThreadRng) -> Vec<usize> {
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
 
@@ -1029,7 +1031,6 @@ impl Population {
         sampled_indices
     }
 
-
     pub fn next_generation(&mut self, sampled_indices: Vec<usize>) {
         let new_pop: Vec<Genome> = sampled_indices
             .par_iter()
@@ -1078,7 +1079,6 @@ impl Population {
         self.generation += 1;
     }
 
-
     pub fn write_fasta(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
         let write_one = |genome: &Genome, prefix: String| -> io::Result<()> {
             let genome_output_path = Self::genome_output_path(output_path, &prefix, self.compress_output)?;
@@ -1094,55 +1094,59 @@ impl Population {
                 Box::new(BufWriter::new(file))
             };
 
-            // Group element indices by seqname
-            let mut contig_groups: HashMap<usize, Vec<usize>> = HashMap::new();
-            for (idx, element) in genome.seq.iter().enumerate() {
-                contig_groups
-                    .entry(element.contig_id)
-                    .or_insert_with(Vec::new)
-                    .push(idx);
-            }
+            // Sort element indices by (contig_id, seq position) and stream each contig.
+            // This avoids building a HashMap<contig, Vec<idx>> with many small allocations.
+            let mut sorted_seq_indices: Vec<usize> = (0..genome.seq.len()).collect();
+            sorted_seq_indices.sort_by_key(|&i| (genome.seq[i].contig_id, i));
 
-            // Write each contig group as a separate FASTA entry, in ascending contig order
-            let mut sorted_contig_groups: Vec<(usize, Vec<usize>)> = contig_groups.into_iter().collect();
-            sorted_contig_groups.sort_by_key(|&(id, _)| id);
-            for (contig_id, indices) in sorted_contig_groups {
-                writeln!(
-                    writer,
-                    ">{id}_contig{contig_id}",
-                    id = genome.identifier,
-                    contig_id = contig_id
-                )?;
+            let mut current_contig_id: Option<usize> = None;
+            let mut wrapped_line_len = 0usize;
 
-                let mut wrapped_line_len = 0usize;
-                for idx in indices {
-                    // if inverted, write in reverse complement
-                    if genome.seq[idx].inverted {
-                        for &base in genome.seq[idx].seq.iter().rev() {
-                            writer.write_all(&[Self::decode_base(base, true)])?;
-                            wrapped_line_len += 1;
+            for seq_idx in sorted_seq_indices {
+                let element = &genome.seq[seq_idx];
 
-                            if wrapped_line_len == 80 {
-                                writer.write_all(b"\n")?;
-                                wrapped_line_len = 0;
-                            }
+                if current_contig_id != Some(element.contig_id) {
+                    if current_contig_id.is_some() && wrapped_line_len > 0 {
+                        writer.write_all(b"\n")?;
+                    }
+
+                    current_contig_id = Some(element.contig_id);
+                    wrapped_line_len = 0;
+
+                    writeln!(
+                        writer,
+                        ">{id}_contig{contig_id}",
+                        id = genome.identifier,
+                        contig_id = element.contig_id
+                    )?;
+                }
+
+                // if inverted, write in reverse complement
+                if element.inverted {
+                    for &base in element.seq.iter().rev() {
+                        writer.write_all(&[Self::decode_base(base, true)])?;
+                        wrapped_line_len += 1;
+
+                        if wrapped_line_len == 80 {
+                            writer.write_all(b"\n")?;
+                            wrapped_line_len = 0;
                         }
-                    } else {
-                        for &base in genome.seq[idx].seq.iter() {
-                            writer.write_all(&[Self::decode_base(base, false)])?;
-                            wrapped_line_len += 1;
+                    }
+                } else {
+                    for &base in element.seq.iter() {
+                        writer.write_all(&[Self::decode_base(base, false)])?;
+                        wrapped_line_len += 1;
 
-                            if wrapped_line_len == 80 {
-                                writer.write_all(b"\n")?;
-                                wrapped_line_len = 0;
-                            }
+                        if wrapped_line_len == 80 {
+                            writer.write_all(b"\n")?;
+                            wrapped_line_len = 0;
                         }
                     }
                 }
+            }
 
-                if wrapped_line_len > 0 {
-                    writer.write_all(b"\n")?;
-                }
+            if wrapped_line_len > 0 {
+                writer.write_all(b"\n")?;
             }
 
             writer.flush()?;
@@ -1165,23 +1169,20 @@ impl Population {
             })
     }
 
-
     pub fn write_gff(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
         // calculate selection coefficients for all genomes once to avoid redundant calculations when writing attributes
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();
 
         if logsumexp_value.is_finite() {
-            selection_weights = selection_weights
-                .into_iter()
-                .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
-                .collect();
+            for w in &mut selection_weights {
+                *w = (*w - logsumexp_value).exp(); // exp(log(w) - logsumexp)
+            }
 
             let sum_weights: f64 = selection_weights.iter().sum();
             if sum_weights > 0.0 && sum_weights.is_finite() {
-                selection_weights = selection_weights
-                    .iter()
-                    .map(|&w| w / sum_weights)
-                    .collect();
+                for w in &mut selection_weights {
+                    *w /= sum_weights;
+                }
             } else {
                 selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
             }
@@ -1207,19 +1208,26 @@ impl Population {
 
             let log_genome_selection_probability = selection_weights[genome_index].ln();
             let log_genome_selection_coefficient = self.genome_selection_coefficient(genome);
-            let mut contig_offsets: HashMap<usize, usize> = HashMap::new();
 
             // Sort element indices by (contig_id, seq position) so GFF is grouped
             // by contig and entries within each contig appear in physical order.
             let mut sorted_seq_indices: Vec<usize> = (0..genome.seq.len()).collect();
             sorted_seq_indices.sort_by_key(|&i| (genome.seq[i].contig_id, i));
 
+            let mut current_contig_id: Option<usize> = None;
+            let mut current_contig_offset: usize = 0;
+
             for seq_idx in sorted_seq_indices {
                 let element = &genome.seq[seq_idx];
-                let offset = contig_offsets.entry(element.contig_id).or_insert(0);
-                let start_0 = *offset;
+
+                if current_contig_id != Some(element.contig_id) {
+                    current_contig_id = Some(element.contig_id);
+                    current_contig_offset = 0;
+                }
+
+                let start_0 = current_contig_offset;
                 let end_0 = start_0 + element.seq.len();
-                *offset = end_0;
+                current_contig_offset = end_0;
 
                 if start_0 >= end_0 {
                     continue;
@@ -1236,7 +1244,17 @@ impl Population {
                 let end_1based = end_0;
                 let strand = if element.strand { "+" } else { "-" };
 
-                let attributes = format!(
+                write!(
+                    writer,
+                    "{}\tPansimNuc\t{}\t{}\t{}\t.\t{}\t.\t",
+                    seq_id,
+                    element.feature_type,
+                    start_1based,
+                    end_1based,
+                    strand
+                )?;
+                writeln!(
+                    writer,
                     "genome_id={};element_id={};feature_type={};feature_id={};contig_id={};parent={};multiplier={:.6};sequence_length={};log_genome_selection_coefficient={:.6};log_genome_selection_probability={:.6};log_element_selection_coefficient={:.6};feature_broken={};multiplier_adj={:.6};multiplier_adj_selection_coefficient={:.6}",
                     genome.genome_id,
                     element.element_id,
@@ -1252,12 +1270,6 @@ impl Population {
                     feature_broken,
                     feature_multiplier,
                     log_element_selection_coefficient + feature_multiplier.ln(),
-                );
-
-                writeln!(
-                    writer,
-                    "{}\tPansimNuc\t{}\t{}\t{}\t.\t{}\t.\t{}",
-                    seq_id, element.feature_type, start_1based, end_1based, strand, attributes
                 )?;
             }
 

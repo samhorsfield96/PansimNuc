@@ -1,9 +1,8 @@
-use noodles_fasta as fasta;
 use noodles_gff::feature::record::Strand;
 use noodles_gff::{self as gff};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, BufReader, BufWriter, Write};
+use std::io::{self, BufRead, BufReader};
 
 #[derive(Clone)]
 struct TeInterval {
@@ -50,22 +49,6 @@ fn classify_te_feature_type(raw_type: &str) -> Option<String> {
     }
 }
 
-fn get_contig_order_from_gff(gff_path: &str) -> io::Result<Vec<String>> {
-    let file_gff = File::open(gff_path)?;
-    let mut gff_reader = gff::io::Reader::new(BufReader::new(file_gff));
-    let mut contigs: Vec<String> = Vec::new();
-
-    for result in gff_reader.record_bufs() {
-        let record: noodles_gff::feature::RecordBuf = result?;
-        let seqname = record.reference_sequence_name().to_string();
-        if contigs.last().map_or(true, |last| last != &seqname) {
-            contigs.push(seqname);
-        }
-    }
-
-    Ok(contigs)
-}
-
 fn parse_earlgrey_intervals(
     earlgrey_gff_path: &str,
     contig_map: &HashMap<String, usize>,
@@ -110,6 +93,51 @@ fn parse_earlgrey_intervals(
     Ok(intervals_by_contig)
 }
 
+fn apply_contig_sequence(
+    contig_id: usize,
+    results: &mut Vec<FeaturePos>,
+    seq: &str,
+    intervals_by_contig: Option<&HashMap<usize, Vec<TeInterval>>>,
+) {
+    let mut last_feature_end: usize = 0;
+
+    for result in &mut **results {
+        if result.start >= result.end || result.end > seq.len() {
+            continue;
+        }
+
+        let subseq = &seq[result.start..result.end];
+
+        result.seq = encode_dna(subseq);
+
+        last_feature_end = result.end;
+    }
+
+    // add final intergenic region, if contig empty adds full contig
+    let feature_start = last_feature_end;
+    let feature_end = seq.len();
+    let subseq = encode_dna(&seq[feature_start..feature_end]);
+
+    results.push(FeaturePos {
+        contig_id,
+        feature_id: 0,
+        feature_type: "intergenic".to_string(),
+        start: feature_start,
+        end: feature_end,
+        strand: true,
+        seq: subseq,
+    });
+
+    normalize_intergenic_features(results, seq);
+
+    if let Some(intervals_map) = intervals_by_contig {
+        if let Some(intervals) = intervals_map.get(&contig_id) {
+            overlay_te_intervals(results, intervals, contig_id, seq);
+            normalize_intergenic_features(results, seq);
+        }
+    }
+}
+
 fn push_feature_segment(
     out: &mut Vec<FeaturePos>,
     contig_id: usize,
@@ -142,11 +170,11 @@ fn overlay_te_intervals(
     contig_seq: &str,
 ) {
     for interval in intervals {
-        let mut updated: Vec<FeaturePos> = Vec::new();
+        let mut updated: Vec<FeaturePos> = Vec::with_capacity(features.len() + 2);
 
         let mut inserted_te = false;
 
-        for feature in &*features {
+        for feature in features.drain(..) {
             let overlap_start = feature.start.max(interval.start);
             let overlap_end = feature.end.min(interval.end);
             let flank_feature_type =
@@ -158,15 +186,7 @@ fn overlay_te_intervals(
 
             // if no overlap, keep feature as is
             if overlap_start >= overlap_end {
-                updated.push(FeaturePos {
-                    contig_id: feature.contig_id,
-                    feature_id: feature.feature_id,
-                    feature_type: feature.feature_type.clone(),
-                    start: feature.start,
-                    end: feature.end,
-                    strand: feature.strand,
-                    seq: feature.seq.clone(),
-                });
+                updated.push(feature);
                 continue;
             }
             
@@ -219,15 +239,15 @@ fn overlay_te_intervals(
 }
 
 fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &str) {
-    let mut normalized: Vec<FeaturePos> = Vec::new();
+    let mut normalized: Vec<FeaturePos> = Vec::with_capacity(features.len());
 
-    for feature in &*features {
+    for feature in features.drain(..) {
         // ignore features with 0 length or invalid coordinates
         if feature.start >= feature.end || feature.end > contig_seq.len() {
             continue;
         }
 
-        let mut current = feature.clone();
+        let mut current = feature;
         if current.feature_type == "intergenic" {
             current.feature_id = 0;
             current.strand = true;
@@ -241,10 +261,11 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
                 && current.feature_type == "intergenic"
                 && last.end >= current.start
             {
+                let prev_end = last.end;
                 last.end = last.end.max(current.end);
                 last.feature_id = 0;
                 last.strand = true;
-                if last.start < last.end && last.end <= contig_seq.len() {
+                if last.end != prev_end && last.start < last.end && last.end <= contig_seq.len() {
                     last.seq = encode_dna(&contig_seq[last.start..last.end]);
                 }
                 continue;
@@ -254,10 +275,11 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
                 && current.feature_type == "intron"
                 && last.end >= current.start
             {
+                let prev_end = last.end;
                 last.end = last.end.max(current.end);
                 last.feature_id = 0;
                 last.strand = true;
-                if last.start < last.end && last.end <= contig_seq.len() {
+                if last.end != prev_end && last.start < last.end && last.end <= contig_seq.len() {
                     last.seq = encode_dna(&contig_seq[last.start..last.end]);
                 }
                 continue;
@@ -267,11 +289,12 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
                 && current.feature_type == "intergenic"
                 && last.end >= current.start
             {
+                let prev_end = last.end;
                 last.end = last.end.max(current.end);
                 last.feature_id = 0;
                 last.strand = true;
                 last.feature_type = "intergenic".to_string();
-                if last.start < last.end && last.end <= contig_seq.len() {
+                if last.end != prev_end && last.start < last.end && last.end <= contig_seq.len() {
                     last.seq = encode_dna(&contig_seq[last.start..last.end]);
                 }
                 continue;
@@ -436,76 +459,89 @@ pub fn read_gff_lines(
 
     let (mut features, contig_name_to_id) = extract_feature_positions(file_gff)?;
 
-    // Load FASTA records into memory keyed by contig name.
-    let mut fasta_reader = fasta::io::Reader::new(BufReader::new(file_fasta));
+    let contig_map: HashMap<String, usize> = contig_name_to_id
+        .iter()
+        .enumerate()
+        .map(|(idx, name)| (name.clone(), idx))
+        .collect();
 
-    let mut genome: Vec<String> = Vec::new();
+    let intervals_by_contig = if let Some(earlgrey_path) = earlgrey_gff_path {
+        Some(parse_earlgrey_intervals(earlgrey_path, &contig_map)?)
+    } else {
+        None
+    };
 
-    for result in fasta_reader.records() {
-        let record = result?;
-        genome.push(String::from_utf8_lossy(record.sequence().as_ref()).into_owned());
-    }
+    // Stream FASTA records and process each contig immediately to avoid storing all contigs in memory.
+    let mut fasta_reader = BufReader::new(file_fasta);
+    let mut line = String::new();
+    let mut current_name: Option<String> = None;
+    let mut current_seq = String::new();
+    let mut seen = vec![false; contig_name_to_id.len()];
 
-    for (contig_id, results) in features.iter_mut().enumerate() {
-        if let Some(seq) = genome.get(contig_id) {
-            let mut last_feature_end: usize = 0;
+    let mut flush_contig = |name: &str, seq: &str| -> io::Result<()> {
+        let Some(&contig_id) = contig_map.get(name) else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("FASTA contig '{}' not found in GFF contigs", name),
+            ));
+        };
 
-            for result in &mut **results {
-                if result.start >= result.end || result.end > seq.len() {
-                    continue;
-                }
+        if seen[contig_id] {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Duplicate FASTA contig '{}'", name),
+            ));
+        }
+        seen[contig_id] = true;
 
-                let subseq = &seq[result.start..result.end];
+        apply_contig_sequence(
+            contig_id,
+            &mut features[contig_id],
+            seq,
+            intervals_by_contig.as_ref(),
+        );
 
-                result.seq = encode_dna(subseq);
+        Ok(())
+    };
 
-                last_feature_end = result.end;
+    loop {
+        line.clear();
+        let n = fasta_reader.read_line(&mut line)?;
+        if n == 0 {
+            break;
+        }
+
+        if let Some(stripped) = line.strip_prefix('>') {
+            if let Some(name) = current_name.take() {
+                flush_contig(&name, &current_seq)?;
+                current_seq.clear();
             }
 
-            // add final intergenic region, if contig empty adds full contig
-            let len_seq: usize = seq.len();
-            let feature_start = last_feature_end;
-            let feature_end = len_seq;
-            let subseq = encode_dna(&seq[feature_start..feature_end]);
-
-            results.push(FeaturePos {
-                contig_id: contig_id,
-                feature_id: 0,
-                feature_type: "intergenic".to_string(),
-                start: feature_start,
-                end: feature_end,
-                strand: true,
-                seq: subseq,
-            });
-
-            normalize_intergenic_features(results, seq);
+            let header = stripped.trim();
+            let Some(name) = header.split_whitespace().next() else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Encountered FASTA header with no contig name",
+                ));
+            };
+            current_name = Some(name.to_string());
         } else {
-            panic!("Contig_ID {} in GFF has no corresponding sequence in FASTA", contig_id);
+            current_seq.push_str(line.trim_end());
         }
     }
 
-    if let Some(earlgrey_path) = earlgrey_gff_path {
-        let contig_order = get_contig_order_from_gff(gff_path)?;
-        let contig_map: HashMap<String, usize> = contig_order
-            .iter()
-            .enumerate()
-            .map(|(idx, name)| (name.clone(), idx))
-            .collect();
+    if let Some(name) = current_name.take() {
+        flush_contig(&name, &current_seq)?;
+    }
 
-        let intervals_by_contig = parse_earlgrey_intervals(earlgrey_path, &contig_map)?;
-
-        for (contig_id, results) in features.iter_mut().enumerate() {
-            let Some(seq) = genome.get(contig_id) else {
-                continue;
-            };
-
-            let Some(intervals) = intervals_by_contig.get(&contig_id) else {
-                continue;
-            };
-
-            overlay_te_intervals(results, intervals, contig_id, seq);
-            normalize_intergenic_features(results, seq);
-        }
+    if let Some((missing_idx, _)) = seen.iter().enumerate().find(|(_, is_seen)| !**is_seen) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "GFF contig '{}' has no corresponding FASTA sequence",
+                contig_name_to_id[missing_idx]
+            ),
+        ));
     }
 
     Ok((features, contig_name_to_id))
