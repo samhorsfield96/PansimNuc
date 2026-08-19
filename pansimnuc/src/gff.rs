@@ -3,7 +3,7 @@ use noodles_gff::feature::record::Strand;
 use noodles_gff::{self as gff};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, BufReader, BufWriter, Write};
+use std::io::{self, BufReader};
 
 #[derive(Clone)]
 struct TeInterval {
@@ -24,6 +24,7 @@ pub struct FeaturePos {
     pub seq: Vec<u8>,
 }
 
+#[hotpath::measure]
 fn encode_dna(seq: &str) -> Vec<u8> {
     seq.bytes()
         .map(|b| match b {
@@ -36,6 +37,7 @@ fn encode_dna(seq: &str) -> Vec<u8> {
         .collect()
 }
 
+#[hotpath::measure]
 fn classify_te_feature_type(raw_type: &str) -> Option<String> {
     let upper = raw_type.to_ascii_uppercase();
 
@@ -50,6 +52,7 @@ fn classify_te_feature_type(raw_type: &str) -> Option<String> {
     }
 }
 
+#[hotpath::measure]
 fn get_contig_order_from_gff(gff_path: &str) -> io::Result<Vec<String>> {
     let file_gff = File::open(gff_path)?;
     let mut gff_reader = gff::io::Reader::new(BufReader::new(file_gff));
@@ -66,6 +69,7 @@ fn get_contig_order_from_gff(gff_path: &str) -> io::Result<Vec<String>> {
     Ok(contigs)
 }
 
+#[hotpath::measure]
 fn parse_earlgrey_intervals(
     earlgrey_gff_path: &str,
     contig_map: &HashMap<String, usize>,
@@ -110,6 +114,7 @@ fn parse_earlgrey_intervals(
     Ok(intervals_by_contig)
 }
 
+#[hotpath::measure]
 fn push_feature_segment(
     out: &mut Vec<FeaturePos>,
     contig_id: usize,
@@ -135,6 +140,7 @@ fn push_feature_segment(
     });
 }
 
+#[hotpath::measure]
 fn overlay_te_intervals(
     features: &mut Vec<FeaturePos>,
     intervals: &[TeInterval],
@@ -142,11 +148,11 @@ fn overlay_te_intervals(
     contig_seq: &str,
 ) {
     for interval in intervals {
-        let mut updated: Vec<FeaturePos> = Vec::new();
+        let mut updated: Vec<FeaturePos> = Vec::with_capacity(features.len() + 2);
 
         let mut inserted_te = false;
 
-        for feature in &*features {
+        for feature in features.drain(..) {
             let overlap_start = feature.start.max(interval.start);
             let overlap_end = feature.end.min(interval.end);
             let flank_feature_type =
@@ -158,15 +164,7 @@ fn overlay_te_intervals(
 
             // if no overlap, keep feature as is
             if overlap_start >= overlap_end {
-                updated.push(FeaturePos {
-                    contig_id: feature.contig_id,
-                    feature_id: feature.feature_id,
-                    feature_type: feature.feature_type.clone(),
-                    start: feature.start,
-                    end: feature.end,
-                    strand: feature.strand,
-                    seq: feature.seq.clone(),
-                });
+                updated.push(feature);
                 continue;
             }
             
@@ -218,16 +216,17 @@ fn overlay_te_intervals(
     }
 }
 
+#[hotpath::measure]
 fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &str) {
-    let mut normalized: Vec<FeaturePos> = Vec::new();
+    let mut normalized: Vec<FeaturePos> = Vec::with_capacity(features.len());
 
-    for feature in &*features {
+    for feature in features.drain(..) {
         // ignore features with 0 length or invalid coordinates
         if feature.start >= feature.end || feature.end > contig_seq.len() {
             continue;
         }
 
-        let mut current = feature.clone();
+        let mut current = feature;
         if current.feature_type == "intergenic" {
             current.feature_id = 0;
             current.strand = true;
@@ -241,10 +240,11 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
                 && current.feature_type == "intergenic"
                 && last.end >= current.start
             {
+                let prev_end = last.end;
                 last.end = last.end.max(current.end);
                 last.feature_id = 0;
                 last.strand = true;
-                if last.start < last.end && last.end <= contig_seq.len() {
+                if last.end != prev_end && last.start < last.end && last.end <= contig_seq.len() {
                     last.seq = encode_dna(&contig_seq[last.start..last.end]);
                 }
                 continue;
@@ -254,10 +254,11 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
                 && current.feature_type == "intron"
                 && last.end >= current.start
             {
+                let prev_end = last.end;
                 last.end = last.end.max(current.end);
                 last.feature_id = 0;
                 last.strand = true;
-                if last.start < last.end && last.end <= contig_seq.len() {
+                if last.end != prev_end && last.start < last.end && last.end <= contig_seq.len() {
                     last.seq = encode_dna(&contig_seq[last.start..last.end]);
                 }
                 continue;
@@ -267,11 +268,12 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
                 && current.feature_type == "intergenic"
                 && last.end >= current.start
             {
+                let prev_end = last.end;
                 last.end = last.end.max(current.end);
                 last.feature_id = 0;
                 last.strand = true;
                 last.feature_type = "intergenic".to_string();
-                if last.start < last.end && last.end <= contig_seq.len() {
+                if last.end != prev_end && last.start < last.end && last.end <= contig_seq.len() {
                     last.seq = encode_dna(&contig_seq[last.start..last.end]);
                 }
                 continue;
@@ -284,6 +286,7 @@ fn normalize_intergenic_features(features: &mut Vec<FeaturePos>, contig_seq: &st
     *features = normalized;
 }
 
+#[hotpath::measure]
 pub fn extract_feature_positions(file_gff: File) -> io::Result<(Vec<Vec<FeaturePos>>, Vec<String>)> {
     let mut gff_reader = gff::io::Reader::new(BufReader::new(file_gff));
 
@@ -426,6 +429,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<(Vec<Vec<FeatureP
     Ok((features, contig_name_to_id))
 }
 
+#[hotpath::measure]
 pub fn read_gff_lines(
     gff_path: &str,
     fasta_path: &str,

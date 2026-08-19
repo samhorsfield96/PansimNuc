@@ -15,6 +15,7 @@ pub struct PopulationSplitConfig {
 }
 
 impl PopulationSplitConfig {
+    #[hotpath::measure]
     pub fn new() -> Self {
         PopulationSplitConfig {
             population_splits: Vec::new(),
@@ -26,6 +27,7 @@ impl PopulationSplitConfig {
 
 impl Config {
     /// Parse a config file with sections marked by [header]
+    #[hotpath::measure]
     pub fn from_file(path: &str) -> io::Result<Self> {
         let file = File::open(path)?;
         let reader = BufReader::new(file);
@@ -119,6 +121,7 @@ impl Config {
     }
 
     /// Parse and validate migration split settings from [population].
+    #[hotpath::measure]
     pub fn population_split_config(&self) -> Result<PopulationSplitConfig, String> {
         let population_splits = self.get_usize_vec("population", "population_splits")?;
         let generation_splits = self.get_usize_vec("population", "generation_splits")?;
@@ -141,6 +144,7 @@ impl Config {
     }
 
     /// Parse tracking regions from [tracking] into a list of (contig, start, end) tuples.
+    #[hotpath::measure]
     pub fn tracking_regions(&self) -> Result<Vec<(String, usize, usize)>, String> {
         let contigs: Vec<String> = self
             .get_usize_vec("tracking", "contig")?
