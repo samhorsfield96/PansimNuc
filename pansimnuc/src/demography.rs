@@ -1,10 +1,9 @@
 use crate::population::Population;
-use crate::config::{self, PopulationSplitConfig};
+use crate::config::PopulationSplitConfig;
 use crate::tracking::write_tracking_output;
 use rand::Rng;
 use rand::seq::IteratorRandom;
 use std::collections::HashSet;
-use rayon::prelude::*;
 use std::collections::HashMap;
 
 pub struct MetaPopulation {
@@ -17,7 +16,7 @@ pub struct MetaPopulation {
 }
 
 impl MetaPopulation {
-
+    #[hotpath::measure]
     pub fn new(
         population: Population, 
         population_split_config: PopulationSplitConfig, 
@@ -36,6 +35,7 @@ impl MetaPopulation {
         }
     }
 
+    #[hotpath::measure]
     fn max_population_id(&self) -> usize {
         self.populations.iter().map(|p| p.id).max().unwrap_or(0)
     }
@@ -53,7 +53,7 @@ impl MetaPopulation {
         self.populations.push(new_population);
     }
 
-
+    #[hotpath::measure]
     fn merge_populations(&mut self) {
         if self.populations.len() < 2 {
             return; // Need at least two populations to merge
@@ -63,45 +63,36 @@ impl MetaPopulation {
         let mut rng = rand::thread_rng();
         let selected_indices = (0..self.populations.len()).choose_multiple(&mut rng, 2);
 
-        let pop1 = &self.populations[selected_indices[0]];
-        let pop2 = &self.populations[selected_indices[1]];
+        // remove selected populations by index and take ownership to avoid cloning an entire Population
+        let new_population_id = self.max_population_id() + 1;
+        let low_idx = selected_indices[0].min(selected_indices[1]);
+        let high_idx = selected_indices[0].max(selected_indices[1]);
 
-        // merge two populations, sampling by replacement to maintain population size
-        // create vector of tuples of population ids and genome ids
-        let mut merged_pop = Vec::new();
-        for genome in pop1.pop.iter() {
-            merged_pop.push((pop1.id, genome.genome_id));
-        }
-        for genome in pop2.pop.iter() {
-            merged_pop.push((pop2.id, genome.genome_id));
-        }
+        let pop2 = self.populations.swap_remove(high_idx);
+        let pop1 = self.populations.swap_remove(low_idx);
 
-        // sample with replacement to create new population
-        let mut new_pop_genomes = Vec::new();
-        for new_genome_id in 0..pop1.pop.len() {
-            let idx = rng.gen_range(0..merged_pop.len());
-            let (pop_id, genome_id) = merged_pop[idx];
-            let mut genome = if pop_id == pop1.id {
-                pop1.pop[genome_id].clone()
+        // sample with replacement from the union of both populations, preserving the original pop1 size
+        let pop1_len = pop1.pop.len();
+        let pop2_len = pop2.pop.len();
+        let combined_len = pop1_len + pop2_len;
+
+        let mut new_pop_genomes = Vec::with_capacity(pop1_len);
+        for new_genome_id in 0..pop1_len {
+            let idx = rng.gen_range(0..combined_len);
+            let mut genome = if idx < pop1_len {
+                pop1.pop[idx].clone()
             } else {
-                pop2.pop[genome_id].clone()
+                pop2.pop[idx - pop1_len].clone()
             };
             genome.genome_id = new_genome_id; // assign new genome ID
             new_pop_genomes.push(genome);
         }
 
-        let mut merged_population = pop1.clone();
+        let mut merged_population = pop1;
         merged_population.pop = new_pop_genomes;
-        merged_population.id = self.max_population_id() + 1;
-
-        // remove old populations and add merged population, remove from back to front to avoid index issues
-        if selected_indices[0] < selected_indices[1] {
-            self.populations.remove(selected_indices[1]);
-            self.populations.remove(selected_indices[0]);
-        } else {
-            self.populations.remove(selected_indices[0]);
-            self.populations.remove(selected_indices[1]);
-        }
+        merged_population.id = new_population_id;
+        // population members were resampled, so homology map must match new genome ordering
+        merged_population.update_homology_map();
 
         self.populations.push(merged_population);
     }
@@ -180,13 +171,15 @@ impl MetaPopulation {
                 .expect("bidirectional_recombination must be a boolean (true/false).");
         }
 
-        // before starting, update mutation distributions for all populations based on initial genome sizes, to ensure they are correct for the first generation
-        self.populations.par_iter_mut().for_each(|population| {
+        // Process populations one-at-a-time to limit concurrent transient allocations
+        // from mutation/recombination/sampling steps and reduce peak memory.
+        // Internal population routines still use Rayon where appropriate.
+        for population in self.populations.iter_mut() {
             population.update_mu_dists(&self.site_mutation_mus_vals, &self.site_indel_mus_vals);
-        });
+        }
 
         for generation in 1..=self.n_generations {
-            self.populations.par_iter_mut().for_each(|population| {
+            for population in self.populations.iter_mut() {
                 let mut rng = rand::thread_rng();
                 
                 // mutate at nucleotide level
@@ -208,7 +201,7 @@ impl MetaPopulation {
                 if generation < self.n_generations {
                     population.update_mu_dists(&self.site_mutation_mus_vals, &self.site_indel_mus_vals);
                 }
-            });
+            }
 
             // perform migration between populations
             let n_migrations = self.migrate();
