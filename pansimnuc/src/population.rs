@@ -230,7 +230,7 @@ pub struct Population {
     pub compress_output: bool
 }
 
-pub type HomologyPositions = SmallVec<[usize; 1]>;
+pub type HomologyPositions = SmallVec<[u32; 1]>;
 pub type HomologyMap = Vec<Vec<HomologyPositions>>;
 
 impl Population {
@@ -561,7 +561,7 @@ impl Population {
             for (element_idx, element) in genome.seq.iter().enumerate() {
                 let element_id = element.element_id;
                 let homology_group = &mut self.homology_map[element_id][genome.genome_id];
-                homology_group.push(element_idx); // convert back to 0 indexed
+                homology_group.push(element_idx as u32); // convert back to 0 indexed
             }
         }
     }
@@ -710,7 +710,7 @@ impl Population {
 
                 // generate homology map for this element, initially one position per genome
                 let element_homology_map: Vec<HomologyPositions> =
-                    vec![smallvec![element_id]; n_genomes];
+                    vec![smallvec![element_id as u32]; n_genomes];
                 homology_map.push(element_homology_map);
 
                 element_id += 1;
