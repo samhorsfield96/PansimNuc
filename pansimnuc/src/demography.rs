@@ -87,8 +87,6 @@ impl MetaPopulation {
         let mut merged_population = pop1;
         merged_population.pop = new_pop_genomes;
         merged_population.id = new_population_id;
-        // population members were resampled, so homology map must match new genome ordering
-        merged_population.update_homology_map();
 
         self.populations.push(merged_population);
     }
@@ -136,11 +134,6 @@ impl MetaPopulation {
                 migrated_genome.genome_id = target_genome_idx; // assign genome ID of target genome to migrated genome to maintain population structure 
                 self.populations[target_pop_idx].pop[target_genome_idx] = migrated_genome;
             }
-        }
-
-        // update homology maps for all populations after migration, to ensure they are consistent with the new population structure
-        for population_idx in updated_populations {
-            self.populations[population_idx].update_homology_map();
         }
 
         n_migrations
@@ -322,7 +315,6 @@ mod tests {
             structural_mu_dists: Vec::new(),
             recombination_dists: Vec::new(),
             recombination_threshold: 0.0,
-            homology_map: Vec::new(),
             feature_map: std::collections::HashMap::new(),
             max_multiplier_dist: 0,
             n_generations: 1,

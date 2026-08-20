@@ -175,7 +175,6 @@ mod tests {
             structural_mu_dists: vec![],
             recombination_dists: vec![],
             recombination_threshold: 0.9,
-            homology_map: vec![],
             feature_map: HashMap::new(),
             max_multiplier_dist: 0,
             n_generations: 1,
