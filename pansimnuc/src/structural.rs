@@ -2,7 +2,6 @@
 
 use crate::mutation::Distribution as MutationDistribution;
 use crate::population::NucElement;
-use crate::population::HomologyPositions;
 use crate::population::{Genome, Population};
 use rand::Rng; 
 use rand::seq::SliceRandom;
@@ -441,7 +440,6 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
         component_packages.into_par_iter().map(|(recombination_map, mut genomes)| {
             // thread specific variables
             let mut thread_rng = rand::thread_rng();
-            let mut thread_homology_updates: HashMap<(usize, usize), HomologyPositions> = HashMap::new();
             let mut thread_total_donor_length = 0;
             let mut thread_total_recipient_length = 0;
             let mut thread_successful_recombinations = 0;
@@ -458,6 +456,11 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                 // get local donor index in genomes vec
                 let donor_local = genome_id_to_local_idx[&donor];
 
+                // generate initial donor homology_map; kept mutable so bidirectional splices
+                // to the donor genome stay reflected across subsequent recipients
+                let mut donor_genome_len = genomes[donor_local].1.seq.len();
+                let mut donor_homology_map = create_homology_map(&genomes[donor_local].1, donor_genome_len);
+
                 for recipient in recipients {
                     // get local recipient index in genomes vec
                     let recipient_local = genome_id_to_local_idx[&recipient];
@@ -470,11 +473,11 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         (&mut right[0].1, &mut left[recipient_local].1)
                     };
 
-                    let donor_genome_len = donor_genome.seq.len();
+                    // update in case donor has changed length
+                    donor_genome_len = donor_genome.seq.len();
                     let recipient_genome_len = recipient_genome.seq.len();
 
-                    // generate donor and recpient homology map
-                    let donor_homology_map = create_homology_map(&donor_genome, donor_genome_len);
+                    // generate recipient homology map
                     let recipient_homology_map = create_homology_map(&recipient_genome, recipient_genome_len);
 
                     // look for donor and recipient site, maximum total donor length attempts, if not found, skip recombination event
@@ -610,10 +613,25 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
 
                         // do the same for donor track
                         if bidirectional {
-                            // update donor genome
+                            // also need to update donor homology map
+                            // remove old positions in donor site
+                            for element_idx in start_donor_site..=end_donor_site {
+                                let element_id = donor_genome.seq[element_idx].element_id;
+                                if let Some(positions) = donor_homology_map.get_mut(&element_id) {
+                                    positions.retain(|pos| *pos != element_idx); // remove old position
+                                }
+                            }
+
+                            // update donor genome in place
                             donor_genome
                                 .seq
                                 .splice(start_donor_site..=end_donor_site, recipient_track);
+
+                            // add new positions to homology map
+                            for element_idx in start_donor_site..(start_donor_site + recipient_track_len) {
+                                let element_id = donor_genome.seq[element_idx].element_id;
+                                donor_homology_map.entry(element_id).or_default().push(element_idx); // add new position
+                            }
 
                             // update contig_ids
                             donor_genome.update_contig_starts();
@@ -621,7 +639,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                     }
                 }
             }
-        (genomes, thread_homology_updates, thread_total_donor_length, thread_total_recipient_length, thread_successful_recombinations)
+        (genomes, thread_total_donor_length, thread_total_recipient_length, thread_successful_recombinations)
     }).collect::<Vec<_>>();
 
     // combine results from each thread
@@ -632,7 +650,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
     // staging vec for indexed insertion by genome_id
     let mut new_pop: Vec<Option<Genome>> = (0..pop_size).map(|_| None).collect();
 
-    for (genomes, thread_homology_updates, thread_donor_length, thread_recipient_length, thread_successful_recombinations) in results {
+    for (genomes, thread_donor_length, thread_recipient_length, thread_successful_recombinations) in results {
         total_donor_length += thread_donor_length;
         total_recipient_length += thread_recipient_length;
         successful_recombinations += thread_successful_recombinations;
