@@ -18,7 +18,6 @@ use std::sync::Arc;
 use flate2::Compression;
 use bgzip::BGZFWriter;
 use flate2::read::GzDecoder;
-use smallvec::{smallvec, SmallVec};
 
 #[derive(Clone)]
 pub struct NucElement {
@@ -228,9 +227,6 @@ pub struct Population {
     pub optimal_genome_size: usize,
     pub compress_output: bool
 }
-
-pub type HomologyPositions = SmallVec<[usize; 1]>;
-pub type HomologyMap = Vec<Vec<HomologyPositions>>;
 
 impl Population {
     pub fn total_seq_lengths(&self) -> (f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) {
