@@ -2,7 +2,6 @@
 
 use crate::mutation::Distribution as MutationDistribution;
 use crate::population::NucElement;
-use crate::population::HomologyPositions;
 use crate::population::{Genome, Population};
 use rand::Rng; 
 use rand::seq::SliceRandom;
@@ -13,6 +12,7 @@ use std::collections::HashSet;
 use petgraph::graph::{NodeIndex, UnGraph};
 use petgraph::visit::Dfs;
 use rayon::{prelude::*};
+use smallvec::{smallvec, SmallVec};
 
 // for a given NucElement, store its position in the genome
 // which can then be shuffled around by structural mutations, or copied
@@ -350,6 +350,18 @@ fn connected_components(
     components
 }
 
+pub type HomologyPositions = SmallVec<[usize; 1]>;
+
+fn create_homology_map (genome: &Genome, genome_len: usize) -> HashMap<usize, HomologyPositions> {
+    let mut homology_map: HashMap<usize, HomologyPositions> = HashMap::with_capacity(genome_len);
+
+     for (element_idx, element) in genome.seq.iter().enumerate() {
+        let element_id = element.element_id;
+        homology_map.entry(element_id).or_default().push(element_idx);
+    }
+    homology_map
+}
+
 pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> (usize, usize, usize) {
     let mut rng = rand::thread_rng();
 
@@ -431,7 +443,6 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
         component_packages.into_par_iter().map(|(recombination_map, mut genomes)| {
             // thread specific variables
             let mut thread_rng = rand::thread_rng();
-            let mut thread_homology_updates: HashMap<(usize, usize), HomologyPositions> = HashMap::new();
             let mut thread_total_donor_length = 0;
             let mut thread_total_recipient_length = 0;
             let mut thread_successful_recombinations = 0;
@@ -447,6 +458,12 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
             for (donor, recipients) in recombination_map {
                 // get local donor index in genomes vec
                 let donor_local = genome_id_to_local_idx[&donor];
+
+                // generate initial donor homology_map; kept mutable so bidirectional splices
+                // to the donor genome stay reflected across subsequent recipients
+                let mut donor_genome_len = genomes[donor_local].1.seq.len();
+                let mut donor_homology_map = create_homology_map(&genomes[donor_local].1, donor_genome_len);
+
                 for recipient in recipients {
                     // get local recipient index in genomes vec
                     let recipient_local = genome_id_to_local_idx[&recipient];
@@ -459,8 +476,12 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         (&mut right[0].1, &mut left[recipient_local].1)
                     };
 
-                    let donor_genome_len = donor_genome.seq.len();
+                    // update in case donor has changed length
+                    donor_genome_len = donor_genome.seq.len();
                     let recipient_genome_len = recipient_genome.seq.len();
+
+                    // generate recipient homology map
+                    let recipient_homology_map = create_homology_map(&recipient_genome, recipient_genome_len);
 
                     // look for donor and recipient site, maximum total donor length attempts, if not found, skip recombination event
                     let mut donor_site_chosen: bool = false;
@@ -479,15 +500,15 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         let element = &donor_genome.seq[recombination_pos];
                         let recombination_pos_idx = element.element_id;
 
-                        // Use staged positions for genomes already changed by an earlier event in
-                        // this component; the population map is only the initial snapshot.
-                        let donor_homology = thread_homology_updates
-                            .get(&(recombination_pos_idx, donor))
-                            .unwrap_or(&population.homology_map[recombination_pos_idx][donor]);
-                        let recipient_homology = thread_homology_updates
-                            .get(&(recombination_pos_idx, recipient))
-                            .unwrap_or(&population.homology_map[recombination_pos_idx][recipient]);
-
+                        // get homology indices; element_id may be absent from either map, so fall back to an empty slice instead of panicking
+                        let donor_homology = donor_homology_map
+                            .get(&recombination_pos_idx)
+                            .map(SmallVec::as_slice)
+                            .unwrap_or(&[]);
+                        let recipient_homology = recipient_homology_map
+                            .get(&recombination_pos_idx)
+                            .map(SmallVec::as_slice)
+                            .unwrap_or(&[]);
 
                         let donor_has_site = !donor_homology.is_empty();
                         let recipient_has_site = !recipient_homology.is_empty();
@@ -585,63 +606,43 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         thread_total_recipient_length += recipient_track_seq_len;
                         thread_successful_recombinations += 1;
 
-                        // update homology map for recipient genome, need to add new positions for each element in donor track, and remove old positions for each element in recipient track
-                        // remove old positions in recipient site
-                        for element_idx in start_recipient_site..=end_recipient_site {
-                            let element_id = recipient_genome.seq[element_idx].element_id;
-                            let homology_group = thread_homology_updates
-                                .entry((element_id, recipient_genome.genome_id))
-                                .or_insert_with(|| population.homology_map[element_id][recipient_genome.genome_id].clone());
-                            homology_group.retain(|pos| *pos != element_idx); // remove old position
-                        }
-
                         // now safe to mutably borrow recipient and update recipient
                         recipient_genome
                             .seq
                             .splice(start_recipient_site..=end_recipient_site, donor_track);
 
-                        // add new positions
-                        for element_idx in start_recipient_site..(start_recipient_site + donor_track_len) {
-                            let element_id = recipient_genome.seq[element_idx].element_id;
-                            let homology_group = thread_homology_updates
-                                .entry((element_id, recipient_genome.genome_id))
-                                .or_insert_with(|| population.homology_map[element_id][recipient_genome.genome_id].clone());
-                            homology_group.push(element_idx); // add new position
-                        }
                         // update contig_ids
                         recipient_genome.update_contig_starts();
 
                         // do the same for donor track
                         if bidirectional {
+                            // also need to update donor homology map
                             // remove old positions in donor site
                             for element_idx in start_donor_site..=end_donor_site {
                                 let element_id = donor_genome.seq[element_idx].element_id;
-                                let homology_group = thread_homology_updates
-                                    .entry((element_id, donor_genome.genome_id))
-                                    .or_insert_with(|| population.homology_map[element_id][donor_genome.genome_id].clone());
-                                homology_group.retain(|pos| *pos != element_idx); // remove old position
+                                if let Some(positions) = donor_homology_map.get_mut(&element_id) {
+                                    positions.retain(|pos| *pos != element_idx); // remove old position
+                                }
                             }
 
-                            // update donor genome
+                            // update donor genome in place
                             donor_genome
                                 .seq
                                 .splice(start_donor_site..=end_donor_site, recipient_track);
 
-                            // add new positions
+                            // add new positions to homology map
                             for element_idx in start_donor_site..(start_donor_site + recipient_track_len) {
                                 let element_id = donor_genome.seq[element_idx].element_id;
-                                let homology_group = thread_homology_updates
-                                    .entry((element_id, donor_genome.genome_id))
-                                    .or_insert_with(|| population.homology_map[element_id][donor_genome.genome_id].clone());
-                                homology_group.push(element_idx); // add new position
+                                donor_homology_map.entry(element_id).or_default().push(element_idx); // add new position
                             }
+
                             // update contig_ids
                             donor_genome.update_contig_starts();
                         }
                     }
                 }
             }
-        (genomes, thread_homology_updates, thread_total_donor_length, thread_total_recipient_length, thread_successful_recombinations)
+        (genomes, thread_total_donor_length, thread_total_recipient_length, thread_successful_recombinations)
     }).collect::<Vec<_>>();
 
     // combine results from each thread
@@ -652,7 +653,7 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
     // staging vec for indexed insertion by genome_id
     let mut new_pop: Vec<Option<Genome>> = (0..pop_size).map(|_| None).collect();
 
-    for (genomes, thread_homology_updates, thread_donor_length, thread_recipient_length, thread_successful_recombinations) in results {
+    for (genomes, thread_donor_length, thread_recipient_length, thread_successful_recombinations) in results {
         total_donor_length += thread_donor_length;
         total_recipient_length += thread_recipient_length;
         successful_recombinations += thread_successful_recombinations;
@@ -660,11 +661,6 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
         // update population with new genomes
         for (genome_id, genome) in genomes.into_iter() {
             new_pop[genome_id] = Some(genome);
-        }
-
-        // only write back homology groups that changed in this component
-        for ((element_id, genome_id), positions) in thread_homology_updates.into_iter() {
-            population.homology_map[element_id][genome_id] = positions;
         }
     }
 
@@ -926,13 +922,6 @@ mod tests {
                 .unwrap();
         let recombination_len = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
 
-        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
-        for idx in 0..n_elements {
-            // Map each element_id to its actual position in each genome so
-            // recombination start sites can vary across the genome.
-            homology_map.push(vec![smallvec::smallvec![idx], smallvec::smallvec![idx]]);
-        }
-
         Population {
             id: 0,
             generation: 0,
@@ -944,7 +933,6 @@ mod tests {
             structural_mu_dists: vec![vec![]],
             recombination_dists: vec![recombination_count, recombination_len],
             recombination_threshold: 0.0,
-            homology_map,
             feature_map: HashMap::new(),
             max_multiplier_dist: 10,
             n_generations: 10,
@@ -1097,11 +1085,6 @@ mod tests {
         default_structural_dists[0][2] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
 
-        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
-        for _ in genome.seq.iter() {
-            homology_map.push(vec![smallvec::smallvec![0]]);
-        }
-
         mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
 
         let after_strands: Vec<bool> = genome.seq.iter().map(|e| e.strand).collect();
@@ -1123,11 +1106,6 @@ mod tests {
 
         let mut default_structural_dists = default_structural_dists();
         default_structural_dists[0][1] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
-
-        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
-        for _ in genome.seq.iter() {
-            homology_map.push(vec![smallvec::smallvec![0]]);
-        }
 
         let pos = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
         mutate_intra_genome(&mut genome, &default_structural_dists, &pos, false);
@@ -1154,10 +1132,6 @@ mod tests {
         default_structural_dists[0][0] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
         default_structural_dists[0][1] = MutationDistribution::new_uniform(1.0, 1.1).unwrap();
 
-        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
-        for _ in genome.seq.iter() {
-            homology_map.push(vec![smallvec::smallvec![0]]);
-        }
 
         // Use a non-zero offset so duplicates land somewhere other than position 0.
         let pos = MutationDistribution::new_uniform(1.0, 2.0).unwrap();
@@ -1681,11 +1655,6 @@ mod tests {
                 .unwrap();
         let recombination_len = MutationDistribution::new_uniform(0.0, 0.1).unwrap();
 
-        let mut homology_map: Vec<Vec<HomologyPositions>> = Vec::new();
-        for idx in 0..n_elements {
-            homology_map.push(vec![smallvec::smallvec![idx], smallvec::smallvec![idx]]);
-        }
-
         let mut population = Population {
             id: 0,
             generation: 0,
@@ -1698,7 +1667,6 @@ mod tests {
             recombination_dists: vec![recombination_count, recombination_len],
             // Require exact sequence identity at candidate sites.
             recombination_threshold: 1.0,
-            homology_map,
             feature_map: HashMap::new(),
             max_multiplier_dist: 10,
             n_generations: 10,
