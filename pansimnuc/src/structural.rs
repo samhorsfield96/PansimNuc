@@ -12,6 +12,7 @@ use std::collections::HashSet;
 use petgraph::graph::{NodeIndex, UnGraph};
 use petgraph::visit::Dfs;
 use rayon::{prelude::*};
+use smallvec::{smallvec, SmallVec};
 
 // for a given NucElement, store its position in the genome
 // which can then be shuffled around by structural mutations, or copied
@@ -349,8 +350,10 @@ fn connected_components(
     components
 }
 
-fn create_homology_map (genome: &Genome, genome_len: usize) -> HashMap<usize, Vec<usize>> {
-    let mut homology_map: HashMap<usize, Vec<usize>> = HashMap::with_capacity(genome_len);
+pub type HomologyPositions = SmallVec<[usize; 1]>;
+
+fn create_homology_map (genome: &Genome, genome_len: usize) -> HashMap<usize, HomologyPositions> {
+    let mut homology_map: HashMap<usize, HomologyPositions> = HashMap::with_capacity(genome_len);
 
      for (element_idx, element) in genome.seq.iter().enumerate() {
         let element_id = element.element_id;
@@ -500,11 +503,11 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
                         // get homology indices; element_id may be absent from either map, so fall back to an empty slice instead of panicking
                         let donor_homology = donor_homology_map
                             .get(&recombination_pos_idx)
-                            .map(Vec::as_slice)
+                            .map(SmallVec::as_slice)
                             .unwrap_or(&[]);
                         let recipient_homology = recipient_homology_map
                             .get(&recombination_pos_idx)
-                            .map(Vec::as_slice)
+                            .map(SmallVec::as_slice)
                             .unwrap_or(&[]);
 
                         let donor_has_site = !donor_homology.is_empty();
