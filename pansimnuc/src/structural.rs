@@ -853,7 +853,7 @@ use crate::mutation::{Distribution as MutationDistribution, MutationMap};
         let mut seq: Vec<NucElement> = Vec::new();
         for idx in 0..n_elements {
             let marker_seq_ori = vec![marker_base; 4];
-            let marer_seq = bitpacked::new_vec(marker_seq_ori);
+            let marker_seq: bitpacked = bitpacked::new_vec(marker_seq_ori);
             seq.push(NucElement {
                 contig_id: 0,
                 element_id: idx,
@@ -861,10 +861,10 @@ use crate::mutation::{Distribution as MutationDistribution, MutationMap};
                 feature_pos: idx,
                 feature_type: Arc::from("exon"),
                 multiplier: 1.0,
-                seq: Arc::new(marer_seq.clone()),
-                mutation_map: Arc::new(MutationMap::new(0, 0, &marer_seq, &sel_dist, &mut rng)),
+                seq: Arc::new(marker_seq.clone()),
+                mutation_map: Arc::new(MutationMap::new(0, 0, &marker_seq, &sel_dist, &mut rng)),
                 strand: strand_seed,
-                original_length: marer_seq.len(),
+                original_length: marker_seq.len(),
                 frameshift: false,
                 tracked: false,
                 selection_coeff: 0.0,
@@ -905,9 +905,9 @@ use crate::mutation::{Distribution as MutationDistribution, MutationMap};
             .iter()
             .flat_map(|element| {
                 if element.strand {
-                    element.seq.decode_dna()
+                    element.seq.decode_int()
                 } else {
-                    reverse_complement(&element.seq.decode_dna())
+                    reverse_complement(&element.seq.decode_int())
                 }
             })
             .map(|base| base.to_string())
@@ -916,9 +916,9 @@ use crate::mutation::{Distribution as MutationDistribution, MutationMap};
     }
 
     fn make_recombination_test_population(forced_events: usize, n_elements: usize) -> Population {
-        // genome 0 starts with marker base 1 (A), genome 1 starts with marker base 2 (C)
-        let g0 = make_recombination_test_genome(0, n_elements, true, 1);
-        let g1 = make_recombination_test_genome(1, n_elements, true, 2);
+        // genome 0 starts with marker base 0 (A), genome 1 starts with marker base 1 (C)
+        let g0 = make_recombination_test_genome(0, n_elements, true, 0);
+        let g1 = make_recombination_test_genome(1, n_elements, true, 1);
 
         let recombination_count =
             MutationDistribution::new_uniform(forced_events as f64, forced_events as f64 + 0.1)
@@ -958,7 +958,7 @@ use crate::mutation::{Distribution as MutationDistribution, MutationMap};
         population
             .pop
             .iter()
-            .filter(|genome| genome_has_marker(genome, 1) && genome_has_marker(genome, 2))
+            .filter(|genome| genome_has_marker(genome, 0) && genome_has_marker(genome, 1))
             .count()
     }
 
@@ -1050,16 +1050,16 @@ use crate::mutation::{Distribution as MutationDistribution, MutationMap};
 
         let exact_homology = {
             let distance = levenshtein_simd_k(
-                &query.seq.decode_dna().as_slice(),
-                &subject.seq.decode_dna().as_slice(),
+                &&query.seq.decode_int().as_slice(),
+                &subject.seq.decode_int().as_slice(),
                 sequence_length as u32,
             )
             .expect("the exact distance should be within the maximum bound");
             1.0 - distance as f64 / sequence_length as f64
         };
         let kmer_homology = estimate_long_sequence_homology(
-            &query.seq.decode_dna().as_slice(),
-            &subject.seq.decode_dna().as_slice(),
+            &query.seq.decode_int().as_slice(),
+            &subject.seq.decode_int().as_slice(),
         );
 
         println!("exact_homology: {}", exact_homology);
@@ -1392,11 +1392,11 @@ use crate::mutation::{Distribution as MutationDistribution, MutationMap};
         );
 
         assert!(
-            !genome_has_marker(&population.pop[0], 2),
+            !genome_has_marker(&population.pop[0], 1),
             "before bidirectional recombination, genome 0 should not have marker sequence from genome 1"
         );
         assert!(
-            !genome_has_marker(&population.pop[1], 1),
+            !genome_has_marker(&population.pop[1], 0),
             "before ith bidirectional recombination, genome 1 should not have marker sequence from genome 0"
         );
 
@@ -1425,11 +1425,11 @@ use crate::mutation::{Distribution as MutationDistribution, MutationMap};
             "at least one recombination should succeed in this deterministic setup"
         );
         assert!(
-            genome_has_marker(&population.pop[0], 2),
+            genome_has_marker(&population.pop[0], 1),
             "with bidirectional recombination, genome 0 should gain marker sequence from genome 1"
         );
         assert!(
-            genome_has_marker(&population.pop[1], 1),
+            genome_has_marker(&population.pop[1], 0),
             "with bidirectional recombination, genome 1 should gain marker sequence from genome 0"
         );
         assert!(
@@ -1450,12 +1450,12 @@ use crate::mutation::{Distribution as MutationDistribution, MutationMap};
         );
 
         assert!(
-            !genome_has_marker(&population.pop[0], 2),
+            !genome_has_marker(&population.pop[0], 1),
             "before bidirectional recombination, genome 0 should not have marker sequence from genome 1"
         );
         assert!(
-            !genome_has_marker(&population.pop[1], 1),
-            "before ith bidirectional recombination, genome 1 should not have marker sequence from genome 0"
+            !genome_has_marker(&population.pop[1], 0),
+            "before bidirectional recombination, genome 1 should not have marker sequence from genome 0"
         );
 
         println!("Genome 0 pre-recomb: {}", print_genome(&population, 0));
@@ -1483,11 +1483,11 @@ use crate::mutation::{Distribution as MutationDistribution, MutationMap};
             "at least one recombination should succeed in this deterministic setup"
         );
         assert!(
-            genome_has_marker(&population.pop[0], 2),
+            genome_has_marker(&population.pop[0], 1),
             "with bidirectional recombination, genome 0 should gain marker sequence from genome 1"
         );
         assert!(
-            genome_has_marker(&population.pop[1], 1),
+            genome_has_marker(&population.pop[1], 0),
             "with bidirectional recombination, genome 1 should gain marker sequence from genome 0"
         );
         assert!(
@@ -1531,7 +1531,7 @@ use crate::mutation::{Distribution as MutationDistribution, MutationMap};
                 .iter()
                 .enumerate()
                 .map(|(genome_idx, genome)| {
-                    let foreign_marker = if genome_idx == 0 { 2 } else { 1 };
+                    let foreign_marker = if genome_idx == 0 { 1 } else { 0 };
                     genome
                         .seq
                         .iter()
@@ -1651,8 +1651,8 @@ use crate::mutation::{Distribution as MutationDistribution, MutationMap};
         let forced_events = 5;
         let n_elements = 8;
 
-        let mut g0 = make_recombination_test_genome(0, n_elements, true, 1);
-        let mut g1 = make_recombination_test_genome(1, n_elements, false, 1);
+        let mut g0 = make_recombination_test_genome(0, n_elements, true, 0);
+        let mut g1 = make_recombination_test_genome(1, n_elements, false, 0);
 
         let recombination_count =
             MutationDistribution::new_uniform(forced_events as f64, forced_events as f64 + 0.1)
