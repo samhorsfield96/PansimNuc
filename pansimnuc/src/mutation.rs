@@ -1100,7 +1100,7 @@ mod tests {
         // reliably produces insertions; use a very high rate to guarantee length change
         let indel_dist = Distribution::new_poisson(10.0).unwrap();
         let core_vec: Vec<Vec<u8>> =
-            vec![vec![1, 2, 3], vec![0, 2, 3], vec![0, 1, 3], vec![0, 1, 2]];
+            vec![vec![1, 2, 3], vec![0, 2, 3], vec![0, 1, 3], vec![0, 1, 2], vec![0, 1, 2, 3]];
 
         let n_snps = mu_dist.sample(&mut rng) as usize;
         let n_indels = indel_dist.sample(&mut rng) as usize;
@@ -1150,7 +1150,7 @@ mod tests {
         assert_ne!(map.get(1, 1), None); // site 1 changed
         assert_ne!(map.get(2, 1), None); // site 1 changed
         assert_ne!(map.get(3, 1), None); // site 1 changed
-        
+
         assert_eq!(map.get(0, 0), Some(&0.10)); // site 0 unchanged
         assert_eq!(map.get(0, 2), Some(&0.20)); // site 1 shifted to 2
         assert_eq!(map.get(0, 3), Some(&0.30)); // site 2 shifted to 3
@@ -1234,7 +1234,7 @@ mod tests {
         let mu_dist = Distribution::new_poisson(1e-12).unwrap();
         let indel_dist = Distribution::new_poisson(10.0).unwrap();
         let core_vec: Vec<Vec<u8>> =
-            vec![vec![1, 2, 3], vec![0, 2, 3], vec![0, 1, 3], vec![0, 1, 2]];
+            vec![vec![1, 2, 3], vec![0, 2, 3], vec![0, 1, 3], vec![0, 1, 2], vec![0, 1, 2, 3]];
 
         let mut frameshift = true;
         let n_snps = mu_dist.sample(&mut thread_rng) as usize;
@@ -1258,7 +1258,7 @@ mod tests {
         let mu_dist = Distribution::new_poisson(1e-12).unwrap();
         let indel_dist = Distribution::new_poisson(1e-12).unwrap();
         let core_vec: Vec<Vec<u8>> =
-            vec![vec![1, 2, 3], vec![0, 2, 3], vec![0, 1, 3], vec![0, 1, 2]];
+            vec![vec![1, 2, 3], vec![0, 2, 3], vec![0, 1, 3], vec![0, 1, 2], vec![0, 1, 2, 3]];
 
         // Start with frameshift already set; expect it to remain unchanged when no indels fire
         let mut frameshift = true;

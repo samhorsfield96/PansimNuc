@@ -67,8 +67,8 @@ fn estimate_long_sequence_homology(s: &[u8], t: &[u8]) -> f64 {
 }
 
 fn calculate_homology(a: &NucElement, b: &NucElement, threshold: f64) -> f64 {
-    let a_sequence = a.seq.decode_dna();
-    let b_sequence = b.seq.decode_dna();
+    let a_sequence = a.seq.decode_int();
+    let b_sequence = b.seq.decode_int();
 
     let a_len = a_sequence.len();
     let b_len = b_sequence.len();
@@ -987,21 +987,21 @@ use crate::mutation::{Distribution as MutationDistribution, MutationMap};
 
     #[test]
     fn reverse_complement_produces_expected_sequence() {
-        let seq = vec![1, 2, 4, 8, 16];
-        let rc = reverse_complement(&seq);
+        let seq = bitpacked::new_vec(vec![0, 1, 2, 3, 4]);
+        let rc = reverse_complement(&seq.decode_int());
         assert_eq!(
             rc,
-            vec![16, 1, 2, 4, 8],
+            vec![4, 0, 1, 2, 3],
             "reverse complement should reverse sequence and swap one-hot nucleotide codes"
         );
     }
 
     #[test]
     fn homology_uses_reverse_complement_for_opposite_strands() {
-        let forward = vec![1, 2, 4, 8, 1];
-        let reversed_complement = reverse_complement(&forward);
+        let forward = bitpacked::new_vec(vec![0, 1, 2, 3, 0]);
+        let reversed_complement = reverse_complement(&forward.decode_int());
 
-        let query = make_homology_test_element(forward, true);
+        let query = make_homology_test_element(forward.decode_int(), true);
 
         // Same strand: do not reverse complement, so this should not be a perfect match.
         let subject_same_strand = make_homology_test_element(reversed_complement.clone(), true);

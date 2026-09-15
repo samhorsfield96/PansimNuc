@@ -51,6 +51,25 @@ impl bitpacked {
         }
     }
 
+    pub fn decode_int(&self) -> Vec<u8> {
+        let sequence_length = self.bits.len() / 3;
+
+        let mut seq = vec![0u8; sequence_length];
+
+        for site in 0..sequence_length {
+            let offset = site * 3;
+
+            let value =
+                (self.bits[offset] as u8)
+                | ((self.bits[offset + 1] as u8) << 1)
+                | ((self.bits[offset + 2] as u8) << 2);
+
+            seq[site] = value;
+        }
+
+        seq
+    }
+
     // function to generate string
     pub fn decode_dna(&self) -> Vec<u8> {
         let sequence_length = self.bits.len() / 3;

@@ -734,7 +734,7 @@ impl Population {
             .collect();
 
         let core_vec: Vec<Vec<u8>> =
-            vec![vec![1, 2, 3], vec![0, 2, 3], vec![0, 1, 3], vec![0, 1, 2]];
+            vec![vec![1, 2, 3], vec![0, 2, 3], vec![0, 1, 3], vec![0, 1, 2], vec![0, 1, 2, 3]];
 
         Self {
             id: 0,
