@@ -8,7 +8,7 @@ pub type DnaBits = BitVec<u64, Lsb0>;
 
 // seq holds the two bit characters of each base
 // pos_n holds the one bit character of each N base if present
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct bitpacked {
     bits : DnaBits
 }
@@ -132,7 +132,7 @@ impl bitpacked {
         self.bits.remove(offset);
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = u8> + '_ {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = u8> + '_ {
         (0..self.len()).map(|site| self.index(site))
     }
 }

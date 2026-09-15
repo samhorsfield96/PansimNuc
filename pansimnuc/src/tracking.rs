@@ -78,7 +78,7 @@ pub fn write_tracking_output(out_path: &str, metapopulation: &MetaPopulation) {
                 let element_end = current_start + element.seq.len();
 
                 if element.tracked {
-                    let element_seq = element.seq.iter().map(|&base| Population::decode_base(base, false)).collect::<Vec<u8>>();
+                    let element_seq = element.seq.iter().map(|base| Population::decode_base(base, false)).collect::<Vec<u8>>();
                     let element_selection_coefficients = element.generate_selection_coefficients();
 
                     wtr.write_record(&[
@@ -111,7 +111,8 @@ pub fn write_tracking_output(out_path: &str, metapopulation: &MetaPopulation) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::demography::MetaPopulation;
+    use crate::bitpacking::bitpacked;
+use crate::demography::MetaPopulation;
     use crate::mutation::{Distribution, MutationMap};
     use crate::population::{Genome, NucElement, Population};
     use rand::SeedableRng;
@@ -120,7 +121,7 @@ mod tests {
     use std::sync::Arc;
 
     fn make_element(contig_id: usize, seq_len: usize) -> NucElement {
-        let seq = vec![1u8; seq_len];
+        let seq = bitpacked::new_vec(vec![0u8; seq_len]);
         let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
         let mut rng: StdRng = StdRng::seed_from_u64(0);
         NucElement {
