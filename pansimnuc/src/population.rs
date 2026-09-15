@@ -4,6 +4,7 @@ use crate::mutation::MutationMap;
 use crate::structural::mutate_inter_genome;
 use crate::structural::mutate_intra_genome;
 use crate::tracking::identify_tracked_element;
+use crate::bitpacking::bitpacked;
 use logsumexp::LogSumExp;
 use rand::SeedableRng;
 use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
@@ -27,7 +28,7 @@ pub struct NucElement {
     pub feature_pos: usize,
     pub feature_type: Arc<str>,
     pub multiplier: f64,
-    pub seq: Arc<Vec<u8>>,
+    pub seq: Arc<bitpacked>,
     pub mutation_map: Arc<MutationMap>,
     pub strand: bool,
     pub inverted: bool,
@@ -46,7 +47,7 @@ impl NucElement {
         let mut element_log_sum = 0.0;
 
         for (site, allele) in self.seq.iter().enumerate() {
-            if let Some(coeff) = self.mutation_map.get(*allele, site) {
+            if let Some(coeff) = self.mutation_map.get(allele, site) {
                 let log_coeff = (1.0 + coeff).ln(); // add log of coefficient to log sum
                 if log_coeff == std::f64::NEG_INFINITY {
                     // if coefficient is -1, set log sum to -inf and break loop, as any other mutations won't change this
@@ -69,7 +70,7 @@ impl NucElement {
             .iter()
             .enumerate()
             .map(|(site, allele)| {
-                if let Some(coeff) = self.mutation_map.get(*allele, site) {
+                if let Some(coeff) = self.mutation_map.get(allele, site) {
                     let log_coeff = (1.0 + coeff).ln(); // add log of coefficient to log sum
                     log_coeff
                 } else {
@@ -479,11 +480,11 @@ impl Population {
 
     pub fn decode_base(base: u8, inverted: bool) -> u8 {
         match base {
-            1 => if inverted { b'T' } else { b'A' },
-            2 => if inverted { b'G' } else { b'C' },
-            4 => if inverted { b'C' } else { b'G' },
-            8 => if inverted { b'A' } else { b'T' },
-            16 => b'N',
+            0 => if inverted { b'T' } else { b'A' },
+            1 => if inverted { b'G' } else { b'C' },
+            2 => if inverted { b'C' } else { b'G' },
+            3 => if inverted { b'A' } else { b'T' },
+            4 => b'N',
             _ => panic!("Invalid base encoding: {}", base),
         }
     }
@@ -733,7 +734,7 @@ impl Population {
             .collect();
 
         let core_vec: Vec<Vec<u8>> =
-            vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16]];
+            vec![vec![1, 2, 3], vec![0, 2, 3], vec![0, 1, 3], vec![0, 1, 2]];
 
         Self {
             id: 0,
@@ -1077,7 +1078,7 @@ impl Population {
 
                 // if inverted, write in reverse complement
                 if element.inverted {
-                    for &base in element.seq.iter().rev() {
+                    for base in element.seq.iter().rev() {
                         writer.write_all(&[Self::decode_base(base, true)])?;
                         wrapped_line_len += 1;
 
@@ -1087,7 +1088,7 @@ impl Population {
                         }
                     }
                 } else {
-                    for &base in element.seq.iter() {
+                    for base in element.seq.iter() {
                         writer.write_all(&[Self::decode_base(base, false)])?;
                         wrapped_line_len += 1;
 
@@ -1280,7 +1281,7 @@ mod tests {
                 start: 100,
                 end: 200,
                 strand: true,
-                seq: vec![1, 2, 4, 8], // ACGT
+                seq: bitpacked::new_vec(vec![0, 1, 2, 3]), // ACGT
             },
             FeaturePos {
                 contig_id: 0,
@@ -1289,7 +1290,7 @@ mod tests {
                 start: 300,
                 end: 400,
                 strand: false,
-                seq: vec![8, 4, 2, 1], // TGCA
+                seq: bitpacked::new_vec(vec![3, 2, 1, 0]), // TGCA
             },
         ];
         root.push(features);
@@ -1373,7 +1374,7 @@ mod tests {
             start: 0,
             end: 4,
             strand: true,
-            seq: vec![1, 2, 4, 8],
+            seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
         }];
         root.push(features);
 
@@ -1460,7 +1461,7 @@ mod tests {
             start: 0,
             end: 4,
             strand: true,
-            seq: vec![1, 2, 4, 8],
+            seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
         }];
         root.push(features);
 
@@ -1547,7 +1548,7 @@ mod tests {
             start: 0,
             end: 4,
             strand: true,
-            seq: vec![1, 2, 4, 8],
+            seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
         }];
         root.push(features);
 
@@ -1639,7 +1640,7 @@ mod tests {
             start: 0,
             end: 4,
             strand: true,
-            seq: vec![1, 2, 4, 8],
+            seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
         }];
         root.push(features);
 
@@ -1733,7 +1734,7 @@ mod tests {
             start: 0,
             end: 4,
             strand: true,
-            seq: vec![1, 2, 4, 8],
+            seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
         }];
         root.push(features);
 
@@ -1792,7 +1793,7 @@ mod tests {
         let mutated_element = &pop.pop[0].seq[0];
         assert_ne!(mutated_element.seq, original_seq);
 
-        for (site, (&old_allele, &new_allele)) in original_seq
+        for (site, (old_allele, new_allele)) in original_seq
             .iter()
             .zip(mutated_element.seq.iter())
             .enumerate()
@@ -1813,7 +1814,7 @@ mod tests {
                 start: 0,
                 end: 4,
                 strand: true,
-                seq: vec![1, 2, 4, 8],
+                seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -1822,7 +1823,7 @@ mod tests {
                 start: 4,
                 end: 8,
                 strand: true,
-                seq: vec![8, 4, 2, 1],
+                seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
             },
         ];
         root.push(features);
@@ -1886,7 +1887,7 @@ mod tests {
                 genome
                     .seq
                     .iter()
-                    .map(|element| (*element.seq).clone())
+                    .map(|element| (element.seq.decode_dna()).clone())
                     .collect()
             })
             .collect();
@@ -1909,7 +1910,7 @@ mod tests {
             let new_sequences: Vec<Vec<u8>> = genome
                 .seq
                 .iter()
-                .map(|element| (*element.seq).clone())
+                .map(|element| (element.seq.decode_dna()).clone())
                 .collect();
             assert_eq!(new_sequences, original_sequences[selected_index]);
         }
@@ -1925,7 +1926,7 @@ mod tests {
                 start: 0,
                 end: 4,
                 strand: true,
-                seq: vec![1, 1, 1, 1],
+                seq: bitpacked::new_vec(vec![0, 0, 0, 0]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -1934,7 +1935,7 @@ mod tests {
                 start: 4,
                 end: 8,
                 strand: true,
-                seq: vec![2, 2, 2, 2],
+                seq: bitpacked::new_vec(vec![1, 1, 1, 1]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -1943,7 +1944,7 @@ mod tests {
                 start: 8,
                 end: 12,
                 strand: true,
-                seq: vec![4, 4, 4, 4],
+                seq: bitpacked::new_vec(vec![2, 2, 2, 2]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -1952,7 +1953,7 @@ mod tests {
                 start: 12,
                 end: 16,
                 strand: true,
-                seq: vec![8, 8, 8, 8],
+                seq: bitpacked::new_vec(vec![3, 3, 3, 3]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -1961,7 +1962,7 @@ mod tests {
                 start: 16,
                 end: 18,
                 strand: true,
-                seq: vec![8, 8, 8, 8],
+                seq: bitpacked::new_vec(vec![3, 3, 3, 3]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -1970,7 +1971,7 @@ mod tests {
                 start: 18,
                 end: 22,
                 strand: true,
-                seq: vec![1, 1, 1, 1],
+                seq: bitpacked::new_vec(vec![0, 0, 0, 0]),
             },
         ];
         root.push(features);
@@ -2325,12 +2326,13 @@ mod tests {
 
     fn make_test_element_with_coefficients(
         feature_id: usize,
-        seq: Vec<u8>,
+        ori_seq: Vec<u8>,
         coefficients: &[(usize, u8, f64)],
     ) -> NucElement {
         let mut rng: StdRng = StdRng::seed_from_u64(99);
         let seed_dist = MutationDistribution::new_uniform(0.0, 1.0)
             .expect("failed to create uniform distribution for seeded mutation map");
+        let seq = &bitpacked::new_vec(ori_seq);
         let mut mutation_map = MutationMap::new(0, 0, &seq, &seed_dist, &mut rng);
 
         for (site, allele, coeff) in coefficients {
@@ -2630,7 +2632,7 @@ mod tests {
                 start: 0,
                 end: seq_len,
                 strand: true,
-                seq: vec![1u8; seq_len],
+                seq: bitpacked::new_vec(vec![0u8; seq_len]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -2639,7 +2641,7 @@ mod tests {
                 start: seq_len,
                 end: seq_len * 2,
                 strand: true,
-                seq: vec![1u8; seq_len],
+                seq: bitpacked::new_vec(vec![0u8; seq_len]),
             },
         ]];
 
@@ -2763,7 +2765,7 @@ mod tests {
             start: 0,
             end: 4,
             strand: true,
-            seq: vec![1, 2, 4, 8], // 4 bp
+            seq: bitpacked::new_vec(vec![0, 1, 2, 3]), // 4 bp
         }]);
 
         let selection_dist = MutationDistribution::new_uniform(0.0, 1.0)
@@ -2858,7 +2860,7 @@ mod tests {
                 start: 0,
                 end: 100,
                 strand: true,
-                seq: vec![1u8; 100],
+                seq: bitpacked::new_vec(vec![0u8; 100]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -2867,7 +2869,7 @@ mod tests {
                 start: 100,
                 end: 150,
                 strand: true,
-                seq: vec![2u8; 50],
+                seq: bitpacked::new_vec(vec![1u8; 50]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -2876,7 +2878,7 @@ mod tests {
                 start: 150,
                 end: 350,
                 strand: true,
-                seq: vec![4u8; 200],
+                seq: bitpacked::new_vec(vec![2u8; 200]),
             },
         ]);
 
