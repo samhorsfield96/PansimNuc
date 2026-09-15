@@ -3,6 +3,8 @@ use noodles_gff::{self as gff};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
+use crate::bitpacking::{bitpacked, DnaBits};
+use bitvec::prelude::*;
 
 #[derive(Clone)]
 struct TeInterval {
@@ -20,19 +22,54 @@ pub struct FeaturePos {
     pub start: usize,
     pub end: usize,
     pub strand: bool, // true for +, false for -
-    pub seq: Vec<u8>,
+    pub seq: DnaBits,
 }
 
-fn encode_dna(seq: &str) -> Vec<u8> {
-    seq.bytes()
-        .map(|b| match b {
-            b'A' => 1,
-            b'C' => 2,
-            b'G' => 4,
-            b'T' => 8,
-            _ => 16, // N or any other non-ACGT character
-        })
-        .collect()
+fn encode_dna(seq: &str) -> DnaBits {
+    let mut bits = BitVec::<u8, Lsb0>::with_capacity(seq.len() * 3);
+
+    for base in seq.bytes() {
+        let value = match base {
+            b'A' => 0, // 000
+            b'C' => 1, // 001
+            b'G' => 2, // 010
+            b'T' => 3, // 011
+            _ => 4,    // 100
+        };
+
+        bits.push(value & 0b001 != 0);
+        bits.push(value & 0b010 != 0);
+        bits.push(value & 0b100 != 0);
+    }
+
+    bits
+}
+
+fn decode_dna(bits: &DnaBits) -> Vec<u8> {
+    let sequence_length = bits.len() / 3;
+
+    let seq = vec![0u8; sequence_length];
+
+    for site in 0..sequence_length {
+        let offset = site * 3;
+
+        let value =
+            (bits[offset] as u8)
+            | ((bits[offset + 1] as u8) << 1)
+            | ((bits[offset + 2] as u8) << 2);
+
+        let base = match value {
+            0 => b'A',
+            1 => b'C',
+            2 => b'G',
+            3 => b'T',
+            _ => b'N',
+        };
+
+        seq[site] = base;
+    }
+
+    seq
 }
 
 fn classify_te_feature_type(raw_type: &str) -> Option<String> {
@@ -355,7 +392,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<(Vec<Vec<FeatureP
                         start: last_feature_end,
                         end: feature_start,
                         strand: true,
-                        seq: vec![0],
+                        seq: BitVec::new(),
                     });
                 }
             }
@@ -373,7 +410,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<(Vec<Vec<FeatureP
                         start: last_feature_end,
                         end: feature_start,
                         strand: true,
-                        seq: vec![0],
+                        seq: BitVec::new(),
                     });
                 } else {
                     // if intergenic region, need to update end coordinate to current exon start
@@ -387,7 +424,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<(Vec<Vec<FeatureP
                     start: feature_start,
                     end: feature_end,
                     strand: record.strand() == Strand::Forward,
-                    seq: vec![0],
+                    seq: BitVec::new(),
                 });
             } else if feature_type == "exon"
                 && feature_start >= last_feature_end
@@ -401,7 +438,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<(Vec<Vec<FeatureP
                     start: last_feature_end,
                     end: feature_start,
                     strand: record.strand() == Strand::Forward,
-                    seq: vec![0],
+                    seq: BitVec::new(),
                 });
 
                 // only add exons as features
@@ -412,7 +449,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<(Vec<Vec<FeatureP
                     start: feature_start,
                     end: feature_end,
                     strand: record.strand() == Strand::Forward,
-                    seq: vec![0],
+                    seq: BitVec::new(),
                 });
             }
         } else {
@@ -425,7 +462,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<(Vec<Vec<FeatureP
                     start: 0,
                     end: feature_start,
                     strand: true,
-                    seq: vec![0],
+                    seq: BitVec::new(),
                 });
             } else {
                 // unless if first feature starts at 0 add feature
@@ -439,7 +476,7 @@ pub fn extract_feature_positions(file_gff: File) -> io::Result<(Vec<Vec<FeatureP
                         start: feature_start,
                         end: feature_end,
                         strand: record.strand() == Strand::Forward,
-                        seq: vec![0],
+                        seq: BitVec::new(),
                     });
                 }
             }
@@ -679,7 +716,7 @@ contig1\t.\texon\t30\t40\t.\t+\t.\tID=exon2";
                 feature.start,
                 feature.end,
                 if feature.strand { "+" } else { "-" },
-                String::from_utf8_lossy(&feature.seq)
+                String::from_utf8_lossy(&decode_dna(&feature.seq))
             );
         }
 
@@ -753,7 +790,7 @@ contig2\t.\texon\t80\t100\t.\t-\t.\tID=c2g2e2";
                     feature.start,
                     feature.end,
                     if feature.strand { "+" } else { "-" },
-                    String::from_utf8_lossy(&feature.seq)
+                    String::from_utf8_lossy(&decode_dna(&feature.seq))
                 );
             }
         }
@@ -823,7 +860,7 @@ contig1\t.\texon\t20\t50\t.\t+\t.\tID=gene2_exon1";
                 feature.start,
                 feature.end,
                 if feature.strand { "+" } else { "-" },
-                String::from_utf8_lossy(&feature.seq)
+                String::from_utf8_lossy(&decode_dna(&feature.seq))
             );
         }
 
@@ -876,7 +913,7 @@ contig1\t.\tUnclassified\t140\t145\t.\t+\t.\tID=skip_me";
                 feature.start,
                 feature.end,
                 if feature.strand { "+" } else { "-" },
-                String::from_utf8_lossy(&feature.seq)
+                String::from_utf8_lossy(&decode_dna(&feature.seq))
             );
         }
 
@@ -979,7 +1016,7 @@ contig1\t.\tLINE\t35\t45\t.\t-\t.\tID=te_copy_2";
                 feature.start,
                 feature.end,
                 if feature.strand { "+" } else { "-" },
-                String::from_utf8_lossy(&feature.seq)
+                String::from_utf8_lossy(&decode_dna(&feature.seq))
             );
         }
 
@@ -1117,7 +1154,7 @@ contig2\t.\tUnclassified\t22\t24\t.\t+\t.\tID=skip_me";
                 feature.start,
                 feature.end,
                 if feature.strand { "+" } else { "-" },
-                String::from_utf8_lossy(&feature.seq)
+                String::from_utf8_lossy(&decode_dna(&feature.seq))
             );
         }
 
@@ -1129,7 +1166,7 @@ contig2\t.\tUnclassified\t22\t24\t.\t+\t.\tID=skip_me";
                 feature.start,
                 feature.end,
                 if feature.strand { "+" } else { "-" },
-                String::from_utf8_lossy(&feature.seq)
+                String::from_utf8_lossy(&decode_dna(&feature.seq))
             );
         }
 
