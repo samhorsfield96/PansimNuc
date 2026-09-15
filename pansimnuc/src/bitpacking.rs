@@ -155,3 +155,87 @@ impl bitpacked {
         (0..self.len()).map(|site| self.index(site))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_dna_sequence() {
+        let sequence = bitpacked::new("ACGTN");
+
+        assert_eq!(sequence.len(), 5);
+        assert_eq!(sequence.decode_int(), vec![0, 1, 2, 3, 4]);
+        assert_eq!(sequence.decode_dna(), b"ACGTN");
+    }
+
+    #[test]
+    fn indexes_bases() {
+        let sequence = bitpacked::new("ACGTN");
+
+        assert_eq!(sequence.index(0), 0);
+        assert_eq!(sequence.index(1), 1);
+        assert_eq!(sequence.index(2), 2);
+        assert_eq!(sequence.index(3), 3);
+        assert_eq!(sequence.index(4), 4);
+    }
+
+    #[test]
+    fn updates_base() {
+        let mut sequence = bitpacked::new("AAAA");
+
+        sequence.update(0, 1); // C
+        sequence.update(1, 2); // G
+        sequence.update(2, 3); // T
+
+        assert_eq!(sequence.decode_int(), vec![1, 2, 3, 0]);
+        assert_eq!(sequence.decode_dna(), b"CGTA");
+    }
+
+    #[test]
+    fn inserts_base_at_beginning_middle_and_end() {
+        let mut sequence = bitpacked::new("ACGT");
+
+        sequence.insert(0, 4); // NACGT
+        sequence.insert(2, 3); // NATCGT
+        sequence.insert(sequence.len(), 0); // NATCGTA
+
+        assert_eq!(sequence.len(), 7);
+        assert_eq!(sequence.decode_int(), vec![4, 0, 3, 1, 2, 3, 0]);
+        assert_eq!(sequence.decode_dna(), b"NATCGTA");
+    }
+
+    #[test]
+    fn removes_base_at_beginning_middle_and_end() {
+        let mut sequence = bitpacked::new("ACGTN");
+
+        sequence.remove(0); // CGTN
+        assert_eq!(sequence.decode_dna(), b"CGTN");
+
+        sequence.remove(1); // CTN
+        assert_eq!(sequence.decode_dna(), b"CTN");
+
+        sequence.remove(sequence.len() - 1); // CT
+        assert_eq!(sequence.decode_dna(), b"CT");
+
+        assert_eq!(sequence.len(), 2);
+    }
+
+    #[test]
+    fn iterates_over_encoded_bases() {
+        let sequence = bitpacked::new("ACGTN");
+
+        let bases: Vec<u8> = sequence.iter().collect();
+
+        assert_eq!(bases, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn iterates_in_reverse() {
+        let sequence = bitpacked::new("ACGTN");
+
+        let bases: Vec<u8> = sequence.iter().rev().collect();
+
+        assert_eq!(bases, vec![4, 3, 2, 1, 0]);
+    }
+}
