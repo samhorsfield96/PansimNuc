@@ -1,34 +1,81 @@
+use bitvec::prelude::*;
+
 // idea is to have two bits per base in a standard u64, and a separate u64 vector 
 // holding positions of any Ns in a sequence
 // main issue is dealing with indels, need to have a way of deleting element (could have positional deletion or addition?)
 
+pub type DnaBits = BitVec<u64, Lsb0>;
+
 // seq holds the two bit characters of each base
 // pos_n holds the one bit character of each N base if present
+#[derive(Clone)]
 pub struct bitpacked {
-    pos_base: u64
-    pos_n: u32
+    bits : DnaBits
 }
 
 impl bitpacked {
     // new function should take a slice of string and fill the bitpacked item
-    fn new()
+    pub fn new(seq: &str) -> Self {
+        let mut bits = BitVec::<u64, Lsb0>::with_capacity(seq.len() * 3);
+
+        for base in seq.bytes() {
+            let value = match base {
+                b'A' => 0, // 000
+                b'C' => 1, // 001
+                b'G' => 2, // 010
+                b'T' => 3, // 011
+                _ => 4,    // 100
+            };
+
+            bits.push(value & 0b001 != 0);
+            bits.push(value & 0b010 != 0);
+            bits.push(value & 0b100 != 0);
+        }
+
+        Self {
+            bits: bits
+        }
+    }
+
+    // function to generate string
+    pub fn decode_dna(&mut self) -> Vec<u8> {
+        let sequence_length = self.bits.len() / 3;
+
+        let mut seq = vec![0u8; sequence_length];
+
+        for site in 0..sequence_length {
+            let offset = site * 3;
+
+            let value =
+                (self.bits[offset] as u8)
+                | ((self.bits[offset + 1] as u8) << 1)
+                | ((self.bits[offset + 2] as u8) << 2);
+
+            let base = match value {
+                0 => b'A',
+                1 => b'C',
+                2 => b'G',
+                3 => b'T',
+                _ => b'N',
+            };
+
+            seq[site] = base;
+        }
+
+        seq
+    }
+
+    pub fn initialise() -> Self {
+        let bits = BitVec::<u64, Lsb0>::with_capacity(1 * 3);
+
+        Self {
+            bits: bits
+        }
+    }
+
 
     // insert function should enable editing of a specific location within the bitpacked item
     fn insert()
+
+    fn delete()
 }
-
-// this is a full element, for which the length needs to be determined for account for the correct
-// number of bitpacked elements
-pub bitpacked_vec {
-    seq: Vec<bitpacked>
-}
-
-impl bitpacked_vec {
-    // new function should take a full string, create a series of bitpacked elements and fill them using the above functions
-    fn new()
-
-    // insert function should enable editing of a specific location within the bitpacked item
-    fn insert()
-}
-
-
