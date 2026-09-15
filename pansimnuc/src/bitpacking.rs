@@ -37,8 +37,22 @@ impl bitpacked {
         }
     }
 
+    pub fn new_vec(seq: Vec<u8>) -> Self {
+        let mut bits = BitVec::<u64, Lsb0>::with_capacity(seq.len() * 3);
+
+        for value in seq.iter() {
+            bits.push(value & 0b001 != 0);
+            bits.push(value & 0b010 != 0);
+            bits.push(value & 0b100 != 0);
+        }
+
+        Self {
+            bits: bits
+        }
+    }
+
     // function to generate string
-    pub fn decode_dna(&mut self) -> Vec<u8> {
+    pub fn decode_dna(&self) -> Vec<u8> {
         let sequence_length = self.bits.len() / 3;
 
         let mut seq = vec![0u8; sequence_length];
@@ -73,9 +87,52 @@ impl bitpacked {
         }
     }
 
+    pub fn len(&self) -> usize {
+        let sequence_length = self.bits.len() / 3;
+        sequence_length
+    }
+
+    pub fn index(&self, site: usize) -> u8 {
+
+        let offset = site * 3;
+
+        (self.bits[offset] as u8)
+            | ((self.bits[offset + 1] as u8) << 1)
+            | ((self.bits[offset + 2] as u8) << 2)
+    }
+
+    pub fn update(&mut self, site: usize, new_value: u8) {
+        assert!(site < self.len(), "site out of bounds");
+        assert!(new_value <= 3, "DNA value must be between 0 and 3, 4 is N");
+
+        let offset = site * 3;
+
+        self.bits.set(offset, new_value & 0b001 != 0);
+        self.bits.set(offset + 1, new_value & 0b010 != 0);
+        self.bits.set(offset + 2, new_value & 0b100 != 0);
+    }
 
     // insert function should enable editing of a specific location within the bitpacked item
-    fn insert()
+    pub fn insert(&mut self, site: usize, new_value: u8) {
+        assert!(site <= self.len(), "site out of bounds");
+        let offset = site * 3;
 
-    fn delete()
+        self.bits.insert(offset, new_value & 0b001 != 0);
+        self.bits.insert(offset + 1, new_value & 0b010 != 0);
+        self.bits.insert(offset + 2, new_value & 0b100 != 0);
+    }
+
+    pub fn remove(&mut self, site: usize) {
+        assert!(site < self.len(), "site out of bounds");
+
+        let offset = site * 3;
+
+        self.bits.remove(offset + 2);
+        self.bits.remove(offset + 1);
+        self.bits.remove(offset);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = u8> + '_ {
+        (0..self.len()).map(|site| self.index(site))
+    }
 }
