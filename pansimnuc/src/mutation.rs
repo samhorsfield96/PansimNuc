@@ -502,17 +502,6 @@ pub struct MutationMap {
 }
 
 impl MutationMap {
-    // fn allele_to_index(level: u8) -> Option<usize> {
-    //     match level {
-    //         0 => Some(0),
-    //         1 => Some(1),
-    //         2 => Some(2),
-    //         3 => Some(3),
-    //         4 => Some(4),
-    //         _ => panic!("Allele code must be one-hot (1, 2, 4, 8, 16); got {}", level),
-    //     }
-    // }
-
     pub fn new(
         selection_dist_id: usize,
         mu_dist_id: usize,
