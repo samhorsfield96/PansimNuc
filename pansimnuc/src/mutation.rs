@@ -12,6 +12,7 @@ use std::fmt;
 use std::os::unix::thread;
 use crate::bitpacking::bitpacked;
 use crate::population::NucElement;
+use smallvec::SmallVec;
 
 #[derive(Debug)]
 pub enum DistributionError {
@@ -490,11 +491,14 @@ impl Distribution {
     }
 }
 
+// small datastructure to hold coefficients
+type SiteEffects = SmallVec<[(u8, f64); 1]>;
+
 #[derive(Clone)]
 pub struct MutationMap {
     pub selection_dist_id: usize,
     pub mu_dist_id: usize,
-    data: [Vec<Option<f64>>; 5],
+    data: Vec<SiteEffects>,
 }
 
 impl MutationMap {
@@ -516,13 +520,11 @@ impl MutationMap {
         selection_dist: &Distribution,
         rng: &mut StdRng,
     ) -> Self {
-        let mut data = std::array::from_fn(|_| vec![None; seq.len()]);
+        let mut data = vec![SmallVec::new(); seq.len()];
 
         for site in 0..seq.len() {
             let allele = seq.index(site);
-            // let allele_index = Self::allele_to_index(allele)
-            //     .expect("Allele code conversion failed while building mutation map");
-            data[allele as usize][site] = Some(selection_dist.sample(rng));
+            data[site].push((allele, selection_dist.sample(rng)));
         }
 
         Self {
@@ -535,31 +537,37 @@ impl MutationMap {
     fn update_data (&mut self, site: usize, is_insertion: bool, sequence_length: usize) {
         // if is_insertion, duplicate the current site entry and shift all later sites up by one
         if is_insertion {
-            for allele_map in self.data.iter_mut() {
-                let existing_value = allele_map.get(site).copied().flatten();
-                allele_map.insert(site, existing_value);
-            }
+            let existing_value = self.data.get(site).cloned().unwrap_or_default();
+            self.data.insert(site, existing_value);
         } else {
             // deletion: remove this site and shift later sites down by one
-            for allele_map in self.data.iter_mut() {
-                if site < sequence_length {
-                    allele_map.remove(site);
-                }
+            if site < sequence_length {
+                self.data.remove(site);
             }
         }
     }
 
     fn insert(&mut self, level: u8, key: usize, value: f64) {
-        let allele_index = level as usize;
-        if self.data[allele_index].len() <= key {
-            self.data[allele_index].resize(key + 1, None);
+        if self.data.len() <= key {
+            self.data.resize_with(key + 1, SmallVec::new);
         }
-        self.data[allele_index][key] = Some(value);
+
+        if let Some((_, existing_value)) = self.data[key]
+            .iter_mut()
+            .find(|(allele, _)| *allele == level)
+        {
+            *existing_value = value;
+        } else {
+            self.data[key].push((level, value));
+        }
     }
 
     pub fn get(&self, level: u8, key: usize) -> Option<&f64> {
-        let allele_index = level as usize;
-        self.data[allele_index].get(key).and_then(Option::as_ref)
+        self.data
+            .get(key)?
+            .iter()
+            .find(|(allele, _)| *allele == level)
+            .map(|(_, value)| value)
     }
 
     #[cfg(test)]
@@ -1074,12 +1082,10 @@ mod tests {
             map.mutate(&core_vec, &mut seq, original_length, &mut false, &selection_dist, n_snps, n_indels, &mut thread_rng);
             assert_eq!(seq.len(), original_length);
             assert_eq!(map.data.len(), original_map_state.len());
-            for (allele_map, original_allele_map) in map.data.iter().zip(original_map_state.iter()) {
-                // for each pre-existing entry, check that the same key still has the same value
-                for (key, value) in original_allele_map.iter().enumerate() {
-                    if let Some(value) = value {
-                        assert_eq!(allele_map.get(key), Some(&Some(*value)));
-                    }
+            for (site, original_site_effects) in original_map_state.iter().enumerate() {
+                // For each pre-existing entry, check that the same site and allele retain the same value.
+                for (allele, value) in original_site_effects {
+                    assert_eq!(map.get(*allele, site), Some(value));
                 }
             }
         }
