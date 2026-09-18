@@ -48,7 +48,7 @@ impl NucElement {
 
         for (site, allele) in self.seq.iter().enumerate() {
             if let Some(coeff) = self.mutation_map.get(allele, site) {
-                let log_coeff = (1.0 + coeff).ln(); // add log of coefficient to log sum
+                let log_coeff = (1.0 + *coeff as f64).ln(); // add log of coefficient to log sum
                 if log_coeff == std::f64::NEG_INFINITY {
                     // if coefficient is -1, set log sum to -inf and break loop, as any other mutations won't change this
                     element_log_sum = std::f64::NEG_INFINITY;
@@ -71,7 +71,7 @@ impl NucElement {
             .enumerate()
             .map(|(site, allele)| {
                 if let Some(coeff) = self.mutation_map.get(allele, site) {
-                    let log_coeff = (1.0 + coeff).ln(); // add log of coefficient to log sum
+                    let log_coeff = (1.0 + *coeff as f64).ln(); // add log of coefficient to log sum
                     log_coeff
                 } else {
                     panic!(
@@ -2389,7 +2389,8 @@ mod tests {
 
         let log_sum = element.selection_coeff;
 
-        assert!(log_sum == expected);
+        // account for rounding error
+        assert!((log_sum - expected).abs() <= 1e-8);
     }
 
     #[test]
@@ -2446,7 +2447,10 @@ mod tests {
         let genome = genome_from_seq(vec![e1, e2]);
         let expected = e1_val + e2_val;
         let actual = pop.genome_selection_coefficient(&genome);
-        assert_eq!(actual, expected);
+        
+        // account for rounding error
+        assert!((actual - expected).abs() <= 1e-7);
+
     }
 
     #[test]
@@ -2486,7 +2490,9 @@ mod tests {
         let genome = genome_from_seq(vec![e1.clone(), e2.clone()]);
         let expected_pre = e1_val + e2_val;
         let actual_pre = pop.genome_selection_coefficient(&genome);
-        assert!(actual_pre == expected_pre);
+
+        // account for rounding error
+        assert!((actual_pre - expected_pre).abs() <= 1e-7);
 
         // Insert a neutral TE-CUT (coeff=0, so te_coeff=0) directly between e1 and e2.
         // Being 1 position upstream of the exon, its multiplier=2.0 scales e2's contribution.
@@ -2571,10 +2577,12 @@ mod tests {
         println!("expected_logsumexp {}", expected_logsumexp);
         println!("logsumexp_value {}", logsumexp_value);
 
-        assert!(log_weights[0] == log_w1);
-        assert!(log_weights[1] == log_w2);
-        assert!(log_weights[2] == log_w3);
-        assert!(expected_logsumexp == logsumexp_value);
+
+        // account for rounding error
+        assert!((log_weights[0] - log_w1).abs() <= 1e-7);
+        assert!((log_weights[1] - log_w2).abs() <= 1e-7);
+        assert!((log_weights[2] - log_w3).abs() <= 1e-7);
+        assert!((expected_logsumexp - logsumexp_value).abs() <= 1e-7);
     }
 
     #[test]
@@ -2610,8 +2618,9 @@ mod tests {
         println!("expected_logsumexp {}", expected_logsumexp);
         println!("logsumexp_value {}", logsumexp_value);
 
-        assert!(log_weights[0] == log_w1);
-        assert!(log_weights[1] == log_w2);
+        // account for rounding error
+        assert!((log_weights[0] - log_w1).abs() <= 1e-7);
+        assert!((log_weights[1] - log_w2).abs() <= 1e-7);
         assert_eq!(log_weights[2], std::f64::NEG_INFINITY);
         assert!((expected_logsumexp - logsumexp_value) < 1e-12);
     }

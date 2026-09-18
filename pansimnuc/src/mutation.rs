@@ -492,7 +492,7 @@ impl Distribution {
 }
 
 // small datastructure to hold coefficients
-type SiteEffects = SmallVec<[(u8, f64); 1]>;
+type SiteEffects = SmallVec<[(u8, f32); 1]>;
 
 #[derive(Clone)]
 pub struct MutationMap {
@@ -513,7 +513,7 @@ impl MutationMap {
 
         for site in 0..seq.len() {
             let allele = seq.index(site);
-            data[site].push((allele, selection_dist.sample(rng)));
+            data[site].push((allele, selection_dist.sample(rng) as f32));
         }
 
         Self {
@@ -545,13 +545,13 @@ impl MutationMap {
             .iter_mut()
             .find(|(allele, _)| *allele == level)
         {
-            *existing_value = value;
+            *existing_value = value as f32;
         } else {
-            self.data[key].push((level, value));
+            self.data[key].push((level, value as f32));
         }
     }
 
-    pub fn get(&self, level: u8, key: usize) -> Option<&f64> {
+    pub fn get(&self, level: u8, key: usize) -> Option<&f32> {
         self.data
             .get(key)?
             .iter()
