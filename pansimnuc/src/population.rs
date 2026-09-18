@@ -27,7 +27,7 @@ pub struct NucElement {
     pub feature_id: usize,
     pub feature_pos: usize,
     pub feature_type: Arc<str>,
-    pub multiplier: f64,
+    pub multiplier: f32,
     pub seq: Arc<bitpacked>,
     pub mutation_map: Arc<MutationMap>,
     pub strand: bool,
@@ -35,10 +35,10 @@ pub struct NucElement {
     pub original_length: usize,
     pub frameshift: bool,
     pub tracked: bool,
-    pub selection_coeff: f64
+    pub selection_coeff: f32
 }
 
-fn extremeness(x: f64) -> f64 {
+fn extremeness(x: f32) -> f32 {
     x.max(1.0 / x)
 }
 
@@ -48,10 +48,10 @@ impl NucElement {
 
         for (site, allele) in self.seq.iter().enumerate() {
             if let Some(coeff) = self.mutation_map.get(allele, site) {
-                let log_coeff = (1.0 + *coeff as f64).ln(); // add log of coefficient to log sum
-                if log_coeff == std::f64::NEG_INFINITY {
+                let log_coeff = (1.0 + *coeff).ln(); // add log of coefficient to log sum
+                if log_coeff == std::f32::NEG_INFINITY {
                     // if coefficient is -1, set log sum to -inf and break loop, as any other mutations won't change this
-                    element_log_sum = std::f64::NEG_INFINITY;
+                    element_log_sum = std::f32::NEG_INFINITY;
                     break;
                 }
                 element_log_sum += log_coeff;
@@ -293,9 +293,9 @@ impl Population {
         genome: &Genome,
         element_idx: usize,
         element: &NucElement,
-    ) -> (bool, f64) {
+    ) -> (bool, f32) {
         let mut feature_broken = false;
-        let mut feature_multiplier: f64 = 1.0;
+        let mut feature_multiplier: f32 = 1.0;
 
         let max_multiplier_dist = self.max_multiplier_dist;
 
@@ -489,7 +489,7 @@ impl Population {
         }
     }
 
-    fn genome_selection_coefficient(&self, genome: &Genome) -> f64 {
+    fn genome_selection_coefficient(&self, genome: &Genome) -> f32 {
         let mut log_sum = 0.0;
 
         for (element_idx, element) in genome.seq.iter().enumerate() {
@@ -504,8 +504,8 @@ impl Population {
             let element_log_sum = element.selection_coeff; // pre-calculated sum of ln(1 + s_i) across sites
 
             // lethal element makes the whole genome lethal
-            if element_log_sum == std::f64::NEG_INFINITY {
-                log_sum = std::f64::NEG_INFINITY;
+            if element_log_sum == std::f32::NEG_INFINITY {
+                log_sum = std::f32::NEG_INFINITY;
                 break;
             }
 
@@ -516,7 +516,7 @@ impl Population {
         log_sum
     }
 
-    fn log_sum_exp(&self) -> (Vec<f64>, f64) {
+    fn log_sum_exp(&self) -> (Vec<f32>, f32) {
         let selection_weights = self
             .pop
             .par_iter()
@@ -526,12 +526,12 @@ impl Population {
                 // Preserve -inf for lethal genomes so they map to zero probability after
                 // exp(log_w - logsumexp). Guard against NaNs from unexpected arithmetic.
                 if log_sum.is_nan() {
-                    std::f64::NEG_INFINITY
+                    std::f32::NEG_INFINITY
                 } else {
                     log_sum
                 }
             })
-            .collect::<Vec<f64>>();
+            .collect::<Vec<f32>>();
 
         // logsumexp normalization to prevent underflow/overflow issues with very small/large weights
         let logsumexp_value = selection_weights.iter().ln_sum_exp();
@@ -611,8 +611,8 @@ impl Population {
                     "exon" => 1.0,
                     "intron" => 1.0,
                     "intergenic" => 1.0,
-                    "TE-CUT" => multiplier_dist.sample(rng),
-                    "TE-COPY" => multiplier_dist.sample(rng),
+                    "TE-CUT" => multiplier_dist.sample(rng) as f32,
+                    "TE-COPY" => multiplier_dist.sample(rng) as f32,
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
@@ -664,7 +664,7 @@ impl Population {
                             &selection_dists[5], // new selection distribution for tracked elements
                             rng,
                         ));
-                        element.multiplier = multiplier_dists[5].sample(rng);
+                        element.multiplier = multiplier_dists[5].sample(rng) as f32;
                     }
                 }
 
@@ -948,7 +948,7 @@ impl Population {
                 .collect();
         } else {
             // All log-weights are -inf (or degenerate), so fall back to uniform sampling.
-            selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+            selection_weights = vec![1.0 / (self.pop.len() as f32); self.pop.len()];
         }
 
         #[cfg(debug_assertions)]
@@ -965,7 +965,7 @@ impl Population {
                 // calculate total penalty based on difference from optimal genome size, ensuring that penalty scales with genome size and doesn't become negative
                 let size_penalty = (1.0 - (self.genome_size_penalty_per_bp * ((genome_size as isize - self.optimal_genome_size as isize).abs() as f64))).max(0.0);
                 //println!("Genome {} size: {}, size penalty: {}", i, genome_size, size_penalty);
-                (w * size_penalty).max(0.0) // ensure weights don't become negative due to penalty
+                ((w as f64 * size_penalty) as f32).max(0.0) // ensure weights don't become negative due to penalty
             })
             .collect();
 
@@ -974,11 +974,11 @@ impl Population {
             eprintln!("Selection post-genome size penalty weights: {:?}", selection_weights);
         }
 
-        let sum_weights: f64 = selection_weights.iter().sum();
+        let sum_weights: f32 = selection_weights.iter().sum();
         // account for all values being zero
         if sum_weights == 0.0 || !sum_weights.is_finite() {
             // if all weights are zero, set all weights to equal probability to prevent issues with sampling, as all genomes are equally likely to be selected
-            selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+            selection_weights = vec![1.0 / (self.pop.len() as f32); self.pop.len()];
         }
         
         // Create a WeightedIndex distribution based on weights
@@ -1133,16 +1133,16 @@ impl Population {
                 *w = (*w - logsumexp_value).exp(); // exp(log(w) - logsumexp)
             }
 
-            let sum_weights: f64 = selection_weights.iter().sum();
+            let sum_weights: f32 = selection_weights.iter().sum();
             if sum_weights > 0.0 && sum_weights.is_finite() {
                 for w in &mut selection_weights {
                     *w /= sum_weights;
                 }
             } else {
-                selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+                selection_weights = vec![1.0 / (self.pop.len() as f32); self.pop.len()];
             }
         } else {
-            selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+            selection_weights = vec![1.0 / (self.pop.len() as f32); self.pop.len()];
         }
 
         let write_one = |genome_index: usize, genome: &Genome, prefix: String| -> io::Result<()> {
@@ -2047,7 +2047,7 @@ mod tests {
         }
     }
 
-    fn check_feature_one_intron(pop: &Population, genome: &Genome) -> (bool, f64) {
+    fn check_feature_one_intron(pop: &Population, genome: &Genome) -> (bool, f32) {
         let idx = genome
             .seq
             .iter()
@@ -2056,7 +2056,7 @@ mod tests {
         pop.check_feature_order(genome, idx, &genome.seq[idx])
     }
 
-    fn check_feature_one_exon(pop: &Population, feature_id: usize, genome: &Genome) -> (bool, f64) {
+    fn check_feature_one_exon(pop: &Population, feature_id: usize, genome: &Genome) -> (bool, f32) {
         let idx = genome
             .seq
             .iter()
@@ -2369,7 +2369,7 @@ mod tests {
         );
 
         let log_sum = element.selection_coeff;
-        assert_eq!(log_sum, std::f64::NEG_INFINITY);
+        assert_eq!(log_sum, std::f32::NEG_INFINITY);
     }
 
     #[test]
@@ -2390,7 +2390,7 @@ mod tests {
         let log_sum = element.selection_coeff;
 
         // account for rounding error
-        assert!((log_sum - expected).abs() <= 1e-8);
+        assert!((log_sum - expected as f32).abs() <= 1e-5);
     }
 
     #[test]
@@ -2411,7 +2411,7 @@ mod tests {
         let genome = genome_from_seq(vec![neutral, lethal]);
         assert_eq!(
             pop.genome_selection_coefficient(&genome),
-            std::f64::NEG_INFINITY
+            std::f32::NEG_INFINITY
         );
     }
 
@@ -2449,7 +2449,7 @@ mod tests {
         let actual = pop.genome_selection_coefficient(&genome);
         
         // account for rounding error
-        assert!((actual - expected).abs() <= 1e-7);
+        assert!((actual - expected as f32).abs() <= 1e-5);
 
     }
 
@@ -2492,7 +2492,7 @@ mod tests {
         let actual_pre = pop.genome_selection_coefficient(&genome);
 
         // account for rounding error
-        assert!((actual_pre - expected_pre).abs() <= 1e-7);
+        assert!((actual_pre - expected_pre as f32).abs() <= 1e-5);
 
         // Insert a neutral TE-CUT (coeff=0, so te_coeff=0) directly between e1 and e2.
         // Being 1 position upstream of the exon, its multiplier=2.0 scales e2's contribution.
@@ -2536,9 +2536,8 @@ mod tests {
 
         // te_coeff = ln(1.0) = 0.0; e2 is scaled by 2.0
         let expected_with_te = e1_val + 0.0 + e2_val + (2.0_f64).ln() + te_val;
-        assert_eq!(
-            coeff_with_te as f32,
-            expected_with_te as f32,
+        assert!(
+            (coeff_with_te - expected_with_te as f32).abs() <= 1e-5,
             "Expected e2 contribution to be scaled by downstream TE multiplier"
         );
     }
@@ -2579,10 +2578,10 @@ mod tests {
 
 
         // account for rounding error
-        assert!((log_weights[0] - log_w1).abs() <= 1e-7);
-        assert!((log_weights[1] - log_w2).abs() <= 1e-7);
-        assert!((log_weights[2] - log_w3).abs() <= 1e-7);
-        assert!((expected_logsumexp - logsumexp_value).abs() <= 1e-7);
+        assert!((log_weights[0] - log_w1 as f32).abs() <= 1e-5);
+        assert!((log_weights[1] - log_w2 as f32).abs() <= 1e-5);
+        assert!((log_weights[2] - log_w3 as f32).abs() <= 1e-5);
+        assert!((expected_logsumexp as f32 - logsumexp_value).abs() <= 1e-5);
     }
 
     #[test]
@@ -2619,10 +2618,10 @@ mod tests {
         println!("logsumexp_value {}", logsumexp_value);
 
         // account for rounding error
-        assert!((log_weights[0] - log_w1).abs() <= 1e-7);
-        assert!((log_weights[1] - log_w2).abs() <= 1e-7);
-        assert_eq!(log_weights[2], std::f64::NEG_INFINITY);
-        assert!((expected_logsumexp - logsumexp_value) < 1e-12);
+        assert!((log_weights[0] - log_w1 as f32).abs() <= 1e-5);
+        assert!((log_weights[1] - log_w2 as f32).abs() <= 1e-5);
+        assert_eq!(log_weights[2], std::f32::NEG_INFINITY);
+        assert!((expected_logsumexp as f32 - logsumexp_value) < 1e-12);
     }
 
     // -----------------------------------------------------------------------
