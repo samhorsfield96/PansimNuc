@@ -6,7 +6,7 @@ use rand::Rng;
 use rand::rngs::{StdRng, ThreadRng};
 use rand::seq::IteratorRandom;
 use rand_distr::{Distribution as RandDist, Exp, Normal, Uniform, Gamma};
-use statrs::distribution::{Poisson, NegativeBinomial};
+use statrs::distribution::{Poisson, NegativeBinomial, Laplace};
 use std::collections::HashMap;
 use std::fmt;
 use std::os::unix::thread;
@@ -23,7 +23,8 @@ pub enum DistributionError {
     InvalidPoissonParameters,
     InvalidGammaParameters,
     InvalidNegativeBinomialParameters,
-    InvalidNegativeBinomialMomentsParameters
+    InvalidNegativeBinomialMomentsParameters,
+    InvalidLaplaceParameters,
 }
 
 impl fmt::Display for DistributionError {
@@ -61,6 +62,9 @@ impl fmt::Display for DistributionError {
             }
             DistributionError::InvalidNegativeBinomialMomentsParameters => {
                 write!(f, "Invalid Negative Binomial moments: variance must be greater than mean, and mean must be positive")
+            }
+            DistributionError::InvalidLaplaceParameters => {
+                write!(f, "Invalid Laplace parameters: position and scale must be real numbers and scale must be > 0.0")
             }
         }
     }
@@ -209,6 +213,7 @@ pub enum Distribution {
     Poisson(Poisson),
     Gamma(Gamma<f64>),
     NegativeBinomial(NegativeBinomial),
+    Laplace(Laplace),
 }
 
 impl Distribution {
@@ -414,6 +419,29 @@ impl Distribution {
                     }
                 })
             }
+            "laplace" => {
+                let position = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_location", section),
+                )?;
+                let scale: f64 = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_scale", section),
+                )?;
+
+                Self::new_laplace(position, scale).map_err(|source| {
+                    DistributionConfigError::InvalidDistributionParameters {
+                        section: section.to_string(),
+                        distribution: raw_distribution,
+                        source,
+                    }
+                })
+            }
+
             _ => Err(DistributionConfigError::UnsupportedDistribution {
                 section: section.to_string(),
                 distribution: raw_distribution,
@@ -478,6 +506,12 @@ impl Distribution {
             .map_err(|_| DistributionError::InvalidGammaParameters)
     }
 
+    pub fn new_laplace(location: f64, scale: f64) -> Result<Self, DistributionError> {
+        Laplace::new(location, scale)
+            .map(Distribution::Laplace)
+            .map_err(|_| DistributionError::InvalidLaplaceParameters)
+    }
+
     pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
         match self {
             Distribution::Normal(d) => d.sample(rng),
@@ -487,6 +521,7 @@ impl Distribution {
             Distribution::Poisson(d) => d.sample(rng),
             Distribution::Gamma(d) => d.sample(rng),
             Distribution::NegativeBinomial(d) => d.sample(rng) as f64,
+            Distribution::Laplace(d) => d.sample(rng),
         }
     }
 }
@@ -749,6 +784,12 @@ mod tests {
     }
 
     #[test]
+    fn test_laplace_creation() {
+        let dist = Distribution::new_laplace(0.0, 0.1);
+        assert!(dist.is_ok());
+    }
+
+    #[test]
     fn test_poisson_invalid_params() {
         let dist = Distribution::new_poisson(-1.1);
         assert!(dist.is_err());
@@ -832,6 +873,15 @@ mod tests {
     }
 
     #[test]
+    fn test_laplace_invalid_params() {
+        let dist = Distribution::new_laplace(0.0, 0.0);
+        assert!(dist.is_err());
+
+        let dist2 = Distribution::new_laplace(0.0, -0.1);
+        assert!(dist2.is_err());
+    }
+
+    #[test]
     fn test_distribution_sampling() {
         let mut rng = StdRng::seed_from_u64(42);
 
@@ -862,6 +912,10 @@ mod tests {
         let neg_binomial_moments = Distribution::new_negative_binomial_from_moments(5.0, 10.0).unwrap();
         let sample = neg_binomial_moments.sample(&mut rng);
         assert!(sample >= 0.0);
+
+        let laplace = Distribution::new_laplace(0.0, 0.1).unwrap();
+        let sample = laplace.sample(&mut rng);
+        assert!(sample.is_finite());
     }
 
     #[test]
@@ -945,6 +999,21 @@ mod tests {
 
         let result = Distribution::from_selection_config(&config, "TE-COPY");
         assert!(matches!(result, Ok(Distribution::NegativeBinomial(_))));
+    }
+
+    #[test]
+    fn test_selection_distribution_from_config_laplce() {
+        let config = selection_config(
+            "TE-COPY",
+            &[
+                ("selection_distribution", "laplace"),
+                ("selection_location", "1.0"),
+                ("selection_scale", "0.5"),
+            ],
+        );
+
+        let result = Distribution::from_selection_config(&config, "TE-COPY");
+        assert!(matches!(result, Ok(Distribution::Laplace(_))));
     }
 
     #[test]
