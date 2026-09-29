@@ -9,6 +9,7 @@ mod population;
 mod structural;
 mod demography;
 mod tracking;
+mod bitpacking;
 use rayon::{prelude::*, vec};
 
 use crate::config::PopulationSplitConfig;

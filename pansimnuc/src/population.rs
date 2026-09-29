@@ -4,6 +4,7 @@ use crate::mutation::MutationMap;
 use crate::structural::mutate_inter_genome;
 use crate::structural::mutate_intra_genome;
 use crate::tracking::identify_tracked_element;
+use crate::bitpacking::bitpacked;
 use logsumexp::LogSumExp;
 use rand::SeedableRng;
 use rand::distributions::{Distribution as RandDistribution, WeightedIndex};
@@ -26,18 +27,18 @@ pub struct NucElement {
     pub feature_id: usize,
     pub feature_pos: usize,
     pub feature_type: Arc<str>,
-    pub multiplier: f64,
-    pub seq: Arc<Vec<u8>>,
+    pub multiplier: f32,
+    pub seq: Arc<bitpacked>,
     pub mutation_map: Arc<MutationMap>,
     pub strand: bool,
     pub inverted: bool,
     pub original_length: usize,
     pub frameshift: bool,
     pub tracked: bool,
-    pub selection_coeff: f64
+    pub selection_coeff: f32
 }
 
-fn extremeness(x: f64) -> f64 {
+fn extremeness(x: f32) -> f32 {
     x.max(1.0 / x)
 }
 
@@ -46,11 +47,11 @@ impl NucElement {
         let mut element_log_sum = 0.0;
 
         for (site, allele) in self.seq.iter().enumerate() {
-            if let Some(coeff) = self.mutation_map.get(*allele, site) {
-                let log_coeff = (1.0 + coeff).ln(); // add log of coefficient to log sum
-                if log_coeff == std::f64::NEG_INFINITY {
+            if let Some(coeff) = self.mutation_map.get(allele, site) {
+                let log_coeff = (1.0 + *coeff).ln(); // add log of coefficient to log sum
+                if log_coeff == std::f32::NEG_INFINITY {
                     // if coefficient is -1, set log sum to -inf and break loop, as any other mutations won't change this
-                    element_log_sum = std::f64::NEG_INFINITY;
+                    element_log_sum = std::f32::NEG_INFINITY;
                     break;
                 }
                 element_log_sum += log_coeff;
@@ -69,8 +70,8 @@ impl NucElement {
             .iter()
             .enumerate()
             .map(|(site, allele)| {
-                if let Some(coeff) = self.mutation_map.get(*allele, site) {
-                    let log_coeff = (1.0 + coeff).ln(); // add log of coefficient to log sum
+                if let Some(coeff) = self.mutation_map.get(allele, site) {
+                    let log_coeff = (1.0 + *coeff as f64).ln(); // add log of coefficient to log sum
                     log_coeff
                 } else {
                     panic!(
@@ -292,9 +293,9 @@ impl Population {
         genome: &Genome,
         element_idx: usize,
         element: &NucElement,
-    ) -> (bool, f64) {
+    ) -> (bool, f32) {
         let mut feature_broken = false;
-        let mut feature_multiplier: f64 = 1.0;
+        let mut feature_multiplier: f32 = 1.0;
 
         let max_multiplier_dist = self.max_multiplier_dist;
 
@@ -479,16 +480,16 @@ impl Population {
 
     pub fn decode_base(base: u8, inverted: bool) -> u8 {
         match base {
-            1 => if inverted { b'T' } else { b'A' },
-            2 => if inverted { b'G' } else { b'C' },
-            4 => if inverted { b'C' } else { b'G' },
-            8 => if inverted { b'A' } else { b'T' },
-            16 => b'N',
+            0 => if inverted { b'T' } else { b'A' },
+            1 => if inverted { b'G' } else { b'C' },
+            2 => if inverted { b'C' } else { b'G' },
+            3 => if inverted { b'A' } else { b'T' },
+            4 => b'N',
             _ => panic!("Invalid base encoding: {}", base),
         }
     }
 
-    fn genome_selection_coefficient(&self, genome: &Genome) -> f64 {
+    fn genome_selection_coefficient(&self, genome: &Genome) -> f32 {
         let mut log_sum = 0.0;
 
         for (element_idx, element) in genome.seq.iter().enumerate() {
@@ -503,8 +504,8 @@ impl Population {
             let element_log_sum = element.selection_coeff; // pre-calculated sum of ln(1 + s_i) across sites
 
             // lethal element makes the whole genome lethal
-            if element_log_sum == std::f64::NEG_INFINITY {
-                log_sum = std::f64::NEG_INFINITY;
+            if element_log_sum == std::f32::NEG_INFINITY {
+                log_sum = std::f32::NEG_INFINITY;
                 break;
             }
 
@@ -515,7 +516,7 @@ impl Population {
         log_sum
     }
 
-    fn log_sum_exp(&self) -> (Vec<f64>, f64) {
+    fn log_sum_exp(&self) -> (Vec<f32>, f32) {
         let selection_weights = self
             .pop
             .par_iter()
@@ -525,12 +526,12 @@ impl Population {
                 // Preserve -inf for lethal genomes so they map to zero probability after
                 // exp(log_w - logsumexp). Guard against NaNs from unexpected arithmetic.
                 if log_sum.is_nan() {
-                    std::f64::NEG_INFINITY
+                    std::f32::NEG_INFINITY
                 } else {
                     log_sum
                 }
             })
-            .collect::<Vec<f64>>();
+            .collect::<Vec<f32>>();
 
         // logsumexp normalization to prevent underflow/overflow issues with very small/large weights
         let logsumexp_value = selection_weights.iter().ln_sum_exp();
@@ -610,8 +611,8 @@ impl Population {
                     "exon" => 1.0,
                     "intron" => 1.0,
                     "intergenic" => 1.0,
-                    "TE-CUT" => multiplier_dist.sample(rng),
-                    "TE-COPY" => multiplier_dist.sample(rng),
+                    "TE-CUT" => multiplier_dist.sample(rng) as f32,
+                    "TE-COPY" => multiplier_dist.sample(rng) as f32,
                     _ => panic!("Unknown feature type: {}", feature.feature_type),
                 };
 
@@ -663,7 +664,7 @@ impl Population {
                             &selection_dists[5], // new selection distribution for tracked elements
                             rng,
                         ));
-                        element.multiplier = multiplier_dists[5].sample(rng);
+                        element.multiplier = multiplier_dists[5].sample(rng) as f32;
                     }
                 }
 
@@ -733,7 +734,7 @@ impl Population {
             .collect();
 
         let core_vec: Vec<Vec<u8>> =
-            vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4], vec![1, 2, 4, 8, 16]];
+            vec![vec![1, 2, 3], vec![0, 2, 3], vec![0, 1, 3], vec![0, 1, 2], vec![0, 1, 2, 3]];
 
         Self {
             id: 0,
@@ -947,7 +948,7 @@ impl Population {
                 .collect();
         } else {
             // All log-weights are -inf (or degenerate), so fall back to uniform sampling.
-            selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+            selection_weights = vec![1.0 / (self.pop.len() as f32); self.pop.len()];
         }
 
         #[cfg(debug_assertions)]
@@ -964,7 +965,7 @@ impl Population {
                 // calculate total penalty based on difference from optimal genome size, ensuring that penalty scales with genome size and doesn't become negative
                 let size_penalty = (1.0 - (self.genome_size_penalty_per_bp * ((genome_size as isize - self.optimal_genome_size as isize).abs() as f64))).max(0.0);
                 //println!("Genome {} size: {}, size penalty: {}", i, genome_size, size_penalty);
-                (w * size_penalty).max(0.0) // ensure weights don't become negative due to penalty
+                ((w as f64 * size_penalty) as f32).max(0.0) // ensure weights don't become negative due to penalty
             })
             .collect();
 
@@ -973,11 +974,11 @@ impl Population {
             eprintln!("Selection post-genome size penalty weights: {:?}", selection_weights);
         }
 
-        let sum_weights: f64 = selection_weights.iter().sum();
+        let sum_weights: f32 = selection_weights.iter().sum();
         // account for all values being zero
         if sum_weights == 0.0 || !sum_weights.is_finite() {
             // if all weights are zero, set all weights to equal probability to prevent issues with sampling, as all genomes are equally likely to be selected
-            selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+            selection_weights = vec![1.0 / (self.pop.len() as f32); self.pop.len()];
         }
         
         // Create a WeightedIndex distribution based on weights
@@ -1077,7 +1078,7 @@ impl Population {
 
                 // if inverted, write in reverse complement
                 if element.inverted {
-                    for &base in element.seq.iter().rev() {
+                    for base in element.seq.iter().rev() {
                         writer.write_all(&[Self::decode_base(base, true)])?;
                         wrapped_line_len += 1;
 
@@ -1087,7 +1088,7 @@ impl Population {
                         }
                     }
                 } else {
-                    for &base in element.seq.iter() {
+                    for base in element.seq.iter() {
                         writer.write_all(&[Self::decode_base(base, false)])?;
                         wrapped_line_len += 1;
 
@@ -1132,16 +1133,16 @@ impl Population {
                 *w = (*w - logsumexp_value).exp(); // exp(log(w) - logsumexp)
             }
 
-            let sum_weights: f64 = selection_weights.iter().sum();
+            let sum_weights: f32 = selection_weights.iter().sum();
             if sum_weights > 0.0 && sum_weights.is_finite() {
                 for w in &mut selection_weights {
                     *w /= sum_weights;
                 }
             } else {
-                selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+                selection_weights = vec![1.0 / (self.pop.len() as f32); self.pop.len()];
             }
         } else {
-            selection_weights = vec![1.0 / (self.pop.len() as f64); self.pop.len()];
+            selection_weights = vec![1.0 / (self.pop.len() as f32); self.pop.len()];
         }
 
         let write_one = |genome_index: usize, genome: &Genome, prefix: String| -> io::Result<()> {
@@ -1280,7 +1281,7 @@ mod tests {
                 start: 100,
                 end: 200,
                 strand: true,
-                seq: vec![1, 2, 4, 8], // ACGT
+                seq: bitpacked::new_vec(vec![0, 1, 2, 3]), // ACGT
             },
             FeaturePos {
                 contig_id: 0,
@@ -1289,7 +1290,7 @@ mod tests {
                 start: 300,
                 end: 400,
                 strand: false,
-                seq: vec![8, 4, 2, 1], // TGCA
+                seq: bitpacked::new_vec(vec![3, 2, 1, 0]), // TGCA
             },
         ];
         root.push(features);
@@ -1373,7 +1374,7 @@ mod tests {
             start: 0,
             end: 4,
             strand: true,
-            seq: vec![1, 2, 4, 8],
+            seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
         }];
         root.push(features);
 
@@ -1460,7 +1461,7 @@ mod tests {
             start: 0,
             end: 4,
             strand: true,
-            seq: vec![1, 2, 4, 8],
+            seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
         }];
         root.push(features);
 
@@ -1547,7 +1548,7 @@ mod tests {
             start: 0,
             end: 4,
             strand: true,
-            seq: vec![1, 2, 4, 8],
+            seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
         }];
         root.push(features);
 
@@ -1639,7 +1640,7 @@ mod tests {
             start: 0,
             end: 4,
             strand: true,
-            seq: vec![1, 2, 4, 8],
+            seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
         }];
         root.push(features);
 
@@ -1733,7 +1734,7 @@ mod tests {
             start: 0,
             end: 4,
             strand: true,
-            seq: vec![1, 2, 4, 8],
+            seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
         }];
         root.push(features);
 
@@ -1792,7 +1793,7 @@ mod tests {
         let mutated_element = &pop.pop[0].seq[0];
         assert_ne!(mutated_element.seq, original_seq);
 
-        for (site, (&old_allele, &new_allele)) in original_seq
+        for (site, (old_allele, new_allele)) in original_seq
             .iter()
             .zip(mutated_element.seq.iter())
             .enumerate()
@@ -1813,7 +1814,7 @@ mod tests {
                 start: 0,
                 end: 4,
                 strand: true,
-                seq: vec![1, 2, 4, 8],
+                seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -1822,7 +1823,7 @@ mod tests {
                 start: 4,
                 end: 8,
                 strand: true,
-                seq: vec![8, 4, 2, 1],
+                seq: bitpacked::new_vec(vec![0, 1, 2, 3]),
             },
         ];
         root.push(features);
@@ -1886,7 +1887,7 @@ mod tests {
                 genome
                     .seq
                     .iter()
-                    .map(|element| (*element.seq).clone())
+                    .map(|element| (element.seq.decode_dna()).clone())
                     .collect()
             })
             .collect();
@@ -1909,7 +1910,7 @@ mod tests {
             let new_sequences: Vec<Vec<u8>> = genome
                 .seq
                 .iter()
-                .map(|element| (*element.seq).clone())
+                .map(|element| (element.seq.decode_dna()).clone())
                 .collect();
             assert_eq!(new_sequences, original_sequences[selected_index]);
         }
@@ -1925,7 +1926,7 @@ mod tests {
                 start: 0,
                 end: 4,
                 strand: true,
-                seq: vec![1, 1, 1, 1],
+                seq: bitpacked::new_vec(vec![0, 0, 0, 0]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -1934,7 +1935,7 @@ mod tests {
                 start: 4,
                 end: 8,
                 strand: true,
-                seq: vec![2, 2, 2, 2],
+                seq: bitpacked::new_vec(vec![1, 1, 1, 1]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -1943,7 +1944,7 @@ mod tests {
                 start: 8,
                 end: 12,
                 strand: true,
-                seq: vec![4, 4, 4, 4],
+                seq: bitpacked::new_vec(vec![2, 2, 2, 2]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -1952,7 +1953,7 @@ mod tests {
                 start: 12,
                 end: 16,
                 strand: true,
-                seq: vec![8, 8, 8, 8],
+                seq: bitpacked::new_vec(vec![3, 3, 3, 3]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -1961,7 +1962,7 @@ mod tests {
                 start: 16,
                 end: 18,
                 strand: true,
-                seq: vec![8, 8, 8, 8],
+                seq: bitpacked::new_vec(vec![3, 3, 3, 3]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -1970,7 +1971,7 @@ mod tests {
                 start: 18,
                 end: 22,
                 strand: true,
-                seq: vec![1, 1, 1, 1],
+                seq: bitpacked::new_vec(vec![0, 0, 0, 0]),
             },
         ];
         root.push(features);
@@ -2046,7 +2047,7 @@ mod tests {
         }
     }
 
-    fn check_feature_one_intron(pop: &Population, genome: &Genome) -> (bool, f64) {
+    fn check_feature_one_intron(pop: &Population, genome: &Genome) -> (bool, f32) {
         let idx = genome
             .seq
             .iter()
@@ -2055,7 +2056,7 @@ mod tests {
         pop.check_feature_order(genome, idx, &genome.seq[idx])
     }
 
-    fn check_feature_one_exon(pop: &Population, feature_id: usize, genome: &Genome) -> (bool, f64) {
+    fn check_feature_one_exon(pop: &Population, feature_id: usize, genome: &Genome) -> (bool, f32) {
         let idx = genome
             .seq
             .iter()
@@ -2325,12 +2326,13 @@ mod tests {
 
     fn make_test_element_with_coefficients(
         feature_id: usize,
-        seq: Vec<u8>,
+        ori_seq: Vec<u8>,
         coefficients: &[(usize, u8, f64)],
     ) -> NucElement {
         let mut rng: StdRng = StdRng::seed_from_u64(99);
         let seed_dist = MutationDistribution::new_uniform(0.0, 1.0)
             .expect("failed to create uniform distribution for seeded mutation map");
+        let seq = &bitpacked::new_vec(ori_seq);
         let mut mutation_map = MutationMap::new(0, 0, &seq, &seed_dist, &mut rng);
 
         for (site, allele, coeff) in coefficients {
@@ -2367,7 +2369,7 @@ mod tests {
         );
 
         let log_sum = element.selection_coeff;
-        assert_eq!(log_sum, std::f64::NEG_INFINITY);
+        assert_eq!(log_sum, std::f32::NEG_INFINITY);
     }
 
     #[test]
@@ -2387,7 +2389,8 @@ mod tests {
 
         let log_sum = element.selection_coeff;
 
-        assert!(log_sum == expected);
+        // account for rounding error
+        assert!((log_sum - expected as f32).abs() <= 1e-5);
     }
 
     #[test]
@@ -2408,7 +2411,7 @@ mod tests {
         let genome = genome_from_seq(vec![neutral, lethal]);
         assert_eq!(
             pop.genome_selection_coefficient(&genome),
-            std::f64::NEG_INFINITY
+            std::f32::NEG_INFINITY
         );
     }
 
@@ -2444,7 +2447,10 @@ mod tests {
         let genome = genome_from_seq(vec![e1, e2]);
         let expected = e1_val + e2_val;
         let actual = pop.genome_selection_coefficient(&genome);
-        assert_eq!(actual, expected);
+        
+        // account for rounding error
+        assert!((actual - expected as f32).abs() <= 1e-5);
+
     }
 
     #[test]
@@ -2484,7 +2490,9 @@ mod tests {
         let genome = genome_from_seq(vec![e1.clone(), e2.clone()]);
         let expected_pre = e1_val + e2_val;
         let actual_pre = pop.genome_selection_coefficient(&genome);
-        assert!(actual_pre == expected_pre);
+
+        // account for rounding error
+        assert!((actual_pre - expected_pre as f32).abs() <= 1e-5);
 
         // Insert a neutral TE-CUT (coeff=0, so te_coeff=0) directly between e1 and e2.
         // Being 1 position upstream of the exon, its multiplier=2.0 scales e2's contribution.
@@ -2528,9 +2536,8 @@ mod tests {
 
         // te_coeff = ln(1.0) = 0.0; e2 is scaled by 2.0
         let expected_with_te = e1_val + 0.0 + e2_val + (2.0_f64).ln() + te_val;
-        assert_eq!(
-            coeff_with_te as f32,
-            expected_with_te as f32,
+        assert!(
+            (coeff_with_te - expected_with_te as f32).abs() <= 1e-5,
             "Expected e2 contribution to be scaled by downstream TE multiplier"
         );
     }
@@ -2569,10 +2576,12 @@ mod tests {
         println!("expected_logsumexp {}", expected_logsumexp);
         println!("logsumexp_value {}", logsumexp_value);
 
-        assert!(log_weights[0] == log_w1);
-        assert!(log_weights[1] == log_w2);
-        assert!(log_weights[2] == log_w3);
-        assert!(expected_logsumexp == logsumexp_value);
+
+        // account for rounding error
+        assert!((log_weights[0] - log_w1 as f32).abs() <= 1e-5);
+        assert!((log_weights[1] - log_w2 as f32).abs() <= 1e-5);
+        assert!((log_weights[2] - log_w3 as f32).abs() <= 1e-5);
+        assert!((expected_logsumexp as f32 - logsumexp_value).abs() <= 1e-5);
     }
 
     #[test]
@@ -2608,10 +2617,11 @@ mod tests {
         println!("expected_logsumexp {}", expected_logsumexp);
         println!("logsumexp_value {}", logsumexp_value);
 
-        assert!(log_weights[0] == log_w1);
-        assert!(log_weights[1] == log_w2);
-        assert_eq!(log_weights[2], std::f64::NEG_INFINITY);
-        assert!((expected_logsumexp - logsumexp_value) < 1e-12);
+        // account for rounding error
+        assert!((log_weights[0] - log_w1 as f32).abs() <= 1e-5);
+        assert!((log_weights[1] - log_w2 as f32).abs() <= 1e-5);
+        assert_eq!(log_weights[2], std::f32::NEG_INFINITY);
+        assert!((expected_logsumexp as f32 - logsumexp_value) < 1e-12);
     }
 
     // -----------------------------------------------------------------------
@@ -2630,7 +2640,7 @@ mod tests {
                 start: 0,
                 end: seq_len,
                 strand: true,
-                seq: vec![1u8; seq_len],
+                seq: bitpacked::new_vec(vec![0u8; seq_len]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -2639,7 +2649,7 @@ mod tests {
                 start: seq_len,
                 end: seq_len * 2,
                 strand: true,
-                seq: vec![1u8; seq_len],
+                seq: bitpacked::new_vec(vec![0u8; seq_len]),
             },
         ]];
 
@@ -2763,7 +2773,7 @@ mod tests {
             start: 0,
             end: 4,
             strand: true,
-            seq: vec![1, 2, 4, 8], // 4 bp
+            seq: bitpacked::new_vec(vec![0, 1, 2, 3]), // 4 bp
         }]);
 
         let selection_dist = MutationDistribution::new_uniform(0.0, 1.0)
@@ -2858,7 +2868,7 @@ mod tests {
                 start: 0,
                 end: 100,
                 strand: true,
-                seq: vec![1u8; 100],
+                seq: bitpacked::new_vec(vec![0u8; 100]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -2867,7 +2877,7 @@ mod tests {
                 start: 100,
                 end: 150,
                 strand: true,
-                seq: vec![2u8; 50],
+                seq: bitpacked::new_vec(vec![1u8; 50]),
             },
             FeaturePos {
                 contig_id: 0,
@@ -2876,7 +2886,7 @@ mod tests {
                 start: 150,
                 end: 350,
                 strand: true,
-                seq: vec![4u8; 200],
+                seq: bitpacked::new_vec(vec![2u8; 200]),
             },
         ]);
 

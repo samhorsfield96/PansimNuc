@@ -23,12 +23,12 @@ fn reverse_complement(seq: &[u8]) -> Vec<u8> {
     seq.iter()
         .rev()
         .map(|base| match base {
-            1 => 8,   // A -> T
-            2 => 4,   // C -> G
-            4 => 2,   // G -> C
-            8 => 1,   // T -> A
-            16 => 16, // N -> N
-            _ => panic!("Allele code must be one-hot (1, 2, 4, 8, 16); got {}", base),
+            0 => 3,   // A -> T
+            1 => 2,   // C -> G
+            2 => 1,   // G -> C
+            3 => 0,   // T -> A
+            4 => 4, // N -> N
+            _ => panic!("Allele code must be one-hot (0, 1, 2, 3, 4); got {}", base),
         })
         .collect()
 }
@@ -67,41 +67,42 @@ fn estimate_long_sequence_homology(s: &[u8], t: &[u8]) -> f64 {
 }
 
 fn calculate_homology(a: &NucElement, b: &NucElement, threshold: f64) -> f64 {
-    let s: &[u8] = a.seq.as_slice();
-    let t: Cow<[u8]> = if a.strand == b.strand {
-        Cow::Borrowed(b.seq.as_slice())
-    } else {
-        Cow::Owned(reverse_complement(b.seq.as_slice()))
-    };
+    let a_sequence = a.seq.decode_int();
+    let b_sequence = b.seq.decode_int();
 
-    let m = s.len();
-    let n = t.len();
+    let a_len = a_sequence.len();
+    let b_len = b_sequence.len();
 
-    if m == 0 || n == 0 {
+    if a_len == 0 || b_len == 0 {
         return 0.0;
     }
 
-    let max_len = m.max(n) as f64;
-    let min_len = m.min(n) as f64;
+    let max_len = a_len.max(b_len) as f64;
+    let min_len = a_len.min(b_len) as f64;
 
-    // determine if length difference is significant to ignore
     if min_len / max_len < threshold {
         return 0.0;
     }
 
-    // rapid k-mer matching method
+    let subject_sequence = if a.strand == b.strand {
+        b_sequence
+    } else {
+        reverse_complement(&b_sequence)
+    };
+
+    let query = a_sequence.as_slice();
+    let subject = subject_sequence.as_slice();
+
     if max_len as usize > LONG_SEQUENCE_THRESHOLD {
-        return estimate_long_sequence_homology(s, t.as_ref());
+        return estimate_long_sequence_homology(query, subject);
     }
 
     let min_dist = ((1.0 - threshold) * max_len).ceil() as u32;
 
-    // accelerated Levenshtein distance with early exit if distance exceeds min_dist
-    if let Some(dist) = levenshtein_simd_k(s, t.as_ref(), min_dist) {
-        return 1.0 - (dist as f64 / max_len);
-    } else {
-        return 0.0;
-    };    
+    match levenshtein_simd_k(query, subject, min_dist) {
+        Some(distance) => 1.0 - (distance as f64 / max_len),
+        None => 0.0,
+    }
 }
 
 // write function which runs through each element and determines whether a structural mutation occurs, and if so, which one, and where it moves to
@@ -684,7 +685,8 @@ pub fn mutate_inter_genome(population: &mut Population, bidirectional: bool) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mutation::{Distribution as MutationDistribution, MutationMap};
+    use crate::bitpacking::bitpacked;
+use crate::mutation::{Distribution as MutationDistribution, MutationMap};
     use crate::population::{Genome, NucElement};
     use rand::SeedableRng;
     use rand::rngs::StdRng;
@@ -734,8 +736,8 @@ mod tests {
                     feature_pos: 0,
                     feature_type: Arc::from("exon"),
                     multiplier: 1.0,
-                    seq: Arc::new(vec![]),
-                    mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
+                    seq: Arc::new(bitpacked::initialise()),
+                    mutation_map: Arc::new(MutationMap::new(0, 0, &bitpacked::initialise(), &sel_dist, &mut rng)),
                     strand: true,
                     inverted: false,
                     original_length: 0,
@@ -750,8 +752,8 @@ mod tests {
                     feature_pos: 1,
                     feature_type: Arc::from("exon"),
                     multiplier: 1.0,
-                    seq: Arc::new(vec![]),
-                    mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
+                    seq: Arc::new(bitpacked::initialise()),
+                    mutation_map: Arc::new(MutationMap::new(0, 0, &bitpacked::initialise(), &sel_dist, &mut rng)),
                     strand: false,
                     inverted: false,
                     original_length: 0,
@@ -766,8 +768,8 @@ mod tests {
                     feature_pos: 2,
                     feature_type: Arc::from("exon"),
                     multiplier: 1.0,
-                    seq: Arc::new(vec![]),
-                    mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], &sel_dist, &mut rng)),
+                    seq: Arc::new(bitpacked::initialise()),
+                    mutation_map: Arc::new(MutationMap::new(0, 0, &bitpacked::initialise(), &sel_dist, &mut rng)),
                     strand: false,
                     inverted: false,
                     original_length: 0,
@@ -797,8 +799,8 @@ mod tests {
             feature_pos,
             feature_type: Arc::from("exon"),
             multiplier: 1.0,
-            seq: Arc::new(vec![]),
-            mutation_map: Arc::new(MutationMap::new(0, 0, &vec![], sel_dist, rng)),
+            seq: Arc::new(bitpacked::initialise()),
+            mutation_map: Arc::new(MutationMap::new(0, 0, &bitpacked::initialise(), sel_dist, rng)),
             strand,
             original_length: 0,
             frameshift: false,
@@ -850,7 +852,8 @@ mod tests {
 
         let mut seq: Vec<NucElement> = Vec::new();
         for idx in 0..n_elements {
-            let marker_seq = vec![marker_base; 4];
+            let marker_seq_ori = vec![marker_base; 4];
+            let marker_seq: bitpacked = bitpacked::new_vec(marker_seq_ori);
             seq.push(NucElement {
                 contig_id: 0,
                 element_id: idx,
@@ -902,9 +905,9 @@ mod tests {
             .iter()
             .flat_map(|element| {
                 if element.strand {
-                    element.seq.as_ref().clone()
+                    element.seq.decode_int()
                 } else {
-                    reverse_complement(element.seq.as_slice())
+                    reverse_complement(&element.seq.decode_int())
                 }
             })
             .map(|base| base.to_string())
@@ -913,9 +916,9 @@ mod tests {
     }
 
     fn make_recombination_test_population(forced_events: usize, n_elements: usize) -> Population {
-        // genome 0 starts with marker base 1 (A), genome 1 starts with marker base 2 (C)
-        let g0 = make_recombination_test_genome(0, n_elements, true, 1);
-        let g1 = make_recombination_test_genome(1, n_elements, true, 2);
+        // genome 0 starts with marker base 0 (A), genome 1 starts with marker base 1 (C)
+        let g0 = make_recombination_test_genome(0, n_elements, true, 0);
+        let g1 = make_recombination_test_genome(1, n_elements, true, 1);
 
         let recombination_count =
             MutationDistribution::new_uniform(forced_events as f64, forced_events as f64 + 0.1)
@@ -948,20 +951,21 @@ mod tests {
         genome
             .seq
             .iter()
-            .any(|element| element.seq.first().copied() == Some(marker))
+            .any(|element| element.seq.index(0) == marker)
     }
 
     fn count_mixed_marker_genomes(population: &Population) -> usize {
         population
             .pop
             .iter()
-            .filter(|genome| genome_has_marker(genome, 1) && genome_has_marker(genome, 2))
+            .filter(|genome| genome_has_marker(genome, 0) && genome_has_marker(genome, 1))
             .count()
     }
 
-    fn make_homology_test_element(seq: Vec<u8>, strand: bool) -> NucElement {
+    fn make_homology_test_element(seq_ori: Vec<u8>, strand: bool) -> NucElement {
         let mut rng = StdRng::seed_from_u64(999);
         let sel_dist = MutationDistribution::new_uniform(0.0, 1.0).unwrap();
+        let seq = bitpacked::new_vec(seq_ori);
 
         NucElement {
             contig_id: 0,
@@ -983,21 +987,21 @@ mod tests {
 
     #[test]
     fn reverse_complement_produces_expected_sequence() {
-        let seq = vec![1, 2, 4, 8, 16];
-        let rc = reverse_complement(&seq);
+        let seq = bitpacked::new_vec(vec![0, 1, 2, 3, 4]);
+        let rc = reverse_complement(&seq.decode_int());
         assert_eq!(
             rc,
-            vec![16, 1, 2, 4, 8],
+            vec![4, 0, 1, 2, 3],
             "reverse complement should reverse sequence and swap one-hot nucleotide codes"
         );
     }
 
     #[test]
     fn homology_uses_reverse_complement_for_opposite_strands() {
-        let forward = vec![1, 2, 4, 8, 1];
-        let reversed_complement = reverse_complement(&forward);
+        let forward = bitpacked::new_vec(vec![0, 1, 2, 3, 0]);
+        let reversed_complement = reverse_complement(&forward.decode_int());
 
-        let query = make_homology_test_element(forward, true);
+        let query = make_homology_test_element(forward.decode_int(), true);
 
         // Same strand: do not reverse complement, so this should not be a perfect match.
         let subject_same_strand = make_homology_test_element(reversed_complement.clone(), true);
@@ -1046,16 +1050,16 @@ mod tests {
 
         let exact_homology = {
             let distance = levenshtein_simd_k(
-                query.seq.as_slice(),
-                subject.seq.as_slice(),
+                &&query.seq.decode_int().as_slice(),
+                &subject.seq.decode_int().as_slice(),
                 sequence_length as u32,
             )
             .expect("the exact distance should be within the maximum bound");
             1.0 - distance as f64 / sequence_length as f64
         };
         let kmer_homology = estimate_long_sequence_homology(
-            query.seq.as_slice(),
-            subject.seq.as_slice(),
+            &query.seq.decode_int().as_slice(),
+            &subject.seq.decode_int().as_slice(),
         );
 
         println!("exact_homology: {}", exact_homology);
@@ -1388,11 +1392,11 @@ mod tests {
         );
 
         assert!(
-            !genome_has_marker(&population.pop[0], 2),
+            !genome_has_marker(&population.pop[0], 1),
             "before bidirectional recombination, genome 0 should not have marker sequence from genome 1"
         );
         assert!(
-            !genome_has_marker(&population.pop[1], 1),
+            !genome_has_marker(&population.pop[1], 0),
             "before ith bidirectional recombination, genome 1 should not have marker sequence from genome 0"
         );
 
@@ -1421,11 +1425,11 @@ mod tests {
             "at least one recombination should succeed in this deterministic setup"
         );
         assert!(
-            genome_has_marker(&population.pop[0], 2),
+            genome_has_marker(&population.pop[0], 1),
             "with bidirectional recombination, genome 0 should gain marker sequence from genome 1"
         );
         assert!(
-            genome_has_marker(&population.pop[1], 1),
+            genome_has_marker(&population.pop[1], 0),
             "with bidirectional recombination, genome 1 should gain marker sequence from genome 0"
         );
         assert!(
@@ -1446,12 +1450,12 @@ mod tests {
         );
 
         assert!(
-            !genome_has_marker(&population.pop[0], 2),
+            !genome_has_marker(&population.pop[0], 1),
             "before bidirectional recombination, genome 0 should not have marker sequence from genome 1"
         );
         assert!(
-            !genome_has_marker(&population.pop[1], 1),
-            "before ith bidirectional recombination, genome 1 should not have marker sequence from genome 0"
+            !genome_has_marker(&population.pop[1], 0),
+            "before bidirectional recombination, genome 1 should not have marker sequence from genome 0"
         );
 
         println!("Genome 0 pre-recomb: {}", print_genome(&population, 0));
@@ -1479,11 +1483,11 @@ mod tests {
             "at least one recombination should succeed in this deterministic setup"
         );
         assert!(
-            genome_has_marker(&population.pop[0], 2),
+            genome_has_marker(&population.pop[0], 1),
             "with bidirectional recombination, genome 0 should gain marker sequence from genome 1"
         );
         assert!(
-            genome_has_marker(&population.pop[1], 1),
+            genome_has_marker(&population.pop[1], 0),
             "with bidirectional recombination, genome 1 should gain marker sequence from genome 0"
         );
         assert!(
@@ -1513,7 +1517,7 @@ mod tests {
                     genome
                         .seq
                         .iter()
-                        .filter(|element| element.seq.first().copied() == Some(foreign_marker))
+                        .filter(|element| element.seq.index(0) == foreign_marker)
                         .count()
                 })
                 .sum();
@@ -1527,11 +1531,11 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(genome_idx, genome)| {
-                    let foreign_marker = if genome_idx == 0 { 2 } else { 1 };
+                    let foreign_marker = if genome_idx == 0 { 1 } else { 0 };
                     genome
                         .seq
                         .iter()
-                        .filter(|element| element.seq.first().copied() == Some(foreign_marker))
+                        .filter(|element| element.seq.index(0) == foreign_marker)
                         .count()
                 })
                 .sum();
@@ -1577,7 +1581,7 @@ mod tests {
             .seq
             .iter()
             .flat_map(|element| element.seq.iter())
-            .filter(|&&base| base == 1)
+            .filter(|&base| base == 1)
             .count();
 
         let short_foreign_positions: Vec<usize> = short_len_population
@@ -1586,7 +1590,7 @@ mod tests {
             .iter()
             .flat_map(|element| element.seq.iter())
             .enumerate()
-            .filter_map(|(position, &base)| (base == 1).then_some(position))
+            .filter_map(|(position, base)| (base == 1).then_some(position))
             .collect();
 
         assert!(
@@ -1618,7 +1622,7 @@ mod tests {
             .seq
             .iter()
             .flat_map(|element| element.seq.iter())
-            .filter(|&&base| base == 1)
+            .filter(|&base| base == 1)
             .count();
 
         let long_foreign_positions: Vec<usize> = long_len_population
@@ -1627,7 +1631,7 @@ mod tests {
             .iter()
             .flat_map(|element| element.seq.iter())
             .enumerate()
-            .filter_map(|(position, &base)| (base == 1).then_some(position))
+            .filter_map(|(position, base)| (base == 1).then_some(position))
             .collect();
 
         assert_eq!(
@@ -1647,8 +1651,8 @@ mod tests {
         let forced_events = 5;
         let n_elements = 8;
 
-        let mut g0 = make_recombination_test_genome(0, n_elements, true, 1);
-        let mut g1 = make_recombination_test_genome(1, n_elements, false, 1);
+        let mut g0 = make_recombination_test_genome(0, n_elements, true, 0);
+        let mut g1 = make_recombination_test_genome(1, n_elements, false, 0);
 
         let recombination_count =
             MutationDistribution::new_uniform(forced_events as f64, forced_events as f64 + 0.1)
@@ -1710,8 +1714,8 @@ mod tests {
                 feature_pos: 0,
                 feature_type: Arc::from(element_type),
                 multiplier: 1.0,
-                seq: Arc::new(vec![1, 2, 4, 8]),
-                mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
+                seq: Arc::new(bitpacked::new_vec(vec![0, 1, 2, 3])),
+                mutation_map: Arc::new(MutationMap::new(0, 0, &bitpacked::new_vec(vec![0, 1, 2, 3]), &sel_dist, &mut rng)),
                 strand: true,
                 inverted: false,
                 original_length: 4,
@@ -1726,8 +1730,8 @@ mod tests {
                 feature_pos: 0,
                 feature_type: Arc::from("exon"),
                 multiplier: 1.0,
-                seq: Arc::new(vec![1, 2, 4, 8]),
-                mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
+                seq: Arc::new(bitpacked::new_vec(vec![0, 1, 2, 3])),
+                mutation_map: Arc::new(MutationMap::new(0, 0, &bitpacked::new_vec(vec![0, 1, 2, 3]), &sel_dist, &mut rng)),
                 strand: true,
                 inverted: false,
                 original_length: 4,
@@ -1742,8 +1746,8 @@ mod tests {
                 feature_pos: 0,
                 feature_type: Arc::from("intergenic"),
                 multiplier: 1.0,
-                seq: Arc::new(vec![1, 2, 4, 8]),
-                mutation_map: Arc::new(MutationMap::new(0, 0, &vec![1, 2, 4, 8], &sel_dist, &mut rng)),
+                seq: Arc::new(bitpacked::new_vec(vec![0, 1, 2, 3])),
+                mutation_map: Arc::new(MutationMap::new(0, 0, &bitpacked::new_vec(vec![0, 1, 2, 3]), &sel_dist, &mut rng)),
                 strand: true,
                 original_length: 4,
                 frameshift: false,
