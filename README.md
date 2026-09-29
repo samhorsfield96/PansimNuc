@@ -127,7 +127,7 @@ Each site's selection coefficient has a multiplicative effect of `1 + X` on fitn
 
 | Parameter | Description |
 |---|---|
-| `selection_distribution` | Distribution to draw selection coefficients from. One of: `normal`, `uniform`, `exp`, `double_exp`, `poisson`, `gamma`, `laplace` |
+| `selection_distribution` | Distribution to draw selection coefficients from. One of: `normal`, `uniform`, `exp`, `double_exp`, `poisson`, `gamma`, `laplace` and `fixed` |
 
 Required parameters by distribution:
 
@@ -140,6 +140,7 @@ Required parameters by distribution:
 | `poisson` | `selection_lambda` |
 | `gamma` | `selection_lambda` (scale), `selection_shape` |
 | `laplace` | `location` (center), `scale` (overdispersion) |
+| `fixed` | `value` (single value) |
 
 ### Intra-genomic structural variation
 

@@ -25,6 +25,7 @@ pub enum DistributionError {
     InvalidNegativeBinomialParameters,
     InvalidNegativeBinomialMomentsParameters,
     InvalidLaplaceParameters,
+    InvalidFixedParameters,
 }
 
 impl fmt::Display for DistributionError {
@@ -65,6 +66,9 @@ impl fmt::Display for DistributionError {
             }
             DistributionError::InvalidLaplaceParameters => {
                 write!(f, "Invalid Laplace parameters: position and scale must be real numbers and scale must be > 0.0")
+            }
+            DistributionError::InvalidFixedParameters => {
+                write!(f, "Invalid Fixed parameters: value must be >= -1.0")
             }
         }
     }
@@ -204,6 +208,27 @@ impl DoubleExponential {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Fixed {
+    value : f64,
+}
+
+impl Fixed {
+    pub fn new (value: f64) -> Result<Self, DistributionError> {
+        if value < -1.0 {
+            return Err(DistributionError::InvalidFixedParameters);
+        } 
+
+        Ok(Self {
+            value
+        })
+    }
+
+    pub fn sample (&self) -> f64 {
+        self.value
+    }
+}
+
 #[derive(Clone)]
 pub enum Distribution {
     Normal(Normal<f64>),
@@ -214,6 +239,7 @@ pub enum Distribution {
     Gamma(Gamma<f64>),
     NegativeBinomial(NegativeBinomial),
     Laplace(Laplace),
+    Fixed(Fixed),
 }
 
 impl Distribution {
@@ -442,6 +468,23 @@ impl Distribution {
                 })
             }
 
+            "fixed" => {
+                let value = Self::parse_required_f64(
+                    configuration,
+                    section,
+                    &raw_distribution,
+                    &format!("{}.selection_value", section),
+                )?;
+
+                Self::new_fixed(value).map_err(|source| {
+                    DistributionConfigError::InvalidDistributionParameters {
+                        section: section.to_string(),
+                        distribution: raw_distribution,
+                        source,
+                    }
+                })
+            }
+
             _ => Err(DistributionConfigError::UnsupportedDistribution {
                 section: section.to_string(),
                 distribution: raw_distribution,
@@ -512,6 +555,12 @@ impl Distribution {
             .map_err(|_| DistributionError::InvalidLaplaceParameters)
     }
 
+    pub fn new_fixed(
+        value: f64,
+    ) -> Result<Self, DistributionError> {
+        Fixed::new(value).map(Distribution::Fixed)
+    }
+
     pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
         match self {
             Distribution::Normal(d) => d.sample(rng),
@@ -522,6 +571,7 @@ impl Distribution {
             Distribution::Gamma(d) => d.sample(rng),
             Distribution::NegativeBinomial(d) => d.sample(rng) as f64,
             Distribution::Laplace(d) => d.sample(rng),
+            Distribution::Fixed(d) => d.sample()
         }
     }
 }
@@ -790,6 +840,12 @@ mod tests {
     }
 
     #[test]
+    fn test_fixed_distribution_creation() {
+        let dist = Distribution::new_fixed(0.1);
+        assert!(dist.is_ok());
+    }
+
+    #[test]
     fn test_poisson_invalid_params() {
         let dist = Distribution::new_poisson(-1.1);
         assert!(dist.is_err());
@@ -841,6 +897,12 @@ mod tests {
 
         let dist4 = Distribution::new_double_exp(0.5, 2.0, -0.1);
         assert!(dist4.is_err());
+    }
+
+    #[test]
+    fn test_fixed_invalid_params() {
+        let dist = Distribution::new_fixed(-1.1);
+        assert!(dist.is_err());
     }
 
     #[test]
@@ -916,6 +978,10 @@ mod tests {
         let laplace = Distribution::new_laplace(0.0, 0.1).unwrap();
         let sample = laplace.sample(&mut rng);
         assert!(sample.is_finite());
+
+        let fixed = Distribution::new_fixed(1.0).unwrap();
+        let sample = fixed.sample(&mut rng);
+        assert!(sample == 1.0);
     }
 
     #[test]
@@ -1014,6 +1080,20 @@ mod tests {
 
         let result = Distribution::from_selection_config(&config, "TE-COPY");
         assert!(matches!(result, Ok(Distribution::Laplace(_))));
+    }
+
+    #[test]
+    fn test_selection_distribution_from_config_fixed() {
+        let config = selection_config(
+            "TE-COPY",
+            &[
+                ("selection_distribution", "fixed"),
+                ("selection_value", "1.0"),
+            ],
+        );
+
+        let result = Distribution::from_selection_config(&config, "TE-COPY");
+        assert!(matches!(result, Ok(Distribution::Fixed(_))));
     }
 
     #[test]
