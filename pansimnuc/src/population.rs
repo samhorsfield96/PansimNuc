@@ -1124,6 +1124,58 @@ impl Population {
             })
     }
 
+    // Realised DFE for the current population, grouped by feature type. Coefficients are
+    // taken directly from each NucElement (pre logsumexp, i.e. before the population-wide
+    // genome selection weight normalisation), and converted from the element's log(1+s)
+    // fitness sum back into an aggregate selection coefficient (W - 1).
+    fn final_dfe(&self) -> HashMap<String, Vec<f32>> {
+        let mut dfe: HashMap<String, Vec<f32>> = HashMap::new();
+
+        for genome in &self.pop {
+            for element in &genome.seq {
+
+                // add 1% of all sites to save memory
+                let max_iters = (element.seq.len() as f64 * 0.01).ceil() as usize;
+
+                let mut current_iter = 0;
+                for (site, allele) in element.seq.iter().enumerate() {
+                    current_iter += 1;
+                    if let Some(coeff) = element.mutation_map.get(allele, site) {
+                        
+                        dfe.entry(element.feature_type.to_string())
+                            .or_default()
+                            .push(*coeff);
+                    } else {
+                        panic!(
+                            "Failed to generate selection coefficient for allele {} at site {}",
+                            allele, site
+                        );
+                    }
+
+                    if current_iter >= max_iters {
+                        break;
+                    }
+                }
+            }
+        }
+
+        dfe
+    }
+
+    pub fn write_final_dfe(&self, output_path: &str) -> io::Result<()> {
+        let dfe = self.final_dfe();
+
+        let file = File::create(output_path)?;
+        let mut writer = BufWriter::new(file);
+        writeln!(writer, "feature_type,selection_coefficient")?;
+        for (feature_type, coefficients) in dfe {
+            for coeff in coefficients {
+                writeln!(writer, "{},{}", feature_type, coeff)?;
+            }
+        }
+        writer.flush()
+    }
+
     pub fn write_gff(&self, output_path: &str, root_genome: bool) -> io::Result<()> {
         // calculate selection coefficients for all genomes once to avoid redundant calculations when writing attributes
         let (mut selection_weights, logsumexp_value) = self.log_sum_exp();

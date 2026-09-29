@@ -407,7 +407,7 @@ fn main() {
                     metapopopulation.run_simulation(is_tracking, &configuration);
                     
                     println!("Writing output...");
-                    metapopopulation.write_output(&configuration);
+                    metapopopulation.write_output(&configuration, true);
                 }
             }
             Err(err) => {

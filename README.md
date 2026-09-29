@@ -191,7 +191,7 @@ WARNING: specifying too large of a region in your root genome will result in ver
 | `threads` | Number of threads to use (parallelised with Rayon) |
 | `seed` | Integer seed for the random number generator (required for reproducibility) |
 | `verbose` | If `true`, print detailed progress information (boolean) |
-| `print_DFE` | If `true`, write 1000 samples from each selection distribution to `<outdir>/selection_samples.csv` (boolean) |
+| `print_DFE` | If `true`, write 1000 samples from each selection distribution to `<outdir>/selection_samples.csv`, and write the realised final-generation DFE per population to `<outdir>/pop_X_final_dfe.csv` (boolean) |
 | `print_all_generations` | If `true`, write GFF and FASTA output at every generation rather than only at the end (boolean) |
 
 ---
@@ -220,6 +220,7 @@ PansimNuc outputs:
 | `[root.gff]` | GFF file containing function annotations of all elements in the root genome for the simulation |
 | `[root.fasta]` | Fasta file containing sequence for root genome for the simulation |
 | `[selection_samples.csv]` | Sample of selection coefficients for all elements used in the simulation |
+| `[pop_X_final_dfe.csv]` | Realised selection coefficient for every element in the final generation of population X, grouped by feature type (`feature_type` column) |
 | `[tracking.csv]` | Tracking information for elements within specifie regions in `tracking` section |
 
 

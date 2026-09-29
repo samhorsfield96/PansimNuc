@@ -237,14 +237,24 @@ impl MetaPopulation {
             }
 
             if print_all_generations {
-                self.write_output(configuration);
+                self.write_output(configuration, false);
             }
 
             println!("Finished generation {}", generation);
         }
     }
 
-    pub fn write_output(&self, configuration: &HashMap<String, String>) {
+    // final_output enables writing of outputs that should only be generated once,
+    // at the true end of the simulation (e.g. the final DFE), rather than at every
+    // generation when print_all_generations is enabled.
+    pub fn write_output(&self, configuration: &HashMap<String, String>, final_output: bool) {
+        let mut print_dfe = false;
+        if let Some(print_dfe_str) = configuration.get("misc.print_DFE") {
+            print_dfe = print_dfe_str
+                .parse::<bool>()
+                .expect("print_DFE must be a boolean (true/false).");
+        }
+
         for population in &self.populations {
             if let Some(outdir) = configuration.get("output.outdir") {
                 let gff_path = format!("{}/.gff", outdir);
@@ -257,6 +267,14 @@ impl MetaPopulation {
                 if let Err(err) = population.write_fasta(&fasta_path, false) {
                     eprintln!("Failed to write final population FASTA files: {err}");
                     std::process::exit(1);
+                }
+
+                if final_output && print_dfe {
+                    let dfe_path = format!("{}/pop_{}_final_dfe.csv", outdir, population.id);
+                    if let Err(err) = population.write_final_dfe(&dfe_path) {
+                        eprintln!("Failed to write final DFE file: {err}");
+                        std::process::exit(1);
+                    }
                 }
             }
         }
