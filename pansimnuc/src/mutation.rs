@@ -592,13 +592,22 @@ impl MutationMap {
         mu_dist_id: usize,
         seq: &bitpacked,
         selection_dist: &Distribution,
+        initialise_empty: bool,
         rng: &mut StdRng,
     ) -> Self {
         let mut data = vec![SmallVec::new(); seq.len()];
 
-        for site in 0..seq.len() {
-            let allele = seq.index(site);
-            data[site].push((allele, selection_dist.sample(rng) as f32));
+        if initialise_empty {
+            for site in 0..seq.len() {
+                let allele = seq.index(site);
+                data[site].push((allele, 0.0));
+            }
+
+        } else {
+            for site in 0..seq.len() {
+                let allele = seq.index(site);
+                data[site].push((allele, selection_dist.sample(rng) as f32));
+            }
         }
 
         Self {
@@ -1120,7 +1129,7 @@ mod tests {
             .expect("Failed to create double exponential distribution for exon features");
         let test_seq = bitpacked::new_vec(vec![0, 0, 2, 3, 1, 0, 1, 3]);
 
-        let map = MutationMap::new(1, 1, &test_seq, &test_dist, &mut rng);
+        let map = MutationMap::new(1, 1, &test_seq, &test_dist, false, &mut rng);
         assert_eq!(map.selection_dist_id, 1);
     }
 
@@ -1130,7 +1139,7 @@ mod tests {
         let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3)
             .expect("Failed to create double exponential distribution for exon features");
         let test_seq = bitpacked::new_vec(vec![0, 0, 2, 3, 1, 0, 1, 3]);
-        let mut map = MutationMap::new(0, 0, &test_seq, &test_dist, &mut rng);
+        let mut map = MutationMap::new(0, 0, &test_seq, &test_dist, false, &mut rng);
 
         map.insert(0, 100, 0.5);
         let value = map.get(0, 100);
@@ -1146,7 +1155,7 @@ mod tests {
         let test_dist = Distribution::new_double_exp(0.5, 2.0, 0.3)
             .expect("Failed to create double exponential distribution for exon features");
         let test_seq = bitpacked::new_vec(vec![0, 0, 2, 3, 1, 0, 1, 3]);
-        let mut map = MutationMap::new(0, 0, &test_seq, &test_dist, &mut rng);
+        let mut map = MutationMap::new(0, 0, &test_seq, &test_dist, false, &mut rng);
 
         map.insert(0, 10, 0.1);
         map.insert(1, 10, 0.2);
@@ -1179,7 +1188,7 @@ mod tests {
         let n_snps = mu_dist.sample(&mut rng) as usize;
         let n_indels = indel_dist.sample(&mut rng) as usize;
 
-        let mut map = MutationMap::new(0, 0, &seq, &selection_dist, &mut rng);
+        let mut map = MutationMap::new(0, 0, &seq, &selection_dist, false, &mut rng);
         map.mutate(&core_vec, &mut seq, original_length, &mut false, &selection_dist, n_snps, n_indels, &mut thread_rng);
 
         assert_eq!(seq.index(0), 4);
@@ -1210,7 +1219,7 @@ mod tests {
         let mut seq = bitpacked::new_vec(vec![0, 0, 2, 3, 1, 0, 1, 2]);
         let original_length = seq.len();
 
-        let mut map = MutationMap::new(0, 0, &seq, &selection_dist, &mut rng);
+        let mut map = MutationMap::new(0, 0, &seq, &selection_dist, false, &mut rng);
         let original_map_state = map.data.clone();
 
         // mutate many times with very low mutation rates to ensure map is updated but sequence does not change
@@ -1236,7 +1245,7 @@ mod tests {
         let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
         // Large sequence so many indels fire; zero SNP rate so only indels mutate
         let seq = bitpacked::new_vec(vec![0u8; 100]);
-        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        let mut map = MutationMap::new(0, 0, &seq, &dist, false, &mut rng);
         let mut seq_mut = seq.clone();
 
         let mu_dist = Distribution::new_poisson(1e-12).unwrap();
@@ -1260,7 +1269,7 @@ mod tests {
         let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
         // All-A sequence so data[0] has a dense entry at every site
         let seq = bitpacked::new_vec(vec![0u8, 0, 0, 0]);
-        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        let mut map = MutationMap::new(0, 0, &seq, &dist, false, &mut rng);
         map.set_for_test(0, 0, 0.10);
         map.set_for_test(0, 1, 0.20);
         map.set_for_test(0, 2, 0.30);
@@ -1320,7 +1329,7 @@ mod tests {
         let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
         // All-A sequence so data[0] has a dense entry at every site
         let seq = bitpacked::new_vec(vec![0u8, 0, 0, 0]);
-        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        let mut map = MutationMap::new(0, 0, &seq, &dist, false, &mut rng);
         map.set_for_test(0, 0, 0.10);
         map.set_for_test(0, 1, 0.20);
         map.set_for_test(0, 2, 0.30);
@@ -1371,7 +1380,7 @@ mod tests {
         let mut thread_rng = rand::thread_rng();
         let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
         let seq = bitpacked::new_vec(vec![0u8; 100]);
-        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        let mut map = MutationMap::new(0, 0, &seq, &dist, false, &mut rng);
         let mut seq_mut = seq.clone();
         let original_length = seq.len();
 
@@ -1396,7 +1405,7 @@ mod tests {
         let mut thread_rng = rand::thread_rng();
         let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
         let seq= bitpacked::new_vec(vec![0u8; 12]);
-        let mut map = MutationMap::new(0, 0, &seq, &dist, &mut rng);
+        let mut map = MutationMap::new(0, 0, &seq, &dist, false,&mut rng);
         let mut seq_mut = seq.clone();
 
         let mu_dist = Distribution::new_poisson(1e-12).unwrap();

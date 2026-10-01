@@ -131,7 +131,7 @@ use crate::demography::MetaPopulation;
             feature_pos: 0,
             feature_type: Arc::from("intergenic"),
             multiplier: 1.0,
-            mutation_map: Arc::new(MutationMap::new(0, 0, &seq, &dist, &mut rng)),
+            mutation_map: Arc::new(MutationMap::new(0, 0, &seq, &dist, false, &mut rng)),
             seq: Arc::new(seq),
             strand: true,
             inverted: false,

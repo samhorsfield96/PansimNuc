@@ -632,6 +632,7 @@ impl Population {
                     mu_dist_id,
                     &feature_seq,
                     &selection_dists[selection_dist_id],
+                    true,
                     rng,
                 ));
 
@@ -662,6 +663,7 @@ impl Population {
                             5, // new mu dist ID for tracked elements
                             &element.seq,
                             &selection_dists[5], // new selection distribution for tracked elements
+                            true,
                             rng,
                         ));
                         element.multiplier = multiplier_dists[5].sample(rng) as f32;
@@ -2385,7 +2387,7 @@ mod tests {
         let seed_dist = MutationDistribution::new_uniform(0.0, 1.0)
             .expect("failed to create uniform distribution for seeded mutation map");
         let seq = &bitpacked::new_vec(ori_seq);
-        let mut mutation_map = MutationMap::new(0, 0, &seq, &seed_dist, &mut rng);
+        let mut mutation_map = MutationMap::new(0, 0, &seq, &seed_dist, false, &mut rng);
 
         for (site, allele, coeff) in coefficients {
             mutation_map.set_for_test(*allele, *site, *coeff);
