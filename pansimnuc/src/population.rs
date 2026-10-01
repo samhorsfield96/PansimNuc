@@ -1135,26 +1135,19 @@ impl Population {
 
         for genome in &self.pop {
             for element in &genome.seq {
-                for site in 0..element.seq.len() {
-                    let site_alleles = element.mutation_map.site_alleles(site);
-
+                for (site, allele) in element.seq.iter().enumerate() {
                     // more than one allele recorded means the site has mutated at some point
-                    if site_alleles.len() > 1 {
-                        let coeffs = dfe.entry(element.feature_type.to_string()).or_default();
-                        let non_zero_count = coeffs.len();
-                        coeffs.extend(
-                            site_alleles
-                                .iter()
-                                .map(|(_, coeff)| *coeff)
-                                .filter(|coeff| *coeff != 0.0),
-                        );
+                    if element.mutation_map.site_alleles(site).len() > 1 {
+                        let coeff = element.mutation_map.get(allele, site).unwrap_or_else(|| {
+                            panic!(
+                                "Failed to generate selection coefficient for allele {} at site {}",
+                                allele, site
+                            )
+                        });
 
-                        // all recorded alleles are neutral, keep as many 0.0 entry for the site as are above 1
-                        if coeffs.len() == non_zero_count {
-                            for _ in  0..(site_alleles.len() - 1) {
-                                coeffs.push(0.0);
-                            }   
-                        }
+                        dfe.entry(element.feature_type.to_string())
+                            .or_default()
+                            .push(*coeff);
                     }
                 }
             }
