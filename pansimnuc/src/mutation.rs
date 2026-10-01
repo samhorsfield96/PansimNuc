@@ -653,6 +653,11 @@ impl MutationMap {
             .map(|(_, value)| value)
     }
 
+    // all (allele, coefficient) pairs ever recorded at a site, used to detect sites with more than one observed allele
+    pub fn site_alleles(&self, key: usize) -> &[(u8, f32)] {
+        self.data.get(key).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
     #[cfg(test)]
     pub(crate) fn set_for_test(&mut self, level: u8, key: usize, value: f64) {
         self.insert(level, key, value);
@@ -1405,7 +1410,7 @@ mod tests {
         let mut thread_rng = rand::thread_rng();
         let dist = Distribution::new_uniform(0.0, 1.0).unwrap();
         let seq= bitpacked::new_vec(vec![0u8; 12]);
-        let mut map = MutationMap::new(0, 0, &seq, &dist, false,&mut rng);
+        let mut map = MutationMap::new(0, 0, &seq, &dist, false, &mut rng);
         let mut seq_mut = seq.clone();
 
         let mu_dist = Distribution::new_poisson(1e-12).unwrap();

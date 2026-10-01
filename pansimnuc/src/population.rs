@@ -1135,27 +1135,26 @@ impl Population {
 
         for genome in &self.pop {
             for element in &genome.seq {
+                for site in 0..element.seq.len() {
+                    let site_alleles = element.mutation_map.site_alleles(site);
 
-                // add 1% of all sites to save memory
-                let max_iters = (element.seq.len() as f64 * 0.01).ceil() as usize;
-
-                let mut current_iter = 0;
-                for (site, allele) in element.seq.iter().enumerate() {
-                    current_iter += 1;
-                    if let Some(coeff) = element.mutation_map.get(allele, site) {
-                        
-                        dfe.entry(element.feature_type.to_string())
-                            .or_default()
-                            .push(*coeff);
-                    } else {
-                        panic!(
-                            "Failed to generate selection coefficient for allele {} at site {}",
-                            allele, site
+                    // more than one allele recorded means the site has mutated at some point
+                    if site_alleles.len() > 1 {
+                        let coeffs = dfe.entry(element.feature_type.to_string()).or_default();
+                        let non_zero_count = coeffs.len();
+                        coeffs.extend(
+                            site_alleles
+                                .iter()
+                                .map(|(_, coeff)| *coeff)
+                                .filter(|coeff| *coeff != 0.0),
                         );
-                    }
 
-                    if current_iter >= max_iters {
-                        break;
+                        // all recorded alleles are neutral, keep as many 0.0 entry for the site as are above 1
+                        if coeffs.len() == non_zero_count {
+                            for _ in  0..(site_alleles.len() - 1) {
+                                coeffs.push(0.0);
+                            }   
+                        }
                     }
                 }
             }
