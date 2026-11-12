@@ -1176,16 +1176,7 @@ impl Population {
 
         if logsumexp_value.is_finite() {
             for w in &mut selection_weights {
-                *w = (*w - logsumexp_value).exp(); // exp(log(w) - logsumexp)
-            }
-
-            let sum_weights: f32 = selection_weights.iter().sum();
-            if sum_weights > 0.0 && sum_weights.is_finite() {
-                for w in &mut selection_weights {
-                    *w /= sum_weights;
-                }
-            } else {
-                selection_weights = vec![1.0 / (self.pop.len() as f32); self.pop.len()];
+                *w = (*w - logsumexp_value).exp(); // exp(log(w) - logsumexp) gives proper probabilities summing to 1
             }
         } else {
             selection_weights = vec![1.0 / (self.pop.len() as f32); self.pop.len()];
